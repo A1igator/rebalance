@@ -44,6 +44,16 @@ Codex updated `README.md`, `PLAN.md`, `AGENTS.md`, `CLAUDE.md`, `docs/RESEARCH.m
 
 Validation: consistency and link/whitespace checks; source URLs retained in the assessment. No wallet, secret, SDK, transaction, hardware connection, deployment, external form submission or teammate access grant was created. Earlier committed prompts/history remain unchanged; the uncommitted deferral interpretation is explicitly superseded by the raw-key clarification.
 
+## Ledger Agent Stack, network research and execution modes — 2026-09-04
+
+Human decisions: maximize Ledger Agent Stack reuse; defer device work; allow any L2 while retaining Robinhood as viable; let local-key/Privy profiles execute automatically with no per-trade human input, while Ledger waits for device confirmation. Exact requests and material delegated tasks are preserved in [the prompt record](prompts/005-ledger-stack-and-execution-modes.md).
+
+Codex substantially revised `PLAN.md`, `README.md`, `AGENTS.md`, `CLAUDE.md`, `docs/RESEARCH.md` and `docs/PRIVY.md`; updated `docs/HACKATHON.md`, `docs/LEDGER_FEEDBACK.md` and this disclosure; created `docs/LEDGER_AGENT_STACK.md`, `docs/NETWORK.md` and the prompt record. Parallel researchers reviewed Ledger source, Ring/skills/prize fit and Base assets; a separate architecture reviewer checked signer-specific dispatch, policy limits and transaction recovery, then reviewed the revised active documents.
+
+The final plan removes the earlier custom vault/session-key contract and distinct Privy owner/executor-wallet requirements. It also supersedes an interim interpretation requiring confirmation in every mode. Deeper source review, prompted by the user's EVM correction, found existing Robinhood/Base EVM configs and different CLI quote/execute paths; the assistant corrected its earlier overbroad no-L2 statement. Base remains a candidate, not a forced switch. Historical prompts/commits remain unchanged and describe their original decisions.
+
+Validation: primary-source and pinned-source review, independent documentation review, local Markdown-link and Git whitespace checks. No application implementation, package/skill installation, runtime network probe, private key, wallet, transaction, hardware connection, deployment or external sponsor submission was created. Source findings are explicitly distinguished from verified runtime behavior. The first implementation target is now a real automatic raw-key testnet swap; simulations remain tests.
+
 ## Development log template
 
 For each material implementation session, append:

@@ -1,21 +1,20 @@
 # Project instructions
 
-This is an ETHOnline 2026 **Start from Scratch** project. Read `PLAN.md`, `docs/HACKATHON.md` and `docs/AI_USAGE.md` before implementation. Current state is planning only.
+This is an ETHOnline 2026 **Start from Scratch** project. Read `PLAN.md`, `docs/HACKATHON.md` and `docs/AI_USAGE.md` before implementation. Current state is planning only; the latest plan supersedes earlier vault/session-key and all-modes-confirmed designs.
 
-- Preserve incremental history. Do not backdate, squash away or rewrite hackathon development commits. Commit material specs, project prompts, plans and AI/reuse disclosures with the work they support.
-- The owner uses `main` directly. Follow that explicit preference; do not require a PR for owner work. Do not push work unless authorized by the current task or existing session.
-- All application commands and reviews go through the agent. The local pie chart is view only: no editors, action buttons, wallet connection, signing access or mutation credentials.
-- Maximize deterministic code. Models translate explicit user requests into typed operations, including owner-authorization workflows and pause/resume. They do not receive keys, enter the scheduler or make trade-time decisions. Ledger requires physical confirmation; raw-key mode trusts the authenticated agent channel to convey exact user confirmation and does not provide independent proof of human presence.
-- Support explicit `private-key`, `ledger` and `privy` profiles behind shared deterministic interfaces. Keep owner and executor authority distinct; never fall back between signers automatically. Each contributor uses independent accounts/vaults and local secrets.
-- Cloud LLM assistance is accepted for the hackathon. Keep private keys and unrelated portfolio data out of model access. The agent passes a local secret reference, never raw key material through chat or command arguments.
-- Physical Ledger integration is deferred until the owner confirms the device has arrived. Progress the deterministic core, real local-key backend, agent controls, view-only chart and simulation first. Keep test doubles isolated from real policy activation and broadcasting; do not claim hardware validation from software signatures or simulations.
-- Privy's hosted TEE signing is explicitly accepted by the owner. It is the planned third prize target and an optional profile mode; implement substantive wallet/swap use with scoped executor authority. Preserve local raw-key/Ledger operation without a Privy dependency and state the selected signer mode accurately.
-- Keep the app local. Do not introduce telemetry, a hosted backend, remote UI assets or a mandatory cloud execution service.
-- Do not call ordinary RPC trustless. State verified capabilities, issuer/rollup/oracle assumptions, public-chain visibility and hardware limitations accurately.
-- Keep runtime data/keys outside the source checkout and Git. Do not put credentials, real portfolio data or unredacted private prompts in docs or fixtures.
-- Use integer financial arithmetic, reviewed chain/address manifests, fail-closed checks and narrow onchain session constraints as specified in the plan.
-- Test meaningful arithmetic, authorization and transaction recovery behavior. Record environments and actual outcomes; never invent device tests, deployments or feedback.
-- Use standard upstream dependencies only with provenance/license records. Do not import pre-event project-specific code/assets into Classic.
-- Update README run instructions and judge evidence links when implementation exists. Complete sponsor feedback from real integration experience.
+- Preserve incremental history; do not backdate, squash away or rewrite hackathon commits. Commit material project prompts, specs, plans, AI disclosures and upstream provenance.
+- The owner uses `main` directly. Follow that preference and push only when authorized by the task/session.
+- All application commands/reviews go through the agent. The chart is view only, with no signing or mutation capability.
+- MVP local-key/Privy profiles execute swaps and required finite approvals automatically under versioned policy, without per-trade human input or LLM calls. Ledger profiles wait for physical confirmation. No custom vault or session-key contract is needed.
+- Support explicit local raw-key, Ledger and Privy signer profiles. Agent-mediated configuration/policy changes control automation. Never silently switch signer/account or enable automation merely because credentials exist. Direct-owner software limits are not onchain guarantees; document verified Privy enforcement separately.
+- Cloud LLM assistance and Privy's TEE signing are accepted. Keep keys/API secrets out of model context, source, command arguments and logs. Each contributor uses independent wallets/local secrets.
+- Robinhood remains viable; the user also permits other L2s. Base/Base Sepolia is a candidate with documented stock and Uniswap deployments. Select the network from verified integration evidence; preserve asset/liquidity/light-client gates.
+- Prioritize Ledger Agent Stack reuse. Read `docs/LEDGER_AGENT_STACK.md`, use official Ledger skills during implementation and pin component versions/source/licenses. Shared EVM config includes Robinhood/Base; the CLI quote allowlist does not establish all CLI chain support. Verify the packaged flow, enforce policy bounds despite requoting, and inspect telemetry. CLI hardware signing is separate from raw-key/Privy adapters.
+- Physical Ledger enrollment/signing tests wait for device arrival. Software work, route validation and raw-key network integration can proceed. Do not claim hardware evidence from mocks/software signatures.
+- Key Ring is encryption infrastructure; a scoped broker is our work. Keep plaintext out of agent-visible output and document its network/isolation assumptions. Do not claim hardware confirmation on every Ring decrypt.
+- Use integer financial arithmetic, reviewed chain/address manifests, finite allowances, persistent spending limits, one economic intent per wallet/chain and conservative stale/invalid-state handling. Ledger review must bind the actual transaction. Read `docs/NETWORK.md` for B20 pricing/native-precompile specifics.
+- Keep application calculation/storage/UI local and telemetry-free. Disclose selected Privy, Ledger/Ring, quote or RPC services accurately. Do not call RPC access or matching responses a proof.
+- Test meaningful planning, automatic versus device-confirmed dispatch, signer, duplicate-request and transaction-recovery behavior. Record actual environments/results; never invent deployments, device tests or sponsor feedback.
+- Attribute public dependencies and copied upstream work. Do not import pre-event project-specific code/assets into Classic. Update setup and judge evidence once implementation exists.
 
-Plan changes should be dated and explained. User instructions take precedence over these project preferences; flag conflicts with published competition requirements factually before proceeding with work that would undermine eligibility.
+User instructions supersede project preferences. Flag any conflict with published competition requirements factually before work that would undermine eligibility.

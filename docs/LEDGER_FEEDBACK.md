@@ -10,10 +10,21 @@ Complete with actual evidence:
 
 - Hardware model, firmware, Ethereum app, OS, transport and DMK/Signer Kit versions.
 - Setup, documentation and device-discovery experience.
-- Robinhood chain/domain and policy signing behavior, including meaningful device display.
+- Selected-chain domain and transaction signing behavior, including meaningful device display.
 - Context resolution, any credentials or external requests, and local-operation limitations.
 - Confirm/reject/disconnect results and protection of the proposal-to-authorization boundary.
 - Specific confusing flows, gaps and suggested improvements; screenshots or PRs if useful.
 - Reproduction instructions and exact code links.
 
-Distinguish actual Clear Signing behavior from host UI previews and generic signing support. If `wallet-cli ring` or Agent Stack is later used, add its version, capability scope and observed local/remote behavior.
+Distinguish actual Clear Signing behavior from host UI previews and generic signing support. Agent Stack reuse is planned; record adopted versions and actual scope. If Ring is adopted, record its observed local/remote lifecycle and broker enforcement separately.
+
+## Documentation/source observations — no runtime test
+
+The [source assessment](LEDGER_AGENT_STACK.md) pins the inspected code and supporting links. Items to validate and refine into sponsor feedback:
+
+- The EVM documentation and existing Robinhood/Base configs are broader than the explicit three-currency guard in `swap quote`; `swap execute` follows a different resolution path. A command-by-command chain matrix and consistent validation would remove ambiguity. Our initial blanket no-L2 interpretation was incorrect and has been corrected.
+- Execute obtains a fresh quote and lacks a sufficient exact-transaction/policy-bounds interface for this application's deterministic planner. Evaluate an explicit prepare/validate/execute flow or reusable builder.
+- Verify analytics and hosted-service behavior before claiming a local, telemetry-free integration.
+- Ring handles encryption; our constrained credential broker would be separate project work. Record service dependencies and isolation guarantees accurately.
+
+These observations are not hardware feedback, successful integration evidence or an external submission.

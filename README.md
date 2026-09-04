@@ -1,44 +1,37 @@
 # Rebalance
 
-A local portfolio rebalancer for **ETHOnline 2026 — Start from Scratch**.
+A local, agent-controlled portfolio rebalancer for **ETHOnline 2026 — Start from Scratch**.
 
-Ask Claude Code/Codex to propose a target change, such as “change ETH from 20% to 30%.” All application requests and reviews go through the agent; the local pie chart is view only. Choose local raw-private-key, Ledger or Privy signing. The agent presents the complete allocation and starts the selected authorization flow: explicit confirmation through the agent for software/Privy management operations, or confirmation on the Ledger device. A deterministic local engine then monitors drift and rebalances through Uniswap without invoking an LLM.
+Ask Claude Code/Codex to change a target, such as “change ETH from 20% to 30%.” A deterministic local daemon detects drift and executes corrective swaps automatically in local-key or Privy mode. Ledger mode asks for physical confirmation. The local pie chart is view only.
 
-Cloud LLM assistance for proposals is accepted for this hackathon; a local model is not required.
+**Status: planning only.** No application, signer integration or project deployment exists yet. The repository began with an empty history after the published hacking start on September 4, 2026.
 
-**Status: planning only.** This repository starts from an empty Git history on September 4, 2026, after the published hacking start. There is no implemented application, deployed project contract, or completed integration yet.
+## Current MVP
 
-**Next milestone:** deterministic allocation proposals, a real local raw-key signer, Robinhood/Uniswap simulation and the view-only chart. Physical Ledger integration is deferred until the owner's device arrives. Software signing is a supported mode that requires no Ledger; isolated simulation approvals remain separate from real authorization.
+- Automatic local raw-key and Privy execution under configured limits, without per-trade human input. Ledger signing requires device confirmation.
+- Deterministic allocation, valuation, drift detection, trade planning and execution. Routine automation needs no LLM calls and works with the coding agent closed.
+- All application controls through the agent; no buttons, editor, wallet connection or signing access in the chart.
+- **Robinhood remains viable; Base is an alternative.** Ledger's shared EVM configuration includes both. Base has live Coinbase tokenized stocks; executable stock routes on Uniswap remain a verification gate on either target.
+- Reuse **Ledger Agent Stack**: official skills, DMK/Ethereum signing and applicable swap components; evaluate Key Ring for a scoped credential broker. The CLI's quote command has narrower chain coverage than its EVM execution path; verify the pinned version end to end.
+- Direct wallet transactions; no custom custody vault or session-key contract in the MVP. Local software enforces automatic-mode limits, with verified Privy controls where available.
 
-## Intended MVP
+**Next milestone:** pin reusable Ledger components, validate/select the network and Uniswap route, then implement an automatic raw-key swap with an actual testnet receipt. Base Sepolia is a documented Uniswap testnet candidate; Robinhood is not ruled out by the CLI quote restriction. Local fixtures/forks remain tests. Physical Ledger work waits for the device to arrive; Privy follows through the shared signing interface.
 
-- View-only local pie chart showing current and target weights, proposal previews, status, and execution history; no editors or action buttons.
-- Integer arithmetic and explicit policy rules for valuation, drift, trades, limits, and recovery.
-- Agent as the sole application control interface for setup, changes, reviews, authorization requests, pause/resume, revocation and withdrawal; private keys stay in the local signer.
-- Explicit raw-private-key or Ledger owner signing, sharing policy validation and bounded delegation to a separate local session key. Software mode trusts the authenticated agent/local host; Ledger adds physical confirmation.
-- Optional Privy mode with TEE-backed wallet signing and a constrained executor; the owner accepts its service/TEE trust assumptions. Local calculation, scheduling and storage are shared across modes.
-- Robinhood Chain integration and direct Uniswap execution, demonstrated first with test assets or a clearly labelled local fork.
-- Local storage and no application telemetry or hosted backend.
-
-“Completely trustless” is the design ambition, **not a present guarantee**. Robinhood's stock issuers and rollup governance remain trust assumptions; transactions are public; cloud coding assistants receive prompts sent to them. A supported Robinhood light client has not been established. The plan makes these boundaries explicit rather than treating ordinary RPC access as verification.
+Cloud LLM input and Privy's TEE signing are accepted for the hackathon. Local raw-key/Ledger modes remain available independently. Onchain activity is public, and issuer/oracle/chain/service assumptions are documented rather than described as eliminated.
 
 ## Project documents
 
-- [PLAN.md](PLAN.md): product, architecture, deterministic behavior, milestones, tests, and acceptance gates.
-- [Hackathon compliance](docs/HACKATHON.md): deadlines, provenance, prize requirements, and submission checklist.
-- [Research and trust limits](docs/RESEARCH.md): primary sources and unresolved integration questions.
-- [AI assistance and dependency provenance](docs/AI_USAGE.md), including [initial planning prompts](docs/prompts/001-planning-session.md).
-- [Uniswap feedback](FEEDBACK.md) and [Ledger feedback](docs/LEDGER_FEEDBACK.md): evidence templates to complete during implementation.
-- [Repository governance](docs/REPOSITORY.md): public personal repository and owner bypass for `main`.
+- [PLAN.md](PLAN.md): signer-specific execution modes, implementation sequence and acceptance checks.
+- [Ledger Agent Stack](docs/LEDGER_AGENT_STACK.md): reusable components, source-verified CLI limits and prize rationale.
+- [Network choice](docs/NETWORK.md): Robinhood/Base, tokenized stocks, Uniswap and light-client evidence.
+- [Hackathon checklist](docs/HACKATHON.md), [Privy assessment](docs/PRIVY.md), and [earlier platform research](docs/RESEARCH.md).
+- [AI assistance/provenance](docs/AI_USAGE.md), including [latest user/task prompts](docs/prompts/005-ledger-stack-and-execution-modes.md).
+- [Uniswap feedback](FEEDBACK.md), [Ledger feedback](docs/LEDGER_FEEDBACK.md), and [repository governance](docs/REPOSITORY.md).
 
-Planned prize targets: **Uniswap — Best Uniswap Stack Contribution**, **Ledger — AI Agents x Ledger**, and **Privy — Best financial flow**. Privy's TEE-based signing is accepted for its optional mode; local raw-key and Ledger modes remain available. See [the prize assessment](docs/PRIVY.md). All integrations and prize submissions are still pending.
+Planned partner targets: **Uniswap — Best Uniswap Stack Contribution**, **Ledger — AI Agents x Ledger**, and **Privy — Best financial flow**. All integrations and submissions remain pending.
 
-## Judge evidence — pending implementation
+## Judge evidence and development
 
-Before submission, replace this section with exact commit-pinned links and line numbers for the Uniswap integration, project contracts, Ledger authorization path, deterministic planner, and tests. Include deployment chain IDs/addresses, transaction evidence, setup instructions, and the human-narrated demo. No integration or device behavior is claimed as verified yet.
+Before submission, add reproducible setup commands, exact commit-pinned code lines, dependency licenses, network/contract identities, actual transaction receipts and the human-narrated demo. Clearly distinguish physical Ledger tests, software signatures, Privy operations and local simulations.
 
-## Development
-
-Read [AGENTS.md](AGENTS.md) before contributing. The repository is currently documentation only; there is no install, run, or test command yet. Add reproducible commands and pinned dependency lockfiles with the first implementation milestone.
-
-License: [MIT](LICENSE) for original project work. Third-party dependencies retain their own licenses and must be attributed.
+Read [AGENTS.md](AGENTS.md) before implementation. No install/run/test command exists yet. Original project work uses the [MIT license](LICENSE); third-party materials retain their own licenses.

@@ -22,11 +22,11 @@ The separate $2,500 B2B prize asks for an organization/business workflow and a P
 
 Privy's documented signing architecture performs signing in its enclave through API requests. A local daemon does not make that signer local; the relevant requests leave the machine and signing needs the service. This differs from both the local raw-key backend and Ledger. Keep the user's preferred local paths functional and make any Privy mode explicit. [Signer architecture](https://docs.privy.io/wallets/using-wallets/signers/overview)
 
-The planned optional `privy` mode reuses the deterministic planner/proposal schemas and adds Privy-specific permissions, lifecycle and request handling. Use separate owner and executor wallet addresses: the owner authorizes the vault's bounded rebalance session, and the local scheduler requests swaps through scoped Privy executor credentials. Verify actual API authorization/policy semantics before relying on this separation. This makes Privy part of the demonstrated financial flow while retaining contract bounds. Do not give a coding agent unrestricted wallet API/CLI access just to simplify the demo.
+The planned `privy` profile reuses the deterministic planner/policy schemas and adds Privy permissions, lifecycle and request handling. The user's [latest decision](prompts/005-ledger-stack-and-execution-modes.md) permits automatic swaps without per-trade human input. A single Privy wallet controlled through appropriate authorization is sufficient; no custom vault or separate owner/executor wallets are required. The local daemon, rather than an LLM, sizes and dispatches policy-valid trades. Verify service policy semantics before claiming additional enforcement; direct-wallet local limits are software controls. Do not expose unrestricted wallet signing as a coding-agent tool.
 
 The view-only chart is compatible. Agent-only user controls are also plausible with SDK/REST, but verify actual provisioning/authentication flows instead of claiming that the existing CLI has no browser step. Developer account setup and wallet ownership/authorization configuration remain unresolved.
 
-Privy lists **Robinhood Testnet** in its gas-sponsorship network support. This is useful compatibility evidence, not proof that every desired transaction, mainnet gas feature or policy is supported. Verify the selected chain and wallet capabilities in an integration spike. [Gas network support](https://docs.privy.io/wallets/gas-and-asset-management/gas/overview)
+Privy lists **Robinhood Testnet** in its gas-sponsorship network support. This is useful compatibility evidence, not proof that every desired transaction, mainnet gas feature or policy is supported. The project also considers Base; verify the selected chain and wallet capabilities in an integration spike. [Gas network support](https://docs.privy.io/wallets/gas-and-asset-management/gas/overview)
 
 Privy supports private-key import/export, but importing a key places signing in its API-managed model; it does not implement this project's local raw-key backend. Exporting and doing everything locally may weaken the claim that Privy is core. Keep these concepts separate. [Private-key import](https://docs.privy.io/wallets/wallets/import-a-wallet/private-key), [export](https://docs.privy.io/wallets/wallets/export)
 
@@ -35,6 +35,7 @@ Privy supports private-key import/export, but importing a key places signing in 
 - [ ] Core raw-key/Uniswap flow and deterministic tests are working.
 - [ ] A concrete Privy wallet flow offers user value and executes real supported operations in the demo environment.
 - [ ] Agent-mediated setup/control, ownership, scoped permissions, key management and network support have been verified.
+- [ ] Swaps execute with the coding agent closed and no per-trade human input; durable intent/budget/provider-request records prevent duplicate or out-of-policy sends.
 - [x] Owner accepts Privy's TEE-based hosted signing for the optional mode; local backends remain independent by design.
 - [ ] Working source, wallet/transaction evidence and user-benefit explanation meet the prize requirements.
 - [x] Plan Privy as the third partner alongside Uniswap/Ledger; defer 1inch and do not exceed the event partner limit. Actual submission is pending.

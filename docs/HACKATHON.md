@@ -54,11 +54,13 @@ Fit: direct deterministic swaps can satisfy the integration direction without in
 Deliver:
 
 - [ ] Actual Ledger-backed approval protecting the transition from agent proposal to spending authority.
-- [ ] Runnable demo with explicit human approval and unattended-execution boundaries.
+- [ ] Runnable demo showing Ledger device approval and rejection; distinguish automatic raw-key/Privy profiles from device-confirmed Ledger execution.
 - [ ] [Ledger feedback](LEDGER_FEEDBACK.md) covering real SDK/docs experience, specific gaps and improvements; include evidence where useful.
 - [ ] Hardware, app, SDK and chain compatibility evidence; accurate disclosure of display/context limitations.
 
 The published requirements do not mandate a particular chain or ERC-7730 artifact. Clear Signing is a design objective to verify, not an achieved feature or a fabricated eligibility rule. The Continuity prize is excluded.
+
+The MVP prioritizes Agent Stack/DMK and suitable swap primitives. A Ring-backed scoped credential broker is optional, with its own actual allowed/denied-operation evidence if implemented. Research-only findings and installed skills are not a substitute for device-backed functionality.
 
 ## Third planned partner — Privy
 

@@ -2,6 +2,8 @@
 
 Research date: **2026-09-04**. These findings come from primary documentation, not a completed installation, device test, node synchronization or transaction. Revalidate deployment identities and runtime behavior before implementation uses them.
 
+Current decisions are in [PLAN.md](../PLAN.md), [network candidates](NETWORK.md) and the [Ledger Agent Stack assessment](LEDGER_AGENT_STACK.md). Robinhood remains viable, with Base as an alternative. Raw-key and Privy profiles execute automatically under configured policy; Ledger waits for device confirmation. Earlier vault/session-key architecture is superseded.
+
 ## Robinhood network and assets
 
 Robinhood documents mainnet **4663** and testnet **46630**, with ETH gas, an Arbitrum L2 architecture and Ethereum blob data availability. Public RPC access is available but does not prove returned state. [Network reference](https://docs.robinhood.com/chain/connecting/)
@@ -28,21 +30,21 @@ Helios documents Ethereum, OP Stack/Base and Linea support; its reviewed documen
 
 Robinhood also documents permissioned BoLD validation and Security Council upgrade powers. A locally verified execution path does not remove these assumptions or issuer backing risk. [Governance](https://docs.robinhood.com/chain/governance/)
 
-Decision: support a labelled RPC integration first; evaluate full-node attachment; treat a Robinhood light client as research-only unless verified. Report unavailable verification rather than silently switching modes.
+Decision: support a labelled RPC integration first; evaluate node/light-client attachment for the selected network. Treat a Robinhood light client as research-only unless verified. Base has documented Helios support, but stock precompile compatibility remains unverified. Report unavailable verification rather than silently switching modes.
 
 ## Ledger
 
-Scheduling update, **2026-09-04**: the owner's device is expected in a couple of days. Defer physical integration and verification until arrival is confirmed; proceed with deterministic core and Robinhood/Uniswap simulation independently. The findings below remain design references, not hardware evidence.
+Scheduling update, **2026-09-04**: the owner's device is expected in a couple of days. Defer physical integration and verification until arrival is confirmed; proceed with deterministic core, Ledger component evaluation and an actual raw-key testnet Uniswap flow. Local simulation remains a test tool. The findings below are design references, not hardware evidence.
 
 Current Ethereum Signer Kit documentation supports raw transactions and EIP-712 typed data. Its default context module requires a Ledger-issued `originToken`; a custom context interface is documented. Hardware signing support does not prove meaningful display for this project's chain and policy. [Signer reference](https://developers.ledger.com/docs/device-interaction/dmk-ts/references/signers/eth)
 
 Use DMK/Ethereum Signer Kit for the integration spike. Ledger's August 4 migration guidance says legacy `hw-app-eth` stops working with its Ethereum app after September 2026. [Migration guidance](https://developers.ledger.com/docs/device-interaction/dmk-ts/integration/migrations/signers/eth/hw_app_eth_to_dmk)
 
-Test actual device/app versions, chain IDs 4663/46630, domain separation, typed-data fields, token display, reject/disconnect flows and outbound context requests. Full context resolution involves partner integration in the current wallet guidance; determine whether a local custom context path meets this prototype's needs. No origin token, device or compatibility result was acquired in this planning session. [Wallet integration](https://developers.ledger.com/docs/clear-signing/for-wallets), [token display support](https://developers.ledger.com/docs/clear-signing/for-dapps/token-support)
+Test actual device/app versions, the selected chain ID, domain separation, typed-data fields, token display, reject/disconnect flows and outbound context requests. Full context resolution involves partner integration in the current wallet guidance; determine whether a local custom context path meets this prototype's needs. No origin token, device or compatibility result was acquired in this planning session. [Wallet integration](https://developers.ledger.com/docs/clear-signing/for-wallets), [token display support](https://developers.ledger.com/docs/clear-signing/for-dapps/token-support)
 
-Decision: provide explicit local raw-key and Ledger owner backends behind one deterministic operation interface. All application requests/reviews go through the agent; the chart has no signing transport or controls. Software mode signs locally after agent-mediated user confirmation and trusts that channel/local host; Ledger adds physical confirmation through a native bridge. The scheduler uses a separate restricted session key in both modes. Verify the native hardware transport after the device arrives. Software signing is not Ledger evidence.
+Decision: provide explicit local raw-key, Ledger and Privy backends behind one deterministic operation interface. All application requests/reviews go through the agent; the chart has no signing transport or controls. Raw-key/Privy profiles automatically execute valid policy-bounded swaps with no per-trade human or LLM input. Ledger adds physical confirmation through a native bridge. Direct owner wallets suffice; no separate session-key/vault contract is planned. Verify native hardware transport after arrival. Software signing is not Ledger evidence.
 
-Privy is the third planned prize target with an optional signer mode. The owner accepts its hosted TEE trust model. Its agent/headless SDK/REST integration and scoped executor design remain to be verified in code. See [the prize and architecture assessment](PRIVY.md).
+Privy is the third planned prize target with an optional automatic signer mode. The owner accepts its hosted TEE trust model. Its agent/headless SDK/REST integration and supported authorization policies remain to be verified in code. See [the prize and architecture assessment](PRIVY.md).
 
 ## Open gates to close with evidence
 
@@ -52,8 +54,8 @@ Privy is the third planned prize target with an optional signer mode. The owner 
 | Uniswap integration | Canonical contracts/code, supported route, pool state and sufficient depth | Labelled fork/test pools |
 | Price enforcement | Feed addresses/semantics, freshness and sequencer checks, independent onchain output bound | Capped test-fund demo only |
 | Ledger | Physical device signing/display and local context path | Disclose gap; no completed Ledger claim |
-| Unattended authorization | Contract tests proving recipient/route/budget/expiry restrictions | Reviewed owner-signed operations through the selected backend or simulation until ready |
-| Light verification | Working Nitro-compatible verification path and explicit finality assumptions | Document RPC/full-node modes |
+| Automatic execution | Deterministic recipient/route/budget/expiry checks, persistent accounting, verified Privy controls where used | Pause invalid/unconfigured profiles; do not claim local limits are onchain restrictions |
+| Light verification | Working selected-chain verification path, including relevant native token behavior and finality assumptions | Document RPC/full-node modes |
 | Local privacy | Outbound-request inspection and secret/data isolation | Disclose services and data sent |
 
-Cloud LLM assistance is accepted by the owner for this hackathon. No local model is a delivery prerequisite. The agent translates requests and presents results without receiving keys. Raw-key mode trusts agent-mediated user confirmations; only the Ledger mode claims an independent physical authorization step.
+Cloud LLM assistance is accepted by the owner for this hackathon. No local model is a delivery prerequisite. The agent translates configuration requests and presents results without receiving keys. Routine raw-key/Privy automation works with the agent closed; only Ledger mode claims an independent physical authorization step.

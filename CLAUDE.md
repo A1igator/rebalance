@@ -1,9 +1,9 @@
 # Claude Code project context
 
-Read and follow [AGENTS.md](AGENTS.md), then [PLAN.md](PLAN.md) and [docs/HACKATHON.md](docs/HACKATHON.md).
+Read [AGENTS.md](AGENTS.md), [PLAN.md](PLAN.md) and [docs/HACKATHON.md](docs/HACKATHON.md).
 
-Cloud model assistance is accepted. All application requests and reviews go through the agent; the pie chart is view only, with no edits, action buttons or signing access. Typed agent capabilities cover status, proposals, review, selected owner-signer authorization and pause/resume. Support local raw-private-key signing without hardware and optional Ledger signing after the device arrives. Software mode trusts the authenticated agent to convey exact user confirmation; Ledger requires physical confirmation. Private keys remain local and separate from the restricted session key. The recurring rebalancer is deterministic and has no model dependency. Never silently switch signers or treat software signing as Ledger evidence.
+The MVP monitors drift and executes deterministically. Raw-key and Privy modes are automatic under configured policy, with no per-trade human input; Ledger mode waits for physical confirmation. No custom vault/session-key contract is planned. All application interaction goes through the agent; the chart is view only. Never silently change signer/account. Ledger hardware testing waits for the device to arrive.
 
-Commit material project prompts/specs/plans and update [docs/AI_USAGE.md](docs/AI_USAGE.md) for generated or edited components. Preserve the hackathon's incremental history and keep keys/portfolio data outside the repository.
+Keep Robinhood viable and evaluate Base under the user's any-L2 preference. Maximize Ledger Agent Stack reuse and distinguish its narrow CLI quote guard from its broader EVM configuration/execution. Read [the Ledger assessment](docs/LEDGER_AGENT_STACK.md) and [network decision](docs/NETWORK.md). Keep routine execution independent of models and policy validation shared across signers.
 
-Privy's TEE trust model is accepted and Privy is the third planned partner. Add its optional SDK/REST signer mode with separate owner/executor authority and meaningful wallet/swap evidence. Local raw-key and Ledger modes must remain usable independently. Keep all scheduling and trade decisions deterministic regardless of signer.
+Cloud LLM input and Privy's TEE trust model are accepted. Keys and API secrets remain outside model prompts. Preserve hackathon history and commit material prompts/plans plus accurate [AI/reuse disclosures](docs/AI_USAGE.md).
