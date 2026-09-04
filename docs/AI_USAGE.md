@@ -20,6 +20,14 @@ The human specified the product, deterministic automation requirement, local pie
 
 No project implementation code or generated product image was created in this session. Platform facts have been researched, not empirically proved. Do not represent this initial plan as a finished application.
 
+## Interaction clarification — 2026-09-04
+
+Human decision: the pie chart is view only and all application interaction goes through the agent. The exact request and independent review task are recorded in [the clarification prompt](prompts/002-agent-only-interaction.md).
+
+Codex updated `README.md`, `PLAN.md`, `AGENTS.md`, `CLAUDE.md` and `docs/RESEARCH.md`; generated the new prompt record; and added this disclosure entry. One parallel design reviewer checked implications for agent controls, view-only permissions and the Ledger boundary. The revision removes the chart editor and manual action flows, adds typed agent lifecycle operations, and keeps deterministic execution and physical owner confirmation.
+
+Validation: documentation consistency, Markdown links and Git whitespace review. No implementation, hardware test, transaction or new dependency was introduced. Earlier planning prompts and commits are preserved.
+
 ## Development log template
 
 For each material implementation session, append:

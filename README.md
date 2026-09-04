@@ -2,7 +2,7 @@
 
 A local portfolio rebalancer for **ETHOnline 2026 — Start from Scratch**.
 
-Use a pie chart or ask Claude Code/Codex to propose a target change, such as “change ETH from 20% to 30%.” Review the complete allocation and authorize its trading limits with Ledger. A deterministic local engine then monitors drift and rebalances through Uniswap without invoking an LLM.
+Ask Claude Code/Codex to propose a target change, such as “change ETH from 20% to 30%.” All application requests and reviews go through the agent; the local pie chart is view only. The agent presents the complete allocation and initiates Ledger authorization, which the owner confirms on the device. A deterministic local engine then monitors drift and rebalances through Uniswap without invoking an LLM.
 
 Cloud LLM assistance for proposals is accepted for this hackathon; a local model is not required.
 
@@ -10,9 +10,9 @@ Cloud LLM assistance for proposals is accepted for this hackathon; a local model
 
 ## Intended MVP
 
-- Local pie chart showing current and target weights, allocation editor, preview, pause, and execution history.
+- View-only local pie chart showing current and target weights, proposal previews, status, and execution history; no editors or action buttons.
 - Integer arithmetic and explicit policy rules for valuation, drift, trades, limits, and recovery.
-- Optional agent interface that can propose changes but cannot sign, activate policies, or execute trades.
+- Agent as the sole application control interface for setup, changes, reviews, authorization requests, pause/resume, revocation, and withdrawal; no keys or unilateral signing authority.
 - Ledger approval of policy changes and narrowly bounded delegation to a local executor.
 - Robinhood Chain integration and direct Uniswap execution, demonstrated first with test assets or a clearly labelled local fork.
 - Local storage and no application telemetry or hosted backend.

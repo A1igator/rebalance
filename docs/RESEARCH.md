@@ -38,7 +38,7 @@ Use DMK/Ethereum Signer Kit for the integration spike. Ledger's August 4 migrati
 
 Test actual device/app versions, chain IDs 4663/46630, domain separation, typed-data fields, token display, reject/disconnect flows and outbound context requests. Full context resolution involves partner integration in the current wallet guidance; determine whether a local custom context path meets this prototype's needs. No origin token, device or compatibility result was acquired in this planning session. [Wallet integration](https://developers.ledger.com/docs/clear-signing/for-wallets), [token display support](https://developers.ledger.com/docs/clear-signing/for-dapps/token-support)
 
-Decision: Ledger authorizes a constrained policy/session; deterministic code uses the delegated executor. The human sees and approves changes in spending authority. The hardware does not autonomously authorize every future trade.
+Decision: all application requests/reviews go through the agent, which initiates a native Ledger bridge for a reviewed operation. The chart only displays state and has no signing transport or controls. The owner confirms spending authority on Ledger; deterministic code uses the delegated executor. The hardware does not autonomously authorize every future trade. Verify the agent-initiated native transport in the first device spike.
 
 ## Open gates to close with evidence
 
@@ -48,8 +48,8 @@ Decision: Ledger authorizes a constrained policy/session; deterministic code use
 | Uniswap integration | Canonical contracts/code, supported route, pool state and sufficient depth | Labelled fork/test pools |
 | Price enforcement | Feed addresses/semantics, freshness and sequencer checks, independent onchain output bound | Capped test-fund demo only |
 | Ledger | Physical device signing/display and local context path | Disclose gap; no completed Ledger claim |
-| Unattended authorization | Contract tests proving recipient/route/budget/expiry restrictions | Manual or simulation mode until ready |
+| Unattended authorization | Contract tests proving recipient/route/budget/expiry restrictions | Agent-initiated, individually Ledger-confirmed operations or simulation until ready |
 | Light verification | Working Nitro-compatible verification path and explicit finality assumptions | Document RPC/full-node modes |
 | Local privacy | Outbound-request inspection and secret/data isolation | Disclose services and data sent |
 
-Cloud LLM proposal assistance is accepted by the owner for this hackathon. No local model is a delivery prerequisite. This permission does not grant a model keys or policy-activation authority.
+Cloud LLM assistance is accepted by the owner for this hackathon. No local model is a delivery prerequisite. The agent translates human requests and presents results; this permission does not grant it keys or unilateral policy-activation authority.

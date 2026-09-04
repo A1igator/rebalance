@@ -4,7 +4,8 @@ This is an ETHOnline 2026 **Start from Scratch** project. Read `PLAN.md`, `docs/
 
 - Preserve incremental history. Do not backdate, squash away or rewrite hackathon development commits. Commit material specs, project prompts, plans and AI/reuse disclosures with the work they support.
 - The owner uses `main` directly. Follow that explicit preference; do not require a PR for owner work. Do not push work unless authorized by the current task or existing session.
-- Maximize deterministic code. Models may propose policy changes; they must not enter the scheduler, sign, activate policies or make trade-time decisions.
+- All application commands and reviews go through the agent. The local pie chart is view only: no editors, action buttons, wallet connection, signing access or mutation credentials.
+- Maximize deterministic code. Models translate explicit user requests into typed operations, including initiation of Ledger authorization and pause/resume. They cannot authorize or activate policies unilaterally, hold keys, sign, enter the scheduler or make trade-time decisions. The owner confirms protected operations on Ledger.
 - Cloud LLM proposal assistance is accepted for the hackathon. Keep signing authority, secrets and unrelated portfolio data out of model access.
 - Keep the app local. Do not introduce telemetry, a hosted backend, remote UI assets or a mandatory cloud execution service.
 - Do not call ordinary RPC trustless. State verified capabilities, issuer/rollup/oracle assumptions, public-chain visibility and hardware limitations accurately.
