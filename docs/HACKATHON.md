@@ -60,11 +60,15 @@ Deliver:
 
 The published requirements do not mandate a particular chain or ERC-7730 artifact. Clear Signing is a design objective to verify, not an achieved feature or a fabricated eligibility rule. The Continuity prize is excluded.
 
-## Optional third partner
+## Third planned partner — Privy
 
-The event permits at most **three partner selections**, with multiple tracks from one partner counted once. Keep the third slot unused unless the core demo is complete.
+The event permits at most **three partner selections**, with multiple tracks from one partner counted once. The planned selections are Uniswap, Ledger and Privy; actual entry and qualifying evidence remain pending.
+
+**Privy — Best financial flow** is the third planned target. Its $2,500 prize requires Privy as a core integration, at least one Privy wallet, a working financial flow using a generally available feature, accessible source/demo and a clear user benefit. It has official agent/headless tooling, so the absence of a separately named agent prize does not rule this project out. A real Privy-backed rebalance mode is required; a decorative adapter or mock is insufficient. See [the official prize](https://ethglobal.com/events/ethonline2026/prizes#privy) and [our assessment](PRIVY.md). The owner accepts its TEE-hosted signer as an explicit alternative to local raw-key/Ledger operation.
 
 [1inch — Build an Aqua App](https://ethglobal.com/events/ethonline2026/prizes/1inch) offers $5,000 split $2,500/$1,500/$1,000. It requires a substantive Aqua position using official contracts and demonstrated token transfers; local forks are allowed and SwapVM is preferred. A separate adapter could fit, but a quote-API integration alone cannot.
+
+1inch is deferred because Privy occupies the third slot. Raw-key mode lets contributors work without devices, but does not satisfy the separate Ledger hardware evidence requirement.
 
 [Chainlink's confidential-compute track](https://ethglobal.com/events/ethonline2026/prizes/chainlink) requires meaningful CRE confidential TEE execution and evidence. Defer it because this changes the local execution model; ordinary feed consumption is not sufficient.
 
@@ -76,6 +80,7 @@ The event permits at most **three partner selections**, with multiple tracks fro
 - [ ] 2–4 minute demo, at least 720p, human narration, normal playback speed; no AI voiceover or phone recording.
 - [ ] Final README contains exact code/contract links, environment distinctions and integration evidence.
 - [ ] Uniswap feedback file/form and Ledger tooling feedback complete.
+- [ ] Privy wallet/financial-flow evidence, available source/demo and user-benefit explanation complete.
 - [ ] Select applicable From Scratch prizes, at most three partners, and submit before the deadline.
 - [ ] Save the submission URL/confirmation and final commit SHA. Do not claim submission until confirmed.
 

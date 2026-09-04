@@ -28,6 +28,22 @@ Codex updated `README.md`, `PLAN.md`, `AGENTS.md`, `CLAUDE.md` and `docs/RESEARC
 
 Validation: documentation consistency, Markdown links and Git whitespace review. No implementation, hardware test, transaction or new dependency was introduced. Earlier planning prompts and commits are preserved.
 
+## Ledger availability update — 2026-09-04
+
+Human decision: delay Ledger work until the device arrives in a couple of days. The exact request and review prompt are recorded in [the deferral prompt](prompts/003-ledger-deferral.md).
+
+Codex revised `PLAN.md`, `README.md`, `AGENTS.md`, `docs/RESEARCH.md` and `docs/LEDGER_FEEDBACK.md`; added the prompt record and this disclosure. One parallel reviewer checked scheduling and dependency implications. The immediate milestone now covers deterministic proposals, agent controls, view-only display and simulation, with physical hardware work conditional on confirmed arrival.
+
+Validation: documentation consistency, Markdown links and Git whitespace review. No implementation, SDK installation, hardware test, transaction, dependency or scheduled reminder was introduced. Hardware approval requirements remain in the final design.
+
+## Raw-key support and Privy assessment — 2026-09-04
+
+Human decisions: support a basic raw private key for a potential teammate without a Ledger; investigate whether the Privy prize fits. Exact requests and delegated prompts are recorded in [the signer/prize prompt](prompts/004-raw-key-and-privy.md).
+
+Codex updated `README.md`, `PLAN.md`, `AGENTS.md`, `CLAUDE.md`, `docs/RESEARCH.md`, `docs/HACKATHON.md`, `docs/LEDGER_FEEDBACK.md`, the current deferral prompt and this disclosure; created `docs/PRIVY.md` and the new prompt record. One reviewer assessed signer/approval boundaries and one researcher verified official Privy prize/tooling sources. Raw-key mode is first-class and trusts the authenticated agent/local host; Ledger provides an independent physical approval step. After receiving the research, the human explicitly accepted Privy's TEE trust model. The assistant incorporated that clarification and planned Privy as the third partner with a distinct scoped owner/executor wallet flow. It is not implemented or submitted yet.
+
+Validation: consistency and link/whitespace checks; source URLs retained in the assessment. No wallet, secret, SDK, transaction, hardware connection, deployment, external form submission or teammate access grant was created. Earlier committed prompts/history remain unchanged; the uncommitted deferral interpretation is explicitly superseded by the raw-key clarification.
+
 ## Development log template
 
 For each material implementation session, append:

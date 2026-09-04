@@ -2,18 +2,21 @@
 
 A local portfolio rebalancer for **ETHOnline 2026 — Start from Scratch**.
 
-Ask Claude Code/Codex to propose a target change, such as “change ETH from 20% to 30%.” All application requests and reviews go through the agent; the local pie chart is view only. The agent presents the complete allocation and initiates Ledger authorization, which the owner confirms on the device. A deterministic local engine then monitors drift and rebalances through Uniswap without invoking an LLM.
+Ask Claude Code/Codex to propose a target change, such as “change ETH from 20% to 30%.” All application requests and reviews go through the agent; the local pie chart is view only. Choose local raw-private-key, Ledger or Privy signing. The agent presents the complete allocation and starts the selected authorization flow: explicit confirmation through the agent for software/Privy management operations, or confirmation on the Ledger device. A deterministic local engine then monitors drift and rebalances through Uniswap without invoking an LLM.
 
 Cloud LLM assistance for proposals is accepted for this hackathon; a local model is not required.
 
 **Status: planning only.** This repository starts from an empty Git history on September 4, 2026, after the published hacking start. There is no implemented application, deployed project contract, or completed integration yet.
 
+**Next milestone:** deterministic allocation proposals, a real local raw-key signer, Robinhood/Uniswap simulation and the view-only chart. Physical Ledger integration is deferred until the owner's device arrives. Software signing is a supported mode that requires no Ledger; isolated simulation approvals remain separate from real authorization.
+
 ## Intended MVP
 
 - View-only local pie chart showing current and target weights, proposal previews, status, and execution history; no editors or action buttons.
 - Integer arithmetic and explicit policy rules for valuation, drift, trades, limits, and recovery.
-- Agent as the sole application control interface for setup, changes, reviews, authorization requests, pause/resume, revocation, and withdrawal; no keys or unilateral signing authority.
-- Ledger approval of policy changes and narrowly bounded delegation to a local executor.
+- Agent as the sole application control interface for setup, changes, reviews, authorization requests, pause/resume, revocation and withdrawal; private keys stay in the local signer.
+- Explicit raw-private-key or Ledger owner signing, sharing policy validation and bounded delegation to a separate local session key. Software mode trusts the authenticated agent/local host; Ledger adds physical confirmation.
+- Optional Privy mode with TEE-backed wallet signing and a constrained executor; the owner accepts its service/TEE trust assumptions. Local calculation, scheduling and storage are shared across modes.
 - Robinhood Chain integration and direct Uniswap execution, demonstrated first with test assets or a clearly labelled local fork.
 - Local storage and no application telemetry or hosted backend.
 
@@ -28,7 +31,7 @@ Cloud LLM assistance for proposals is accepted for this hackathon; a local model
 - [Uniswap feedback](FEEDBACK.md) and [Ledger feedback](docs/LEDGER_FEEDBACK.md): evidence templates to complete during implementation.
 - [Repository governance](docs/REPOSITORY.md): public personal repository and owner bypass for `main`.
 
-Target prizes: **Uniswap — Best Uniswap Stack Contribution** and **Ledger — AI Agents x Ledger**, both From Scratch. A third partner remains optional; core delivery takes priority.
+Planned prize targets: **Uniswap — Best Uniswap Stack Contribution**, **Ledger — AI Agents x Ledger**, and **Privy — Best financial flow**. Privy's TEE-based signing is accepted for its optional mode; local raw-key and Ledger modes remain available. See [the prize assessment](docs/PRIVY.md). All integrations and prize submissions are still pending.
 
 ## Judge evidence — pending implementation
 

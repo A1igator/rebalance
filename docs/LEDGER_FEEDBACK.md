@@ -2,6 +2,8 @@
 
 **Status: pending physical-device integration.** No hardware result, SDK integration, screenshot or external feedback submission is claimed.
 
+Physical integration is deferred as of **2026-09-04** until the owner's device arrives. Complete device-specific feedback after actual testing; simulated authorization or the separate raw-private-key backend cannot satisfy it.
+
 Target: [ETHOnline 2026 — AI Agents x Ledger, From Scratch](https://ethglobal.com/events/ethonline2026/prizes/ledger). The [event portal](https://developers.ledger.com/ethonline) requires tooling feedback with every submission.
 
 Complete with actual evidence:
