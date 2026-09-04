@@ -2,8 +2,8 @@
 
 Read [AGENTS.md](AGENTS.md), [PLAN.md](PLAN.md) and [docs/HACKATHON.md](docs/HACKATHON.md).
 
-The MVP monitors drift and executes deterministically. Raw-key and Privy modes are automatic under configured policy, with no per-trade human input; Ledger mode waits for physical confirmation. No custom vault/session-key contract is planned. All application interaction goes through the agent; the chart is view only. Never silently change signer/account. Ledger hardware testing waits for the device to arrive.
+Build the smallest working rebalancer: one TypeScript app, local config, deterministic loop, three signer implementations and a view-only local chart. Raw-key/Privy swaps run automatically without human or LLM input; Ledger requires physical confirmation. All app commands go through the agent.
 
-Keep Robinhood viable and evaluate Base under the user's any-L2 preference. Maximize Ledger Agent Stack reuse and distinguish its narrow CLI quote guard from its broader EVM configuration/execution. Read [the Ledger assessment](docs/LEDGER_AGENT_STACK.md) and [network decision](docs/NETWORK.md). Keep routine execution independent of models and policy validation shared across signers.
+No spending caps, budget counters, generic policy engine or custom custody vault. Keep Ledger Key Ring/credential-broker and Privy-native scoped authorization features for their prize demos, with focused allowed/denied-operation evidence and no monetary limits. Assess an existing account/session module for Ledger-authorized autonomy, with expiry/revocation and no monetary/usage counters; direct signing remains the baseline until verified. Keep basic correct swap arithmetic, slippage, balance/gas and pending-transaction handling. Keep secrets out of chat/Git/logs.
 
-Cloud LLM input and Privy's TEE trust model are accepted. Keys and API secrets remain outside model prompts. Preserve hackathon history and commit material prompts/plans plus accurate [AI/reuse disclosures](docs/AI_USAGE.md).
+Reuse applicable Ledger Agent Stack components; defer hardware testing/enrollment until arrival. Robinhood remains viable, with Base as an alternative. Cloud LLM input and Privy's TEE are accepted. Preserve hackathon history and [AI/provenance records](docs/AI_USAGE.md).

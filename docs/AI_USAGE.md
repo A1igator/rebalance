@@ -54,6 +54,16 @@ The final plan removes the earlier custom vault/session-key contract and distinc
 
 Validation: primary-source and pinned-source review, independent documentation review, local Markdown-link and Git whitespace checks. No application implementation, package/skill installation, runtime network probe, private key, wallet, transaction, hardware connection, deployment or external sponsor submission was created. Source findings are explicitly distinguished from verified runtime behavior. The first implementation target is now a real automatic raw-key testnet swap; simulations remain tests.
 
+## MVP simplification and session-key reconsideration — 2026-09-04
+
+Human decisions: remove spending limits and budget accounting; simplify generic infrastructure; retain Ledger- and Privy-specific features for prize demonstrations. The user then considered returning to session keys, explicitly preserving the no-cap/no-accounting requirement. Exact inputs and review prompts are recorded in [the simplification prompt](prompts/006-minimal-mvp.md) and [session discussion](prompts/007-session-key-reconsideration.md).
+
+Codex rewrote `PLAN.md`, `README.md`, `AGENTS.md` and `CLAUDE.md` around one application, plain config and basic pending-transaction handling. It updated `docs/PRIVY.md`, `docs/RESEARCH.md`, `docs/LEDGER_AGENT_STACK.md`, `docs/LEDGER_FEEDBACK.md`, `docs/HACKATHON.md` and this disclosure, and created the two prompt records. A parallel reviewer assessed simplification, then the session/direct-signing tradeoff. Sponsor-specific Ring and Privy authorization work was retained after the user's clarification; the broader interim deferral was not committed.
+
+The assistant rechecked Ledger's roadmap and reviewed primary session/account documentation. It recorded an existing-module feasibility check with expiry/revocation and operation scope, no spending or usage accounting, and no unverified claim that Ledger already supplies delegation. Direct-wallet signing remains the baseline until module/chain/hardware evidence supports a change. The preceding monetary-policy and monorepo plan is superseded; historical records remain intact.
+
+Validation: active-document consistency review, local Markdown links and Git whitespace checks. No application code, package/skill installation, wallet, key, runtime probe, transaction, hardware test, deployment or external sponsor submission was created. Research candidates are not adopted dependencies.
+
 ## Development log template
 
 For each material implementation session, append:

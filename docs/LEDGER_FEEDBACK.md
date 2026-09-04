@@ -23,7 +23,7 @@ Distinguish actual Clear Signing behavior from host UI previews and generic sign
 The [source assessment](LEDGER_AGENT_STACK.md) pins the inspected code and supporting links. Items to validate and refine into sponsor feedback:
 
 - The EVM documentation and existing Robinhood/Base configs are broader than the explicit three-currency guard in `swap quote`; `swap execute` follows a different resolution path. A command-by-command chain matrix and consistent validation would remove ambiguity. Our initial blanket no-L2 interpretation was incorrect and has been corrected.
-- Execute obtains a fresh quote and lacks a sufficient exact-transaction/policy-bounds interface for this application's deterministic planner. Evaluate an explicit prepare/validate/execute flow or reusable builder.
+- Execute obtains a fresh quote and lacks a sufficient exact-transaction/slippage-settings interface for this application's deterministic planner. Evaluate a reusable builder without introducing a spending-policy engine.
 - Verify analytics and hosted-service behavior before claiming a local, telemetry-free integration.
 - Ring handles encryption; our constrained credential broker would be separate project work. Record service dependencies and isolation guarantees accurately.
 

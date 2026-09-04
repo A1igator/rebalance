@@ -1,6 +1,6 @@
 # Ledger Agent Stack integration assessment
 
-Research: **2026-09-04**. No package installation, runtime probe, account discovery, hardware test or transaction has occurred. These are documentation/source findings, not a working integration. The [execution-mode decisions](prompts/005-ledger-stack-and-execution-modes.md) are authoritative.
+Research: **2026-09-04**. No package installation, runtime probe, account discovery, hardware test or transaction has occurred. These are documentation/source findings, not a working integration. Read the [minimal-scope decisions](prompts/006-minimal-mvp.md) and [session-key discussion](prompts/007-session-key-reconsideration.md) alongside the current plan.
 
 ## Reuse strategy
 
@@ -26,7 +26,7 @@ Do not change Ethereum's RPC and leave chain ID 1. Use the actual target-network
 
 ## Transaction and privacy boundaries
 
-The inspected execute command requotes and does not expose an exact prepared-transaction/quote-ID or sufficient minimum-output/slippage interface for our policy boundary. Reuse shared components to inspect and constrain the final transaction before signing. Do not use a fresh opaque swap command as proof that a prior preview was preserved. Automatic modes apply the same policy checks before their separate signers are called.
+The inspected execute command requotes and does not expose an exact prepared-transaction/quote-ID or sufficient minimum-output/slippage interface for our swap settings. Reuse shared components to inspect the final transaction before signing. Do not treat a fresh opaque swap command as proof that a prior preview was preserved. This is normal swap correctness, not a spending-budget engine.
 
 The shared [Uniswap adapter](https://github.com/LedgerHQ/ledger-live/blob/6f9b570de882356b1660e75b7c747ef2887fde13/libs/ledger-live-common/src/wallet-api/Exchange/dex/swap-api/uniswap.ts) calls Ledger-hosted swap infrastructure. The CLI [entry point](https://github.com/LedgerHQ/ledger-live/blob/6f9b570de882356b1660e75b7c747ef2887fde13/apps/wallet-cli/src/cli.ts) initializes analytics, with [Segment implementation](https://github.com/LedgerHQ/ledger-live/blob/6f9b570de882356b1660e75b7c747ef2887fde13/apps/wallet-cli/src/analytics/segment.ts). Pin and inspect behavior; do not bundle the stock CLI unchanged while claiming the entire path is telemetry-free or local-only.
 
@@ -36,6 +36,12 @@ No raw-private-key/Privy signer switch was identified in the inspected hardware 
 
 The documented Ring lifecycle uses hardware for enrollment, then a local password and network trustchain restoration for subsequent encryption/decryption without another device tap. Decryption produces plaintext; Ring is not a scoped service proxy. [Ring documentation](https://developers.ledger.com/docs/ai-tools/ledger-cli#key-ring)
 
-A useful optional extension is a local broker for credentials the application actually needs, such as Privy or a quote service. The broker privately retrieves secrets, exposes narrow service operations through opaque references, checks endpoint/method/wallet/amount/expiry scopes and redacts outputs. Those checks are our implementation. Claiming that an agent cannot extract secrets requires actual process/filesystem/credential isolation; unrestricted same-user shell access defeats that claim. Ring network dependence remains explicit. Contributors without devices keep normal local secret references.
+Retain a small local broker for a credential the application actually needs, such as Privy or a quote service. Demonstrate private credential retrieval and an allowed service operation versus a denied unrelated request, using endpoint/method restrictions and redacted output. No amount limits or budget counters. The broker checks are our implementation. Claiming that an agent cannot extract secrets requires actual isolation; unrestricted same-user shell access defeats that claim. Implement only what the demonstrated boundary needs and state its limits. Ring network dependence remains explicit. Contributors without devices keep normal local secret references.
 
 For [Ledger judging](https://ethglobal.com/events/ethonline2026/prizes/ledger), demonstrate real device-confirmed rebalancing and rejection, plus a Ring-backed allowed/denied operation if adopted. Keep device feedback pending until tested. No installation count or speculative broker substitutes for working evidence.
+
+## Session delegation under consideration
+
+Ledger's public roadmap lists agent intents, queued approvals and bounded autonomy as coming soon. It is a product direction, not a verified current session API. DMK can provide device review in our planned adapter; an existing account/session module could add unattended execution after Ledger authorizes the session. [Roadmap](https://shop.ledger.com/pages/ledger-agent-stack)
+
+Assess one module with permitted rebalance operations, recipient, expiry and owner revocation, but no spending/usage caps or accounting. A session needs enforceable account/contract authorization; an ordinary Ledger EOA signature over local JSON is insufficient. Verify the selected chain and actual allowed/rejected operations before adopting it. If successful, describe the demo as Ledger-authorized session execution: subsequent swaps are signed by the session key, not freshly approved on the device. The chart remains view only.

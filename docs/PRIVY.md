@@ -22,7 +22,9 @@ The separate $2,500 B2B prize asks for an organization/business workflow and a P
 
 Privy's documented signing architecture performs signing in its enclave through API requests. A local daemon does not make that signer local; the relevant requests leave the machine and signing needs the service. This differs from both the local raw-key backend and Ledger. Keep the user's preferred local paths functional and make any Privy mode explicit. [Signer architecture](https://docs.privy.io/wallets/using-wallets/signers/overview)
 
-The planned `privy` profile reuses the deterministic planner/policy schemas and adds Privy permissions, lifecycle and request handling. The user's [latest decision](prompts/005-ledger-stack-and-execution-modes.md) permits automatic swaps without per-trade human input. A single Privy wallet controlled through appropriate authorization is sufficient; no custom vault or separate owner/executor wallets are required. The local daemon, rather than an LLM, sizes and dispatches policy-valid trades. Verify service policy semantics before claiming additional enforcement; direct-wallet local limits are software controls. Do not expose unrestricted wallet signing as a coding-agent tool.
+The planned `privy` profile reuses the deterministic planner and local config, with Privy wallet authorization and request handling. The user permits automatic swaps without per-trade human input and has [removed spending caps/budget accounting while retaining Privy-specific prize features](prompts/006-minimal-mvp.md). A single Privy wallet suffices for direct swaps; no custom vault or mandatory owner/executor-wallet split is required. The local daemon, rather than an LLM, sizes and dispatches trades.
+
+Keep supported Privy-native contract/method or signer restrictions for a focused allowed/denied-operation demonstration. Verify actual API semantics before claiming enforcement. Do not add monetary caps, usage counters or a generic cross-signer policy engine. A separate [session-module feasibility check](prompts/007-session-key-reconsideration.md) may use a Privy-held session key, but API authorization is not by itself onchain delegation over a Ledger-owned account.
 
 The view-only chart is compatible. Agent-only user controls are also plausible with SDK/REST, but verify actual provisioning/authentication flows instead of claiming that the existing CLI has no browser step. Developer account setup and wallet ownership/authorization configuration remain unresolved.
 
@@ -34,8 +36,8 @@ Privy supports private-key import/export, but importing a key places signing in 
 
 - [ ] Core raw-key/Uniswap flow and deterministic tests are working.
 - [ ] A concrete Privy wallet flow offers user value and executes real supported operations in the demo environment.
-- [ ] Agent-mediated setup/control, ownership, scoped permissions, key management and network support have been verified.
-- [ ] Swaps execute with the coding agent closed and no per-trade human input; durable intent/budget/provider-request records prevent duplicate or out-of-policy sends.
+- [ ] Agent-mediated setup/control, ownership, credentials and network support are verified, with a focused demonstration of supported Privy authorization restrictions and no spending limits.
+- [ ] Swaps execute with the coding agent closed and no per-trade human input; a pending transaction/provider-request record prevents duplicate sends.
 - [x] Owner accepts Privy's TEE-based hosted signing for the optional mode; local backends remain independent by design.
 - [ ] Working source, wallet/transaction evidence and user-benefit explanation meet the prize requirements.
 - [x] Plan Privy as the third partner alongside Uniswap/Ledger; defer 1inch and do not exceed the event partner limit. Actual submission is pending.

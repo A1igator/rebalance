@@ -60,7 +60,7 @@ Deliver:
 
 The published requirements do not mandate a particular chain or ERC-7730 artifact. Clear Signing is a design objective to verify, not an achieved feature or a fabricated eligibility rule. The Continuity prize is excluded.
 
-The MVP prioritizes Agent Stack/DMK and suitable swap primitives. A Ring-backed scoped credential broker is optional, with its own actual allowed/denied-operation evidence if implemented. Research-only findings and installed skills are not a substitute for device-backed functionality.
+The MVP prioritizes Agent Stack/DMK and suitable swap primitives. Retain a focused Ring-backed credential demo for prize value, with actual allowed/denied-operation evidence. Session delegation is a separate feasibility check: if adopted, distinguish hardware authorization of the session from automatic swaps signed by its software key. No spending-cap feature is part of the plan. Research-only findings and installed skills are not a substitute for device-backed functionality.
 
 ## Third planned partner — Privy
 

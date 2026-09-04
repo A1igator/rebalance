@@ -1,20 +1,19 @@
 # Project instructions
 
-This is an ETHOnline 2026 **Start from Scratch** project. Read `PLAN.md`, `docs/HACKATHON.md` and `docs/AI_USAGE.md` before implementation. Current state is planning only; the latest plan supersedes earlier vault/session-key and all-modes-confirmed designs.
+This is an ETHOnline 2026 **Start from Scratch** project. Read `PLAN.md`, `docs/HACKATHON.md` and `docs/AI_USAGE.md` before implementation. The latest MVP removes spending limits and generic infrastructure while retaining Ledger/Privy features for their prize demos.
 
-- Preserve incremental history; do not backdate, squash away or rewrite hackathon commits. Commit material project prompts, specs, plans, AI disclosures and upstream provenance.
-- The owner uses `main` directly. Follow that preference and push only when authorized by the task/session.
-- All application commands/reviews go through the agent. The chart is view only, with no signing or mutation capability.
-- MVP local-key/Privy profiles execute swaps and required finite approvals automatically under versioned policy, without per-trade human input or LLM calls. Ledger profiles wait for physical confirmation. No custom vault or session-key contract is needed.
-- Support explicit local raw-key, Ledger and Privy signer profiles. Agent-mediated configuration/policy changes control automation. Never silently switch signer/account or enable automation merely because credentials exist. Direct-owner software limits are not onchain guarantees; document verified Privy enforcement separately.
-- Cloud LLM assistance and Privy's TEE signing are accepted. Keep keys/API secrets out of model context, source, command arguments and logs. Each contributor uses independent wallets/local secrets.
-- Robinhood remains viable; the user also permits other L2s. Base/Base Sepolia is a candidate with documented stock and Uniswap deployments. Select the network from verified integration evidence; preserve asset/liquidity/light-client gates.
-- Prioritize Ledger Agent Stack reuse. Read `docs/LEDGER_AGENT_STACK.md`, use official Ledger skills during implementation and pin component versions/source/licenses. Shared EVM config includes Robinhood/Base; the CLI quote allowlist does not establish all CLI chain support. Verify the packaged flow, enforce policy bounds despite requoting, and inspect telemetry. CLI hardware signing is separate from raw-key/Privy adapters.
-- Physical Ledger enrollment/signing tests wait for device arrival. Software work, route validation and raw-key network integration can proceed. Do not claim hardware evidence from mocks/software signatures.
-- Key Ring is encryption infrastructure; a scoped broker is our work. Keep plaintext out of agent-visible output and document its network/isolation assumptions. Do not claim hardware confirmation on every Ring decrypt.
-- Use integer financial arithmetic, reviewed chain/address manifests, finite allowances, persistent spending limits, one economic intent per wallet/chain and conservative stale/invalid-state handling. Ledger review must bind the actual transaction. Read `docs/NETWORK.md` for B20 pricing/native-precompile specifics.
-- Keep application calculation/storage/UI local and telemetry-free. Disclose selected Privy, Ledger/Ring, quote or RPC services accurately. Do not call RPC access or matching responses a proof.
-- Test meaningful planning, automatic versus device-confirmed dispatch, signer, duplicate-request and transaction-recovery behavior. Record actual environments/results; never invent deployments, device tests or sponsor feedback.
-- Attribute public dependencies and copied upstream work. Do not import pre-event project-specific code/assets into Classic. Update setup and judge evidence once implementation exists.
+- Preserve meaningful hackathon history and commit material prompts, specs, plans, AI disclosures and dependency provenance. Do not backdate or squash away the work.
+- The owner uses `main` directly. Follow that preference and the session's commit/push authorization.
+- All application commands go through the agent. The local chart is view only.
+- Raw-key and Privy profiles execute automatically with no per-trade human input or LLM calls. Ledger waits for physical device confirmation. Defer hardware tests until arrival.
+- Keep the shared app small: one TypeScript project, one active profile/chain, ordinary local config, a basic CLI and a pending-transaction record. No spending caps, budget accounting, generic policy/permission engine or bespoke authentication framework.
+- Retain Ledger Key Ring with a focused credential-broker demo and Privy-native scoped authorization where useful for prizes. Use service/contract/method restrictions rather than monetary caps. Verify actual allowed/denied behavior and isolation claims; do not generalize these integrations into a security platform.
+- Assess one existing account/session module for unattended Ledger-authorized swaps. No spending or usage caps/counters. Verify authorization, an allowed swap, rejected unrelated operation, expiry/revocation and chain support before promoting it. A roadmap or locally signed config is not implemented delegation. Keep direct signing as the baseline until verified.
+- Retain correct swap mechanics: integer amounts, valid target weights, correct network/assets/recipient, usable prices/routes, normal slippage/expiry, sufficient balance/gas and receipt tracking before another trade. Do not silently switch signers/accounts or duplicate unresolved transactions.
+- Cloud LLM assistance and Privy's TEE are accepted. Keep secrets outside chat, source control and logs using local/provider setup or the focused Ring integration.
+- Maximize applicable Ledger Agent Stack reuse and pin adopted versions/licenses. Read `docs/LEDGER_AGENT_STACK.md`; shared EVM config includes Robinhood/Base, and the CLI quote guard is not a blanket chain restriction.
+- Robinhood remains viable; other L2s are allowed. Read `docs/NETWORK.md`, choose one working integration and preserve truthful asset/liquidity/verification claims. Begin with an actual testnet swap; simulation is a test tool.
+- Keep application storage/calculation/chart local, bundle UI assets and avoid application telemetry. Disclose external RPC, Ledger or Privy dependencies accurately.
+- Test the core arithmetic, automatic/device-confirmed execution and basic recovery. Record actual results; no invented hardware, network or sponsor evidence.
 
-User instructions supersede project preferences. Flag any conflict with published competition requirements factually before work that would undermine eligibility.
+User instructions supersede project preferences. Published competition requirements still apply; distinguish them from optional product scope.
