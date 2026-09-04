@@ -1,0 +1,28 @@
+# Local funds, identity, portfolio state, and credentials must never enter Git.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+keystore/
+secrets/
+.local/
+data/
+*.sqlite
+*.sqlite-*
+*.db
+*.log
+
+# Build and editor output. Commit dependency lockfiles when code is introduced.
+node_modules/
+dist/
+build/
+coverage/
+out/
+cache/
+broadcast/
+.DS_Store
+.idea/
+.vscode/
+
+# Commit sanitized specs, prompts, plans, and provenance; do not ignore them.
