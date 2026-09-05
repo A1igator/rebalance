@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve as resolvePath } from 'node:path';
 import { test } from 'node:test';
@@ -223,6 +223,74 @@ test('hook captures the stop generation before dependency installation and passe
   assert.deepEqual(calls, ['snapshot', 'dependencies', 'launch']);
 });
 
+test('native unmatched prompts record bounded format metadata without output, prompt content or services', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'rebalance-hook-observation-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const script = fileURLToPath(new URL('../scripts/rebalance-hook.mjs', import.meta.url));
+  const recordPath = join(directory, 'last-hook-observation.json');
+  for (const [prompt, promptFormat] of [
+    ['No command fixture-secret-prompt', 'other'],
+    ['$rebalance status fixture-secret-prompt', 'other-with-command'],
+  ]) {
+    const input = { ...event, prompt, cwd: root,
+      session_id: 'fixture-secret-session', turn_id: 'fixture-secret-turn' };
+    const output = await new Promise<string>((resolve, reject) => {
+      const child = execFile(process.execPath, [script], { cwd: root,
+        env: { REBALANCE_DATA_DIR: directory }, timeout: 10_000 }, (error, stdout, stderr) => {
+        if (error) { reject(error); return; }
+        try { assert.equal(stderr, ''); resolve(stdout); } catch (failure) { reject(failure); }
+      });
+      child.stdin!.end(JSON.stringify(input));
+    });
+    assert.equal(output, '');
+    const raw = await readFile(recordPath, 'utf8');
+    assert.doesNotMatch(raw, /fixture-secret|No command|\$rebalance/);
+    assert.equal(raw.includes(root), false);
+    const observation = JSON.parse(raw);
+    assert.deepEqual(Object.keys(observation).sort(), ['version', 'recordedAt', 'requestId', 'event',
+      'promptFormat', 'promptLength', 'selection', 'workspace', 'planMode'].sort());
+    assert.equal(observation.version, 1);
+    assert.equal(new Date(observation.recordedAt).toISOString(), observation.recordedAt);
+    assert.equal(observation.requestId, selectLaunchRequest({ ...input, prompt: '$rebalance' }, root).requestId);
+    assert.equal(observation.event, 'UserPromptSubmit');
+    assert.equal(observation.promptFormat, promptFormat);
+    assert.equal(observation.promptLength, prompt.length);
+    assert.equal(observation.selection, 'ignored');
+    assert.equal(observation.workspace, 'inside');
+    assert.equal(observation.planMode, false);
+    assert.equal((await stat(recordPath)).mode & 0o777, 0o600);
+    assert.deepEqual(await readdir(directory), ['last-hook-observation.json']);
+  }
+});
+
+test('a failed diagnostic write preserves the normal blocked Plan-mode reply without starting', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'rebalance-hook-observation-failure-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const dataPath = join(directory, 'fixture-secret-not-directory');
+  await writeFile(dataPath, 'fixture-secret-original-content');
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const script = fileURLToPath(new URL('../scripts/rebalance-hook.mjs', import.meta.url));
+  const input = { ...event, cwd: root, permission_mode: 'plan' };
+  const output = await new Promise<string>((resolve, reject) => {
+    const child = execFile(process.execPath, [script], { cwd: root,
+      env: { REBALANCE_DATA_DIR: dataPath }, timeout: 10_000 }, (error, stdout, stderr) => {
+      if (error) { reject(error); return; }
+      try { assert.equal(stderr, ''); resolve(stdout); } catch (failure) { reject(failure); }
+    });
+    child.stdin!.end(JSON.stringify(input));
+  });
+  assert.deepEqual(JSON.parse(output), await handlePrompt(input, {
+    readStopToken: () => assert.fail('must not read stop state'),
+    ensureDependencies: () => assert.fail('must not install'), runLaunch: () => assert.fail('must not launch'),
+  }));
+  assert.equal(publicResult(JSON.parse(output)).outcome, 'blocked');
+  assert.match(output, /Plan mode/);
+  assert.doesNotMatch(output, /fixture-secret|ENOTDIR|EEXIST/);
+  assert.equal(await readFile(dataPath, 'utf8'), 'fixture-secret-original-content');
+  assert.deepEqual(await readdir(directory), ['fixture-secret-not-directory']);
+});
+
 test('prepared hook command reaches the actual CLI in an isolated unconfigured fixture without network or services', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'rebalance-hook-entry-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -236,15 +304,22 @@ test('prepared hook command reaches the actual CLI in an isolated unconfigured f
   const env: NodeJS.ProcessEnv = { ...process.env, REBALANCE_DATA_DIR: directory, NODE_OPTIONS: `--import=${preload}` };
   delete env.REBALANCE_PRIVATE_KEY;
   for (const [index, prompt] of ['$rebalance', skillPrompt(root)].entries()) {
+    const input = { ...event, prompt, cwd: root, turn_id: `fixture-entry-${index}` };
     const output = await new Promise<string>((resolve, reject) => {
       const child = execFile('/bin/sh', ['-c', command], { cwd: root, env, timeout: 10_000 }, (error, stdout) => {
         if (error) reject(error); else resolve(stdout);
       });
-      child.stdin!.end(JSON.stringify({ ...event, prompt, cwd: root, turn_id: `fixture-entry-${index}` }));
+      child.stdin!.end(JSON.stringify(input));
     });
     const context = JSON.parse(output).hookSpecificOutput.additionalContext;
     assert.match(context, /"outcome":"needs-input"/);
     assert.match(context, /"armed":false/);
+    const observation = JSON.parse(await readFile(join(directory, 'last-hook-observation.json'), 'utf8'));
+    assert.equal(observation.requestId, selectLaunchRequest(input, root).requestId);
+    assert.equal(observation.promptFormat, index === 0 ? 'typed' : 'canonical-skill-link');
+    assert.equal(observation.selection, 'selected');
+    assert.equal(observation.workspace, 'inside');
+    assert.equal(observation.planMode, false);
     for (const file of ['unexpected-network', 'private-key', 'config.json', 'stop.json',
       'start.log', 'chart.log', 'pending.json', 'cycle.json', 'run.lock', 'chart.lock']) {
       assert.equal(existsSync(join(directory, file)), false);

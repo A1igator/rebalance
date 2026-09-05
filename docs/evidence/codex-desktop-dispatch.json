@@ -1,0 +1,43 @@
+{
+  "recordedAt": "2026-09-05T16:06:22Z",
+  "source": "Read-only discovery through a separate short-lived process of the Desktop app's bundled Codex engine; public app CLI and local chart status",
+  "standaloneCliVersion": "0.148.0",
+  "desktopBundledVersion": "0.153.1",
+  "featureHooks": true,
+  "runningHostHookFeatureOverrides": [],
+  "runningHostManagedHooksOnlyOverrides": [],
+  "hook": {
+    "sourcePath": "<repo>/.codex/hooks.json",
+    "enabled": true,
+    "trustStatus": "trusted",
+    "currentHash": "sha256:daf9006f9a66333d1714f9e2de3abab93c7f78aa36aca38194defe53f3a61fc5"
+  },
+  "warnings": [],
+  "errors": [],
+  "latestUserInvocation": {
+    "modelVisibleForm": "canonical Markdown skill reference",
+    "rawHookPayloadCaptured": false,
+    "hookContextReceived": false,
+    "publicStatusArmed": false,
+    "publicStatusObservationAt": "2026-09-05T12:58:49.710Z",
+    "chartHttpStatus": 200,
+    "chartArmed": false,
+    "notificationHeartbeat": "ACTIVE, five minutes",
+    "events": []
+  },
+  "limits": [
+    "Fresh discovery does not establish the active conversation's loaded state or hook execution",
+    "No hook metadata was found in narrow current-day Desktop log checks; absence of logging is inconclusive",
+    "The bundled schema exposes live hook notifications but no historical hook-run query or reload method",
+    "No restart requirement or raw prompt serialization was established",
+    "The newly added local diagnostic has only been exercised in isolated fixtures"
+  ],
+  "redactions": ["Omitted local paths, process IDs, wallet, holdings and unrelated hook metadata"],
+  "boundaries": {
+    "discoveryQueryMethods": ["initialize", "initialized", "hooks/list"],
+    "fundedHookInvokedByAssistant": false,
+    "trustChangedByAssistant": false,
+    "fundedRunnerStartedByAssistant": false,
+    "desktopDispatchVerified": false
+  }
+}

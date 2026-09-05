@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { access, readFile, realpath } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { access, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -23,6 +23,45 @@ export function selectLaunchRequest(input, root = repository) {
   }
   return { cwd: input.cwd, requestId: createHash('sha256')
     .update(JSON.stringify([input.session_id, input.turn_id])).digest('hex') };
+}
+
+/** One local entry observation; never persist prompt text, paths, identities or errors. */
+export async function recordHookObservation(input, root = repository) {
+  let temporary;
+  try {
+    const prompt = typeof input?.prompt === 'string' ? input.prompt.trim() : null;
+    const selected = selectLaunchRequest(input, root);
+    const hasIdentity = typeof input?.session_id === 'string' && input.session_id &&
+      typeof input?.turn_id === 'string' && input.turn_id;
+    const observation = {
+      version: 1,
+      recordedAt: new Date().toISOString(),
+      requestId: hasIdentity ? createHash('sha256')
+        .update(JSON.stringify([input.session_id, input.turn_id])).digest('hex') : null,
+      event: input?.hook_event_name === 'UserPromptSubmit' ? 'UserPromptSubmit' : 'other',
+      promptFormat: prompt === null ? 'missing' : prompt === '$rebalance' ? 'typed'
+        : prompt === `[$rebalance](${resolve(root, 'skills/rebalance/SKILL.md')})` ? 'canonical-skill-link'
+        : prompt.includes('$rebalance') ? 'other-with-command' : 'other',
+      promptLength: typeof input?.prompt === 'string' ? input.prompt.length : null,
+      selection: selected?.blocked ? 'blocked' : selected ? 'selected' : 'ignored',
+      workspace: 'unavailable',
+      planMode: input?.permission_mode === 'plan',
+    };
+    if (typeof input?.cwd === 'string' && isAbsolute(input.cwd)) {
+      try {
+        const [canonicalRoot, cwd] = await Promise.all([realpath(root), realpath(input.cwd)]);
+        const child = relative(canonicalRoot, cwd);
+        observation.workspace = child === '..' || child.startsWith('../') || child.startsWith('..\\') || isAbsolute(child)
+          ? 'outside' : 'inside';
+      } catch { /* Classify an unavailable directory without retaining its path/error. */ }
+    }
+    const directory = resolve(root, process.env.REBALANCE_DATA_DIR || '.local');
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    temporary = resolve(directory, `.hook-observation-${randomUUID()}.tmp`);
+    await writeFile(temporary, JSON.stringify(observation) + '\n', { flag: 'wx', mode: 0o600 });
+    await rename(temporary, resolve(directory, 'last-hook-observation.json'));
+  } catch { /* Diagnostics never change the launch decision or expose caught errors. */ }
+  finally { if (temporary) await rm(temporary, { force: true }).catch(() => {}); }
 }
 
 export function hookReply(result) {
@@ -128,7 +167,11 @@ async function main() {
     process.stdout.write(JSON.stringify(hookFailure('input')) + '\n');
     return;
   }
+  // Observe entry alongside handling, without delaying the stop-generation read.
+  // This records selector metadata, not launcher success or runner state.
+  const observation = recordHookObservation(input);
   const response = await handlePrompt(input);
+  await observation;
   if (response) process.stdout.write(JSON.stringify(response) + '\n');
 }
 
