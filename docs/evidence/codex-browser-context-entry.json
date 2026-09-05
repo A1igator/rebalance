@@ -1,0 +1,30 @@
+{
+  "source": "Real local last-hook-observation.json, read after a user-issued skill suggestion",
+  "observation": {
+    "version": 1,
+    "recordedAt": "2026-09-05T16:29:47.059Z",
+    "event": "UserPromptSubmit",
+    "promptFormat": "other-with-command",
+    "promptLength": 477,
+    "selection": "ignored",
+    "workspace": "inside",
+    "planMode": false
+  },
+  "publicStatus": { "armed": false, "cycle": null, "error": null, "events": [] },
+  "modelVisibleFraming": "One ambient in-app browser-context block followed by ## My request: and the canonical skill link",
+  "literalReconstructionLength": 475,
+  "limits": [
+    "The recorded native length is not an exact capture of the raw payload",
+    "A possible surrounding-whitespace difference was not verified",
+    "Hook entry and selector rejection are established; no native launcher dispatch or trade is established",
+    "The framed-input correction is tested with isolated fixtures until a new user submission provides host evidence"
+  ],
+  "redactions": ["Omitted opaque request identity, local paths, browser URL and wallet details"],
+  "boundaries": {
+    "nativeHookEntryVerified": true,
+    "nativeLauncherDispatchVerified": false,
+    "fundedHookInvokedByAssistant": false,
+    "trustChangedByAssistant": false,
+    "fundedRunnerStartedByAssistant": false
+  }
+}

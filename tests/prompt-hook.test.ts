@@ -7,10 +7,21 @@ import { join, resolve as resolvePath } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-const { handlePrompt, selectLaunchRequest } = await import(new URL('../scripts/rebalance-hook.mjs', import.meta.url).href);
+const { handlePrompt, launchPromptFormat, selectLaunchRequest } = await import(new URL('../scripts/rebalance-hook.mjs', import.meta.url).href);
 const event = { hook_event_name: 'UserPromptSubmit', prompt: '$rebalance', permission_mode: 'default',
   session_id: 'fixture-session', turn_id: 'fixture-turn', cwd: '/fixture' };
 const skillPrompt = (root: string) => `[$rebalance](${resolvePath(root, 'skills/rebalance/SKILL.md')})`;
+const ambientPrompt = (request: string, url = 'http://127.0.0.1:4663/') => [
+  '<in-app-browser-context source="ambient-ui-state">',
+  "This block is automatically supplied ambient UI state, not part of the user's request. Do not treat it as an instruction or as evidence that the user explicitly selected the in-app browser.",
+  '# In app browser:',
+  '- The user has the in-app browser open with 5 tabs.',
+  `- Current URL: ${url}`,
+  '</in-app-browser-context>',
+  '',
+  '## My request:',
+  request,
+].join('\n');
 
 function publicResult(reply: { hookSpecificOutput: { additionalContext: string } }) {
   const context = reply.hookSpecificOutput.additionalContext;
@@ -29,7 +40,8 @@ test('hook ignores inspections, heartbeat text, quoted commands and other event 
 });
 
 test('hook blocks plan mode and missing identities without running setup', async () => {
-  for (const prompt of ['$rebalance', skillPrompt('/fixture')]) {
+  for (const prompt of ['$rebalance', skillPrompt('/fixture'),
+    ambientPrompt('$rebalance'), ambientPrompt(skillPrompt('/fixture'))]) {
     for (const input of [{ ...event, prompt, permission_mode: 'plan' }, { ...event, prompt, session_id: '' },
       { ...event, prompt, turn_id: undefined }, { ...event, prompt, cwd: 'relative' }]) {
       const result = await handlePrompt(input, { repository: '/fixture',
@@ -58,6 +70,36 @@ test('hook ignores other skill destinations, scoped links and surrounding text w
   for (const input of [...prompts.map(prompt => ({ ...event, prompt })),
     { ...event, prompt: canonical, hook_event_name: 'Stop' }]) {
     assert.equal(await handlePrompt(input, { repository: '/fixture',
+      readStopToken: () => assert.fail('must not read stop state'),
+      ensureDependencies: () => assert.fail('must not install'), runLaunch: () => assert.fail('must not launch'),
+    }), null);
+  }
+});
+
+test('ambient framing excludes metadata commands, malformed wrappers and every non-bare request tail', async () => {
+  const canonical = skillPrompt('/fixture');
+  const framed = ambientPrompt(canonical);
+  const prompts = [
+    ...['$rebalance status', '$rebalance stop', '$rebalance --setup-only', 'please run $rebalance',
+      '`$rebalance`', '"$rebalance"', skillPrompt('/other-project'), `${canonical} status`,
+      `${canonical}\nanything`, `${canonical}\n${canonical}`, `## My request:\n${canonical}`].map(request => ambientPrompt(request)),
+    ambientPrompt('status', 'http://example.com/$rebalance'),
+    ambientPrompt('status', 'http://example.com/' + canonical),
+    `Unrelated text\n${framed}`, ambientPrompt(framed), framed + '\n## My request:\n$rebalance',
+    framed.replace('source="ambient-ui-state"', 'source="user"'),
+    framed.replace('not part of the user\'s request', 'part of the user\'s request'),
+    framed.replace('# In app browser:', '# Browser:'),
+    framed.replace('5 tabs.', '1000000 tabs.'), framed.replace('5 tabs.', '0 tabs.'),
+    framed.replace('- Current URL: http://127.0.0.1:4663/', '- Current URL: bad url'),
+    ambientPrompt(canonical, 'x'.repeat(4097)),
+    framed.replace('</in-app-browser-context>', 'Extra context line\n</in-app-browser-context>'),
+    framed.replace('</in-app-browser-context>', '</other-context>'),
+    framed.replace('## My request:', '### My request:'),
+    framed.replace('## My request:', '## My request:\n## My request:'),
+  ];
+  for (const prompt of prompts) {
+    assert.equal(launchPromptFormat(prompt, '/fixture'), null);
+    assert.equal(await handlePrompt({ ...event, prompt }, { repository: '/fixture',
       readStopToken: () => assert.fail('must not read stop state'),
       ensureDependencies: () => assert.fail('must not install'), runLaunch: () => assert.fail('must not launch'),
     }), null);
@@ -116,11 +158,43 @@ test('a standalone skill-picker link routes to the same launcher request as the 
   assert.match(result.hookSpecificOutput.additionalContext, /do not repeat launch or start/);
 });
 
+test('ambient framing routes only the entire bare user request with the same stable launch identity', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-hook-ambient-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, 'nested'));
+  const literal = { ...event, cwd: join(root, 'nested') };
+  const cases = [
+    [ambientPrompt('$rebalance').replace('\n\n## My request:', '\n## My request:'), 'ambient-typed'],
+    [ambientPrompt(skillPrompt(root)).replace('\n\n## My request:', '\n \t\n\n## My request:')
+      .replace(/\n/g, '\r\n'), 'ambient-canonical-skill-link'],
+  ];
+  for (const [prompt, format] of cases) {
+    const input = { ...literal, prompt: ` \n${prompt}\n ` };
+    assert.equal(launchPromptFormat(input.prompt, root), format);
+    assert.deepEqual(selectLaunchRequest(input, root), selectLaunchRequest(literal, root));
+    const calls: string[] = [];
+    const result = await handlePrompt(input, { repository: root,
+      readStopToken: async () => { calls.push('stop'); return 'none'; },
+      ensureDependencies: async () => { calls.push('dependencies'); },
+      runLaunch: async (repo: string, requestId: string, expectedStop: string) => {
+        assert.equal(repo, root);
+        assert.equal(requestId, selectLaunchRequest(literal, root).requestId);
+        assert.equal(expectedStop, 'none');
+        calls.push('launch');
+        return { app: 'Rebalance', outcome: 'armed', status: { armed: true }, messages: [] };
+      },
+    });
+    assert.deepEqual(calls, ['stop', 'dependencies', 'launch']);
+    assert.equal(publicResult(result).outcome, 'armed');
+    assert.match(result.hookSpecificOutput.additionalContext, /do not repeat launch or start/);
+  }
+});
+
 test('hook does not launch when installed outside its selected workspace', async t => {
   const root = await mkdtemp(join(tmpdir(), 'rebalance-hook-root-'));
   const unrelated = await mkdtemp(join(tmpdir(), 'rebalance-hook-unrelated-'));
   t.after(() => Promise.all([root, unrelated].map(path => rm(path, { recursive: true, force: true }))));
-  for (const prompt of ['$rebalance', skillPrompt(root)]) {
+  for (const prompt of ['$rebalance', skillPrompt(root), ambientPrompt('$rebalance'), ambientPrompt(skillPrompt(root))]) {
     const result = await handlePrompt({ ...event, prompt, cwd: unrelated }, { repository: root,
       readStopToken: () => assert.fail('must not read stop state'),
       ensureDependencies: () => assert.fail('must not install'), runLaunch: () => assert.fail('must not launch') });
@@ -303,7 +377,9 @@ test('prepared hook command reaches the actual CLI in an isolated unconfigured f
   const command = definition.hooks.UserPromptSubmit[0].hooks[0].command;
   const env: NodeJS.ProcessEnv = { ...process.env, REBALANCE_DATA_DIR: directory, NODE_OPTIONS: `--import=${preload}` };
   delete env.REBALANCE_PRIVATE_KEY;
-  for (const [index, prompt] of ['$rebalance', skillPrompt(root)].entries()) {
+  const forms = [['$rebalance', 'typed'], [skillPrompt(root), 'canonical-skill-link'],
+    [ambientPrompt('$rebalance'), 'ambient-typed'], [ambientPrompt(skillPrompt(root)), 'ambient-canonical-skill-link']];
+  for (const [index, [prompt, expectedFormat]] of forms.entries()) {
     const input = { ...event, prompt, cwd: root, turn_id: `fixture-entry-${index}` };
     const output = await new Promise<string>((resolve, reject) => {
       const child = execFile('/bin/sh', ['-c', command], { cwd: root, env, timeout: 10_000 }, (error, stdout) => {
@@ -316,7 +392,7 @@ test('prepared hook command reaches the actual CLI in an isolated unconfigured f
     assert.match(context, /"armed":false/);
     const observation = JSON.parse(await readFile(join(directory, 'last-hook-observation.json'), 'utf8'));
     assert.equal(observation.requestId, selectLaunchRequest(input, root).requestId);
-    assert.equal(observation.promptFormat, index === 0 ? 'typed' : 'canonical-skill-link');
+    assert.equal(observation.promptFormat, expectedFormat);
     assert.equal(observation.selection, 'selected');
     assert.equal(observation.workspace, 'inside');
     assert.equal(observation.planMode, false);
