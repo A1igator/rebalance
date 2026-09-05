@@ -12,7 +12,7 @@ The [latest decision](docs/prompts/017-mainnet-cadence-codex.md) accepts the mea
 
 ## Use through your agent
 
-Open this repository in Codex or Claude Code and use the project **Rebalance skill** (`$rebalance` in Codex or `/rebalance` in Claude Code). Keep all control in that conversation. The skill handles local setup, reads current state, uses your selected targets and starts the monitor only when requested. Its canonical source is [SKILL.md](skills/rebalance/SKILL.md), shared by the project skill directories.
+Open this repository in Codex or Claude Code and invoke the project **Rebalance skill**: `$rebalance` in Codex or `/rebalance` in Claude Code. That invocation initializes the app through the agent: install missing locked dependencies, reuse/create the local wallet as appropriate, preserve or collect your allocation, refresh public state, reuse/start and open the view-only chart, and reuse previously requested notifications. Repeating it preserves existing setup. No terminal setup steps are required from the user. Initialization reports whether trading is armed; it does not arm trading as a side effect. Its canonical source is [SKILL.md](skills/rebalance/SKILL.md), shared by the project skill directories.
 
 For contributors and reproducible verification, the underlying commands are:
 

@@ -1,13 +1,28 @@
 ---
 name: rebalance
-description: "Operate the local Rebalance app from a Codex or Claude Code conversation: configure user-selected allocations, inspect holdings, start or stop deterministic rebalancing, and open the read-only chart. Use for portfolio operation, not generic repository development."
+description: "Initialize and operate the local Rebalance app from one Codex or Claude Code conversation. Use for skill-only startup, user-selected allocations, holdings, monitoring and the view-only chart; not generic repository development."
 ---
 
 # Rebalance
 
 Use the existing conversation as the app's interactive interface. Translate the user's intent into the local CLI, report public results, and let the local process perform recurring work. Core operation uses the CLI without MCP. Claude Code uses an optional MCP notification channel; Codex uses native Remote and a scheduled follow-up in the same conversation. Neither participates in trading.
 
-## Start with local state
+## Default invocation initializes the app
+
+Treat a bare `$rebalance` in Codex, `/rebalance` in Claude Code, or “initialize Rebalance” as a request to perform setup in this conversation. Do the work through tools; do not respond with a command list for the user to run. A narrower request such as status, events, target editing or stop performs only that operation. In particular, notification heartbeats do not run initialization.
+
+Run from this repository and reuse its existing CLI commands:
+
+1. If the locked dependencies are missing, run `npm ci`, then read `npm run cli -- status`. Preserve a valid existing configuration and wallet; do not reapply demo defaults over saved choices. A failed status/config read is a recovery issue, not evidence of a fresh install.
+2. Only when public status has neither a wallet nor a configuration, use `wallet create` to create/reuse the local raw-key wallet for fresh setup. If a profile already selects a public Ledger/Privy address, preserve that profile instead of creating an unrelated raw-key wallet. Missing or inconsistent existing key metadata is a setup error, not permission to rotate the wallet.
+3. If allocation is missing, use percentages supplied in the conversation or explicit delegation to choose demo weights, then call `configure --targets ...`. Otherwise ask for the five-asset split here and continue independent setup while awaiting it. Never invent holdings or silently install example weights.
+4. If the trading runner is already active, use its current public status and leave it running. Otherwise run `check` for a fresh read-only observation, receipt reconciliation and unsigned plan. If the runner lock is held, reread/reuse status; it may be starting or stopping. Report unavailable RPC or unresolved transactions without clearing records or forcing another runner. `check` is read-only onchain but may update local records through normal receipt/cycle reconciliation.
+5. Reuse the chart when GET `/api/status` returns valid Rebalance JSON matching the CLI's public wallet, network and target weights, with a live chart process. A HEAD request or successful HTML response alone does not verify the status endpoint. Otherwise start `chart --background` once and verify its public endpoint becomes available. The command's `starting` response alone is not readiness. Do not kill an unrelated process or take over an occupied port. Open the existing chart tab when available, or open the verified local chart URL.
+6. If notifications were requested in this conversation, reuse or finish the relevant Codex/Claude setup below. Reuse an existing matching heartbeat and preserve any user-paused notification preference; initialization must not create duplicate schedules or silently re-enable stopped notifications. The user completes native phone pairing or required agent consent; preserve honest delivery limits.
+
+Finish with a short setup result: selected network/wallet and allocation, chart availability, notification state, and whether trading is armed. Bare initialization does not arm trades, clear a stop request or reset cycle/pending records. Explicit requests to start automatic rebalancing use the separate operation below, subject to the executing agent's tool permissions.
+
+## Inspect and operate existing state
 
 Run commands from the Rebalance repository. If dependencies are missing, install the repository's locked dependencies with `npm ci`. Inspect `npm run cli -- status` before making changes; retain the existing wallet and configuration. Use `npm run cli -- graph` when execution or recovery needs explanation.
 

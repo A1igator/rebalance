@@ -10,6 +10,8 @@ Robinhood **mainnet (4663)** remains the selected network. The [latest decision]
 
 ## 1. What we are building
 
+The [skill-only initialization clarification](docs/prompts/018-skill-initialization.md) makes a bare `$rebalance` or `/rebalance` the setup entry point. The agent performs dependency setup, preserves/creates the appropriate local wallet, uses saved or user-selected targets, refreshes state, reuses/opens the chart and reuses requested notifications. Narrow status/event requests stay read-only. Initialization does not silently arm trading or reset recovery/cycle records.
+
 A local portfolio rebalancer with one Claude Code/Codex conversation as its only application command interface and a **view-only pie chart**, with no header, footer or other sections. The [UI simplification](docs/prompts/015-pie-only-ui.md) keeps ticker/percentage labels within the chart; empty-wallet targets are explicitly distinguished from current holdings. Ask the agent to change AAPL from 20% to 30%; deterministic code updates the complete allocation and handles subsequent rebalancing. A repository skill starts and controls the local monitor; no embedded chat is needed.
 
 | Signer | Rebalancing behavior |

@@ -2,6 +2,8 @@
 
 Read [AGENTS.md](AGENTS.md), [PLAN.md](PLAN.md) and [docs/HACKATHON.md](docs/HACKATHON.md).
 
+A bare `/rebalance` initializes the app through the skill in this conversation, reusing wallet/configuration/chart and previously requested notifications. Perform setup through tools instead of returning terminal setup instructions. Initialization does not implicitly arm trading; specific status/event/stop requests do only that operation.
+
 Build the smallest working rebalancer: one TypeScript app, local config, deterministic loop, three signer implementations and a view-only local chart. Raw-key/Privy swaps run automatically without human or LLM input. Ledger tracks drift while disconnected, refreshes on connection and prompts through the agent to rebalance with physical confirmation. Connection alone never authorizes signing. All app commands go through the agent.
 
 Default cycle starts are one hour apart, with a fixed ten-minute active window for sequential approval/swap legs and a five-percentage-point drift trigger. Pending receipts reconcile first. Cycle timing survives restarts and target edits; the 30-second observation poll does not authorize a new cycle every poll.
