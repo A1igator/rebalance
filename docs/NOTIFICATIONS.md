@@ -25,6 +25,8 @@ Claude determines whether/when to push; its docs offer no per-event delivery gua
 
 ## Codex: native Remote and notifications in this conversation
 
+The [deterministic launch hook](LAUNCH.md) is a separate user-command entry point. It recognizes only a literal bare `$rebalance`; scheduled notification prompts never match it. It does not create, pause or duplicate this heartbeat, and it does not turn scheduled reporting into a model-free phone push service.
+
 Codex uses the desktop app's native **Remote** connection to continue this same conversation from ChatGPT mobile. It does not need a second chat, a public app server, a custom relay or Claude's `notifications/claude/channel` method. The installed Codex CLI was observed at **0.148.0**; its experimental remote-control commands are not the documented mobile pairing flow. [Official Remote setup](https://learn.chatgpt.com/docs/remote-connections)
 
 On the desktop host, open **Settings → Connections → Control this Mac or PC → Set up/Add**, approve the app's setup and scan its QR code with your phone. Complete pairing in ChatGPT using the same account and workspace, then open **Remote** and select this existing conversation. Keep the host awake, online and running the desktop app. Availability and required account verification depend on the app/workspace. Pairing and phone delivery have not been verified on the user's device.

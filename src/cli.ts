@@ -1,8 +1,10 @@
 import { spawn } from 'node:child_process';
+import { createHash, randomUUID } from 'node:crypto';
 import { open, mkdir, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { setTimeout as delay } from 'node:timers/promises';
 import { type Hex } from 'viem';
 import { ASSETS } from './assets.js';
 import { createChain, ROBINHOOD } from './chain.js';
@@ -14,6 +16,7 @@ import { STOP_PATH, monitor, status, tick } from './runtime.js';
 import { serve } from './server.js';
 import { acquireLock, atomicWriteJson, readJson, stringifyJson, type PendingTransaction } from './storage.js';
 import { validatePending } from './transactions.js';
+import { launch } from './launch.js';
 
 const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
   wallet create                        Create/reuse a local wallet; public address only
@@ -25,6 +28,8 @@ const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
   targets set AAPL 30                   Change one percentage; redistribute the rest
   targets replace <ASSET=percent,...>   Replace all five targets explicitly
   check                                Fresh read/plan/quote; never sign
+  launch [--setup-only]                 Prepare/reuse chart and arm/reuse the runner
+    [--targets <ASSET=percent,...>]      Initial allocation only; preserve saved targets
   start [--background]                 Arm deterministic automatic rebalancing
   stop                                 Stop before the next dispatch
   chart [--background]                 Serve the read-only chart at 127.0.0.1:4663
@@ -43,6 +48,8 @@ const { values, positionals: args } = parseArgs({ allowPositionals: true, option
   slippage: { type: 'string' }, poll: { type: 'string' }, help: { type: 'boolean' },
   'rebalance-interval-seconds': { type: 'string' },
   'resume-start': { type: 'boolean', default: false },
+  'setup-only': { type: 'boolean', default: false }, 'request-id': { type: 'string' },
+  'expected-stop': { type: 'string' },
 } });
 const print = (value: unknown) => process.stdout.write(stringifyJson(value));
 const requiredConfig = async () => { const c = await loadConfig(); if (!c) throw new Error('Configure explicit targets through the agent first'); return c; };
@@ -50,6 +57,31 @@ const requiredConfig = async () => { const c = await loadConfig(); if (!c) throw
 async function inLock<T>(name: string, action: () => Promise<T>): Promise<T> {
   const release = await acquireLock(DATA, name);
   try { return await action(); } finally { await release(); }
+}
+
+// Stop and the start command's older-stop removal must be ordered. In
+// particular, a slow launch must not erase a newer user stop during setup.
+async function control<T>(action: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    let release: (() => Promise<void>) | undefined;
+    try { release = await acquireLock(DATA, 'control.lock'); }
+    catch (error) {
+      if (attempt >= 99 || !(error instanceof Error) || !/^Lock control\.lock is held/.test(error.message)) throw error;
+      await delay(20); continue;
+    }
+    try { return await action(); } finally { await release(); }
+  }
+}
+
+async function clearOlderStop() {
+  await control(async () => {
+    const stop = await readJson(STOP_PATH);
+    const token = stop === null ? 'none' : createHash('sha256').update(JSON.stringify(stop)).digest('hex');
+    if (values['expected-stop'] !== undefined && values['expected-stop'] !== token) {
+      throw new Error('A newer stop arrived during launch; no runner was started and the stop was preserved');
+    }
+    await rm(STOP_PATH, { force: true });
+  });
 }
 
 async function background(command: string): Promise<void> {
@@ -68,13 +100,18 @@ async function main() {
   const command = args[0];
   if (!command || command === 'help' || values.help) { process.stdout.write(HELP); return; }
   if (values['resume-start'] && (command !== 'start' || values.background)) throw new Error('Invalid background-start continuation');
+  if ((values['setup-only'] || values['request-id'] !== undefined) && command !== 'launch') {
+    throw new Error('--setup-only and --request-id apply only to launch');
+  }
+  if (values['expected-stop'] !== undefined && (!['start', 'launch'].includes(command) || values['resume-start'] ||
+      !/^(none|[a-f0-9]{64})$/.test(values['expected-stop']))) throw new Error('Invalid conditional-start token');
   if (values.background) {
     if (!['start', 'chart'].includes(command)) throw new Error('--background applies only to start or chart');
     if (command === 'start') {
       await requiredConfig();
       // Do not clear a stop belonging to an existing runner. Clear the older
       // request before spawning; the child preserves any subsequently issued stop.
-      await inLock('run.lock', () => rm(STOP_PATH, { force: true }));
+      await inLock('run.lock', clearOlderStop);
     }
     await background(command); return;
   }
@@ -83,6 +120,13 @@ async function main() {
       if (args[1] !== 'create') throw new Error('Use wallet create');
       print(await createWallet()); return;
     case 'status': print(await status()); return;
+    case 'launch': {
+      const result = await launch({ setupOnly: values['setup-only'], targets: values.targets,
+        requestId: values['request-id'], expectedStop: values['expected-stop'] });
+      print(result);
+      if (result.outcome === 'blocked') process.exitCode = 1;
+      return;
+    }
     case 'graph': print({ interface: 'one existing agent conversation', edges: GRAPH, state: (await status()).graph }); return;
     case 'events':
       if (args[1] === 'ack' && args[2]) { await acknowledgeEvent(args[2]); print({ acknowledged: args[2] }); }
@@ -125,7 +169,7 @@ async function main() {
     case 'start': {
       await requiredConfig();
       await inLock('run.lock', async () => {
-        if (!values['resume-start']) await rm(STOP_PATH, { force: true });
+        if (!values['resume-start']) await clearOlderStop();
         const abort = new AbortController();
         const stop = () => abort.abort();
         process.once('SIGINT', stop); process.once('SIGTERM', stop);
@@ -134,7 +178,9 @@ async function main() {
         finally { process.off('SIGINT', stop); process.off('SIGTERM', stop); }
       }); return;
     }
-    case 'stop': await atomicWriteJson(STOP_PATH, { requestedAt: new Date().toISOString() }); print({ status: 'stop-requested', message: 'No new work after the current dispatch boundary; any submitted transaction still settles.' }); return;
+    case 'stop':
+      await control(() => atomicWriteJson(STOP_PATH, { requestedAt: new Date().toISOString(), requestId: randomUUID() }));
+      print({ status: 'stop-requested', message: 'No new work after the current dispatch boundary; any submitted transaction still settles.' }); return;
     case 'chart': {
       await inLock('chart.lock', async () => {
         const server = await serve(); print({ url: 'http://127.0.0.1:4663', viewOnly: true });

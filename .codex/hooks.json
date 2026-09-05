@@ -1,0 +1,18 @@
+{
+  "description": "User-reviewed bare $rebalance command: initialize and arm automatic real-money trading under the saved allocation. No hook trust is granted by this file.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/scripts/rebalance-hook.mjs\"",
+            "statusMessage": "Checking Rebalance command",
+            "additionalContextLimit": 5000,
+            "timeout": 400
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -12,9 +12,11 @@ The [fee decision](docs/prompts/017-mainnet-cadence-codex.md) accepts the measur
 
 ## Use through your agent
 
-Open this repository in Codex or Claude Code and invoke the project **Rebalance skill**: `$rebalance` in Codex or `/rebalance` in Claude Code. The [single-call launch](docs/prompts/019-single-skill-arming.md) requests setup **and arming automatic trading** under your saved allocation. It installs missing locked dependencies, reuses/creates the appropriate wallet, preserves or collects your allocation, refreshes public state, reuses/opens the view-only chart and requested notifications, then starts or reuses the deterministic runner. No separate arming message is part of this workflow. Repeated launches preserve wallet/configuration, cycle timing and pending transactions. Scoped setup-only, status, event and stop requests perform only their named operation. Its canonical source is [SKILL.md](skills/rebalance/SKILL.md), shared by the project skill directories.
+Open this repository in Codex or Claude Code and invoke the project **Rebalance skill**: `$rebalance` in Codex or `/rebalance` in Claude Code. The [single-call launch](docs/prompts/019-single-skill-arming.md) requests setup **and arming automatic trading** under your saved allocation. Startup is implemented in the deterministic [launcher](src/launch.ts), which preserves configuration, reconciles receipts, reuses/starts the chart and runner, and verifies actual readiness. Scoped setup-only, status, event and stop requests perform only their named operation. The shared [skill](skills/rebalance/SKILL.md) handles user input and reports results.
 
-The executing agent must be allowed to perform the requested actions. The current assistant cannot activate real-money stock-token trading, so it can prepare this workflow but cannot complete the funded launch here. The skill must report that restriction and the actual runner state, which remains unarmed in current checks. An already active runner is reused; setup or a background spawn acknowledgement alone is not successful arming.
+For Codex, a project **UserPromptSubmit hook** routes a literal bare `$rebalance` directly to the launcher without an LLM tool decision. It installs missing locked dependencies and records the invocation identity so duplicate delivery cannot rearm after a stop. **The user must review and trust the hook first**; no trust or approval settings are changed by this implementation. The documented review interface is `/hooks` in Codex CLI. Actual desktop skill-picker dispatch remains unverified. [Hook setup, matching and limits](docs/LAUNCH.md)
+
+The current assistant prepares/tests the wiring but cannot activate real-money trading or trust the live hook on the user's behalf. The funded runner remains unarmed in recorded checks. Native notification schedules and Remote pairing remain host setup outside the launcher, and existing requested notifications are reused. An armed status is not proof of a completed trade.
 
 For contributors and reproducible verification, the underlying commands are:
 
@@ -34,12 +36,12 @@ Supply all five target percentages. This is a syntax example, **not a selected a
 npm run cli -- configure --targets USDG=20,AAPL=20,NVDA=20,MSFT=20,AMD=20
 npm run cli -- targets set AAPL 30
 npm run cli -- check
-npm run cli -- chart --background
-npm run cli -- start --background
+npm run cli -- launch --setup-only
+npm run cli -- launch
 npm run cli -- stop
 ```
 
-`check` reads/plans/quotes without signing. `start` arms automatic raw-key execution under the saved targets; no per-swap agent or human confirmation is required. Fund the selected Robinhood wallet with the actual portfolio tokens and native ETH for gas before a live run. Defaults are 5 percentage points of drift, one hour between rebalance cycle starts, 0.5% swap slippage, 120-second expiry and 30-second polling. Each cycle has a fixed ten-minute active window for sequential approval/swap legs; expiry is bounded by that window. Receipt reconciliation runs first, even between cycles. Cycle timing survives restarts and target edits, so polling does not cause a fresh rebalance every 30 seconds. This limits frequency without introducing a spending cap or promising one transaction per hour.
+`check` reads/plans/quotes without signing. `launch --setup-only` prepares services without starting an inactive trader; full `launch` prepares and arms/reuses automatic execution under the saved targets. The low-level `start --background` command remains available. No per-swap agent or human confirmation is required for raw-key mode. Fund the selected Robinhood wallet with the actual portfolio tokens and native ETH for gas before a live run. Defaults are 5 percentage points of drift, one hour between rebalance cycle starts, 0.5% swap slippage, 120-second expiry and 30-second polling. Each cycle has a fixed ten-minute active window for sequential approval/swap legs; expiry is bounded by that window. Receipt reconciliation runs first, even between cycles. Cycle timing survives restarts and target edits, so polling does not cause a fresh rebalance every 30 seconds. This limits frequency without introducing a spending cap or promising one transaction per hour.
 
 Partial target edits proportionally redistribute the remaining weights. Select USDG and four stocks from the [verified manifest](src/assets.ts); only those five enter monitoring and valuation. Replacing symbols changes the tracked allocation and does not automatically liquidate tokens removed from it. Our demo wallet was empty when its selection changed.
 

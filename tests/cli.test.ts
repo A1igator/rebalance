@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -59,8 +60,10 @@ async function until(condition: () => boolean | Promise<boolean>, message: strin
 
 test('stop after background start is retained when the delayed child begins', { timeout: 15_000 }, async t => {
   const { directory, command } = await fixture(t);
-  await atomicWriteJson(join(directory, 'stop.json'), { requestedAt: '2026-01-01T00:00:00Z' });
-  const launched = await command(['start', '--background'], { REBALANCE_TEST_GATE: '1' });
+  const olderStop = { requestedAt: '2026-01-01T00:00:00Z' };
+  await atomicWriteJson(join(directory, 'stop.json'), olderStop);
+  const token = createHash('sha256').update(JSON.stringify(olderStop)).digest('hex');
+  const launched = await command(['start', '--background', '--expected-stop', token], { REBALANCE_TEST_GATE: '1' });
   const started = JSON.parse(launched.stdout) as { status: string; pid: number };
   assert.equal(started.status, 'starting');
   assert.ok(Number.isSafeInteger(started.pid));
@@ -134,4 +137,49 @@ test('CLI configures the cycle interval without replacing targets, resetting cad
   assert.equal(existsSync(join(directory, 'private-key')), false);
   await assert.rejects(command(['configure', '--rebalance-interval-seconds', 'NaN']));
   assert.equal((await readJson<{ rebalanceIntervalSeconds: number }>(join(directory, 'config.json')))!.rebalanceIntervalSeconds, 7200);
+});
+
+test('conditional launch start preserves a stop that arrived after preflight', async t => {
+  const { directory, command } = await fixture(t);
+  const before = { requestedAt: '2026-09-05T06:00:00Z', requestId: 'older-stop' };
+  const latest = { ...before, requestId: 'newer-stop' };
+  await atomicWriteJson(join(directory, 'stop.json'), latest);
+  for (const token of ['none', createHash('sha256').update(JSON.stringify(before)).digest('hex')]) {
+    await assert.rejects(command(['start', '--background', '--expected-stop', token]), (error: unknown) => {
+      assert.match((error as { stderr: string }).stderr, /newer stop/);
+      return true;
+    });
+    assert.deepEqual(await readJson(join(directory, 'stop.json')), latest);
+    assert.equal(existsSync(join(directory, 'start.log')), false);
+  }
+  assert.equal(existsSync(join(directory, 'unexpected-network')), false);
+});
+
+test('stop waits for the short start/stop control lock then persists a distinct generation', async t => {
+  const { directory, command } = await fixture(t);
+  const release = await acquireLock(directory, 'control.lock');
+  t.after(release);
+  const stopping = command(['stop']);
+  await delay(80);
+  assert.equal(existsSync(join(directory, 'stop.json')), false);
+  await release();
+  assert.equal(JSON.parse((await stopping).stdout).status, 'stop-requested');
+  const first = await readJson<{ requestId: string }>(join(directory, 'stop.json'));
+  await command(['stop']);
+  const second = await readJson<{ requestId: string }>(join(directory, 'stop.json'));
+  assert.ok(first?.requestId && second?.requestId);
+  assert.notEqual(first.requestId, second.requestId);
+  assert.equal(existsSync(join(directory, 'unexpected-network')), false);
+});
+
+test('actual launch command reports missing initial targets without creating keys or starting services', async t => {
+  const { directory, command } = await fixture(t);
+  await rm(join(directory, 'config.json'));
+  const result = JSON.parse((await command(['launch'])).stdout);
+  assert.equal(result.outcome, 'needs-input');
+  assert.equal(result.status.armed, false);
+  for (const file of ['private-key', 'start.log', 'chart.log', 'pending.json', 'unexpected-network']) {
+    assert.equal(existsSync(join(directory, file)), false);
+  }
+  await assert.rejects(command(['status', '--setup-only']));
 });
