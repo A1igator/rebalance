@@ -141,3 +141,7 @@ The initial planning session had no dependencies. Adopted dependencies are now r
 The MIT license covers original project files; it does not override licenses on Uniswap, Ledger, fonts, libraries, boilerplate or other third-party materials.
 
 Final implementation verification on 2026-09-04: `npm run typecheck`, **82/82 tests**, and `git diff --check` passed. Final lifecycle tests cover immediate background stop, current-target display, wallet-scoped receipt history and truthful runner liveness. The first core checkpoint is `381e73b`; verified RWA integration/evidence is `b4afa39`. The following app checkpoint preserves the remaining code, skill, UI, notification bridge and updated specifications. No actual trade or phone push is claimed.
+
+## Demo allocation configuration — 2026-09-04
+
+The human delegated the demo weights, then requested USDG at 5%. Exact requests and the short workflow are in [prompt 013](prompts/013-demo-allocation.md). Codex used the Rebalance skill and CLI to set USDG 5% and TSLA/AAPL/NVDA/AMZN 23.75% each; local status confirmed all 10000 basis points and an unarmed monitor. Read-only mainnet check passed at block 54732359 with zero portfolio and gas balances; browser inspection confirmed the targets and stopped status. Root updated this log, PLAN and the prompt record. No implementation code changed or new test suite was needed. Private configuration was not committed; no key was inspected, funds moved, transaction signed or notification sent.
