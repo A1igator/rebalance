@@ -79,10 +79,8 @@ const STOCK_ABI = parseAbi([
   "function oraclePaused() view returns (bool)",
   "function uiMultiplier() view returns (uint256)",
 ]);
-const assetList = Object.values(ASSETS);
-type Asset = (typeof assetList)[number];
-const stockList = assetList.filter((asset) => asset.id !== "USDG");
-type Stock = (typeof stockList)[number];
+type Asset = (typeof ASSETS)[keyof typeof ASSETS];
+type Stock = Exclude<Asset, { id: "USDG" }>;
 type Header = { number: bigint; timestamp: bigint };
 
 function amount(value: bigint, label: string, allowZero = false): bigint {
@@ -92,7 +90,7 @@ function amount(value: bigint, label: string, allowZero = false): bigint {
   return value;
 }
 
-function assetsFor(trade: TradePlan): { sell: Asset; buy: Asset } {
+function assetsFor(trade: TradePlan, assetList: Asset[]): { sell: Asset; buy: Asset } {
   const sell = assetList.find(({ id }) => id === trade.sellAssetId);
   const buy = assetList.find(({ id }) => id === trade.buyAssetId);
   if (!sell || !buy || sell.id === buy.id || (sell.id !== "USDG" && buy.id !== "USDG")) {
@@ -126,12 +124,15 @@ export function createChain(config: ChainConfig) {
   }
   const targets = { ...config.targets };
   if (
-    Object.keys(targets).length !== assetList.length ||
-    assetList.some(({ id }) => !Number.isInteger(targets[id]) || targets[id]! < 0 || targets[id]! > 10_000) ||
+    Object.keys(targets).length !== 5 || !Object.hasOwn(targets, "USDG") ||
+    Object.keys(targets).some(id => !Object.hasOwn(ASSETS, id)) ||
+    Object.values(targets).some(weight => !Number.isInteger(weight) || weight < 0 || weight > 10_000) ||
     Object.values(targets).reduce((sum, target) => sum + target, 0) !== 10_000
   ) {
-    throw new Error("Targets must specify USDG, TSLA, AAPL, NVDA and AMZN and total 10000 integer basis points");
+    throw new Error("Targets must select USDG plus four supported stocks and total 10000 integer basis points");
   }
+  const assetList = Object.values(ASSETS).filter(asset => Object.hasOwn(targets, asset.id));
+  const stockList = assetList.filter((asset): asset is Stock => asset.id !== "USDG");
   const wallet = getAddress(config.wallet);
   const slippageBps = BigInt(config.slippageBps);
   const deadlineSeconds = BigInt(config.deadlineSeconds);
@@ -214,7 +215,7 @@ export function createChain(config: ChainConfig) {
   }
 
   async function requireBalance(trade: TradePlan, blockNumber: bigint): Promise<void> {
-    const { sell } = assetsFor(trade);
+    const { sell } = assetsFor(trade, assetList);
     if (trade.amountIn > await tokenBalance(sell, blockNumber)) throw new Error(`Insufficient ${sell.id} balance`);
   }
 
@@ -228,13 +229,13 @@ export function createChain(config: ChainConfig) {
   }
 
   async function requireTradable(trade: TradePlan, blockNumber: bigint): Promise<void> {
-    const { sell, buy } = assetsFor(trade);
+    const { sell, buy } = assetsFor(trade, assetList);
     const stock = stockList.find(({ id }) => id === (sell.id === "USDG" ? buy.id : sell.id))!;
     await stockState(stock, blockNumber);
   }
 
   async function quoteAt(trade: TradePlan, block: Header): Promise<RouteQuote> {
-    const { sell, buy } = assetsFor(trade);
+    const { sell, buy } = assetsFor(trade, assetList);
     const stockId = sell.id === "USDG" ? buy.id : sell.id;
     const available = pools.get(stockId);
     if (!available?.length) throw new Error(`No verified ${stockId}/USDG route`);
@@ -305,7 +306,7 @@ export function createChain(config: ChainConfig) {
 
   async function quote(trade: TradePlan): Promise<RouteQuote> {
     trade = { ...trade };
-    assetsFor(trade);
+    assetsFor(trade, assetList);
     const block = await header();
     await requireBalance(trade, block.number);
     await requireTradable(trade, block.number);
@@ -314,7 +315,7 @@ export function createChain(config: ChainConfig) {
 
   async function transaction(trade: TradePlan, _previousQuote: RouteQuote): Promise<ChainTransaction> {
     trade = { ...trade };
-    const { sell, buy } = assetsFor(trade);
+    const { sell, buy } = assetsFor(trade, assetList);
     const block = await header();
     await requireBalance(trade, block.number);
     await requireTradable(trade, block.number);

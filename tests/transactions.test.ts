@@ -20,7 +20,6 @@ process.env.REBALANCE_PRIVATE_KEY = key;
 // These modules capture DATA at import time, after the isolated environment exists.
 const { CONFIG_PATH, KEY_PATH, PENDING_PATH, LAST_TRANSACTION_PATH, validateConfig } = await import('../src/config.js');
 const { dispatch, reconcile } = await import('../src/transactions.js');
-const { ASSETS } = await import('../src/chain.js');
 type Chain = Parameters<typeof dispatch>[1];
 const blockHash = `0x${'ab'.repeat(32)}` as Hex;
 const fixtureHash = `0x${'cd'.repeat(32)}` as Hex;
@@ -29,7 +28,7 @@ const stopPath = join(data, 'stop.json');
 function configuration() {
   return validateConfig({
     version: 1, chainId: 4663, wallet, mode: 'private-key', rpcUrl: 'http://127.0.0.1:1',
-    targets: Object.fromEntries(Object.keys(ASSETS).map((id) => [id, id === 'USDG' ? 10_000 : 0])),
+    targets: { USDG: 10_000, TSLA: 0, AAPL: 0, NVDA: 0, AMZN: 0 },
     driftThresholdBps: 500, slippageBps: 50, deadlineSeconds: 120, pollSeconds: 30,
   });
 }

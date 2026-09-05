@@ -1,6 +1,6 @@
 # Robinhood mainnet and integration gates
 
-Checked **2026-09-04** using official documentation and Ledger source. No RPC probe, wallet, network transaction or liquidity measurement has been performed.
+Initial documentation review: **2026-09-04**. Subsequent public mainnet RPC checks and local wallet setup are recorded below and in the linked evidence. No funded network transaction has been performed.
 
 ## Decision
 
@@ -16,7 +16,7 @@ Use Robinhood's documented stock-token metadata, transfer behavior and price-fee
 
 The official [Uniswap v4 deployment registry](https://developers.uniswap.org/docs/protocols/v4/deployments) lists Robinhood mainnet. Verify exact contract identities and available pools instead of inferring addresses across chains.
 
-The live portfolio is USDG plus four canonical Robinhood stock tokens: TSLA, AAPL, NVDA and AMZN. All four stock/USDG Uniswap v3 routes passed bidirectional live quote checks; see [the RWA report](RWA_CHECK.md) and retained public evidence. Runtime uses DEX estimates of actual ERC20 units, checks advisory corporate-action pauses and keeps native ETH outside allocations for gas. WETH is excluded. A funded sender simulation and actual receipts are still required before claiming completed stock rebalancing. No mock assets or alternative-chain fallback is used.
+The current demo portfolio is USDG plus four canonical Robinhood stock tokens: AAPL, NVDA, MSFT and AMD. All four stock/USDG Uniswap v3 routes passed bidirectional live quote checks; see [the original RWA report](RWA_CHECK.md), [current demo report](DEMO_PORTFOLIO.md) and retained public evidence. Runtime uses DEX estimates of actual ERC20 units, checks advisory corporate-action pauses and keeps native ETH outside allocations for gas. WETH is excluded. A funded sender simulation and actual receipts are still required before claiming completed stock rebalancing. No mock assets or alternative-chain fallback is used.
 
 ## Local verification
 

@@ -2,7 +2,7 @@
 
 A local portfolio rebalancer controlled from **one Codex or Claude Code conversation**, with a view-only pie chart. Built from scratch during **ETHOnline 2026**.
 
-The five-asset portfolio is **USDG + Robinhood TSLA, AAPL, NVDA and AMZN tokens**, exclusively on **Robinhood mainnet (4663)**. Native ETH pays gas and stays outside the allocation.
+The current demo is **USDG 5%, with Apple (AAPL), Nvidia (NVDA), Microsoft (MSFT) and AMD at 23.75% each**, exclusively on **Robinhood mainnet (4663)**. The latest user decision prioritizes recognizable technology companies; [selection rationale and route evidence](docs/DEMO_PORTFOLIO.md) describe its limits. Native ETH pays gas and stays outside the allocation.
 
 Ask the agent to change a target. Integer arithmetic redistributes the other weights, and an explicit execution graph observes holdings, plans one corrective swap, signs, and checks its receipt. Once armed, the raw-key monitor runs with the agent closed and makes no LLM calls. There are no session keys, spending caps or budget counters.
 
@@ -27,17 +27,17 @@ npm run cli -- status
 Supply all five target percentages. This is a syntax example, **not a selected allocation**:
 
 ```sh
-npm run cli -- configure --targets USDG=20,TSLA=20,AAPL=20,NVDA=20,AMZN=20
-npm run cli -- targets set TSLA 30
+npm run cli -- configure --targets USDG=20,AAPL=20,NVDA=20,MSFT=20,AMD=20
+npm run cli -- targets set AAPL 30
 npm run cli -- check
 npm run cli -- chart --background
 npm run cli -- start --background
 npm run cli -- stop
 ```
 
-`check` reads/plans/quotes without signing. `start` arms automatic raw-key execution under the saved targets; no per-swap agent or human confirmation is required. Fund the selected Robinhood wallet with the actual portfolio tokens and native ETH for gas before a live run. Defaults are 5 percentage points of drift, 0.5% swap slippage, 120-second expiry and 30-second polling, all visible in local configuration. Partial target edits proportionally redistribute the remaining weights.
+`check` reads/plans/quotes without signing. `start` arms automatic raw-key execution under the saved targets; no per-swap agent or human confirmation is required. Fund the selected Robinhood wallet with the actual portfolio tokens and native ETH for gas before a live run. Defaults are 5 percentage points of drift, 0.5% swap slippage, 120-second expiry and 30-second polling, all visible in local configuration. Partial target edits proportionally redistribute the remaining weights. Select USDG and four stocks from the [verified manifest](src/assets.ts); only those five enter monitoring and valuation. Replacing symbols changes the tracked allocation and does not automatically liquidate tokens removed from it. Our demo wallet was empty when its selection changed.
 
-The chart is at [127.0.0.1:4663](http://127.0.0.1:4663). It contains no editing, wallet-connect or signing controls. `status`, `graph` and `events` are the agent's read interfaces. `stop` prevents new work; an already submitted transaction still settles.
+The UI is one pie chart with ticker/percentage labels, with no header, footer or dashboard sections. It shows current holdings when funded, otherwise explicitly labeled saved targets. Operation details stay in the agent conversation. The chart is at [127.0.0.1:4663](http://127.0.0.1:4663). It contains no editing, wallet-connect or signing controls. `status`, `graph` and `events` are the agent's read interfaces. `stop` prevents new work; an already submitted transaction still settles.
 
 ## Graph and notifications
 
@@ -47,7 +47,8 @@ The optional [notification channel](docs/NOTIFICATIONS.md) feeds retained events
 
 ## What the evidence establishes
 
-- [RWA route check](docs/RWA_CHECK.md): canonical assets, actual Uniswap pools, bidirectional quotes, metadata, raw public RPC evidence and remaining funded-sender checks.
+- [Current demo](docs/DEMO_PORTFOLIO.md): recognizable technology names, full Robinhood catalog snapshot and additional MSFT/AMD route checks.
+- [Original RWA route check](docs/RWA_CHECK.md): canonical assets, actual Uniswap pools, bidirectional quotes, metadata, raw public RPC evidence and remaining funded-sender checks.
 - [Implementation](src/chain.ts): direct Uniswap QuoterV2, exact token approvals and SwapRouter02 deadline multicalls. [Execution](src/transactions.ts) and [graph](src/graph.ts) contain dispatch/recovery behavior.
 - Values are **DEX estimates in USDG**, not independent USD share-price oracles. Actual token units are quoted without applying corporate-action multipliers twice. Advisory `oraclePaused()` blocks new activity during relevant corporate actions. DEX and underlying stock-market prices can differ.
 - Current chain verification is **RPC mode**, not a light client or fully trustless operation. Issuer, chain and RPC dependencies remain. Token compatibility does not establish user eligibility or direct ownership of shares; see the official access details linked in the RWA report.

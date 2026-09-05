@@ -20,7 +20,7 @@ const targets = { USDG: 2000, TSLA: 2000, AAPL: 2000, NVDA: 2000, AMZN: 2000 };
 const config = validateConfig({ version: 1, chainId: 4663, wallet, mode: 'ledger',
   rpcUrl: 'http://runtime-fixture.invalid', targets, driftThresholdBps: 500,
   slippageBps: 50, deadlineSeconds: 120, pollSeconds: 5 });
-const portfolio = evaluatePortfolio(Object.values(ASSETS).map(asset => ({ ...asset,
+const portfolio = evaluatePortfolio(Object.values(ASSETS).filter(asset => Object.hasOwn(targets, asset.id)).map(asset => ({ ...asset,
   balance: 10n ** BigInt(asset.decimals), priceUsdE8: 100_000_000n, targetBps: 2000 })));
 const observedAt = '2026-09-04T20:00:00.000Z';
 
@@ -122,6 +122,30 @@ test('status reflects current targets without an RPC refresh and discards anothe
   assert.equal(switched.portfolio, null);
   assert.equal(switched.updatedAt, null);
   assert.equal(switched.operation, null);
+});
+
+test('changing the selected stock set hides old holdings and proposals while pending recovery continues', async t => {
+  await saved({ proposal: { sellAssetId: 'TSLA', buyAssetId: 'USDG', amountIn: '1', reason: 'previous stock set' } });
+  const selected = { USDG: 500, AAPL: 2375, NVDA: 2375, RUN: 2375, MRNA: 2375 };
+  await atomicWriteJson(CONFIG_PATH, { ...config, targets: selected });
+  const current = await status();
+  assert.deepEqual(current.config?.targets, selected);
+  assert.equal(current.portfolio, null);
+  assert.equal(current.proposal, undefined);
+  assert.equal(current.updatedAt, null);
+  assert.equal(current.blockNumber, undefined);
+  assert.equal(current.valuationNote, undefined);
+  await atomicWriteJson(PENDING_PATH, { chainId: 4663, wallet, hash, nonce: 1,
+    kind: 'swap', createdAt: observedAt, status: 'broadcast' });
+  const requests = mockRpc(t);
+  const observed = await tick(false);
+  assert.equal(observed.operation?.status, 'pending');
+  assert.equal(observed.portfolio, null);
+  assert.equal(observed.proposal, undefined);
+  assert.equal(observed.updatedAt, null);
+  assert.deepEqual(observed.config?.targets, selected);
+  assert.deepEqual(requests, ['eth_chainId', 'eth_getTransactionReceipt']);
+  assert.deepEqual(await events(), []);
 });
 
 test('armed status requires saved arming, a live runner and no stop request', async t => {

@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { type Hex } from 'viem';
+import { ASSETS } from './assets.js';
 import { createChain, ROBINHOOD } from './chain.js';
 import { CONFIG_PATH, DATA, PENDING_PATH, createWallet, loadConfig, parseTargets, percentToBps, validateConfig, type Config } from './config.js';
 import { redistributeTargets } from './core.js';
@@ -17,11 +18,11 @@ import { validatePending } from './transactions.js';
 const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
   wallet create                        Create/reuse a local wallet; public address only
   status                               Read local graph/portfolio state
-  configure --targets USDG=20,TSLA=20,AAPL=20,NVDA=20,AMZN=20
+  configure --targets USDG=5,AAPL=23.75,NVDA=23.75,MSFT=23.75,AMD=23.75
                                        Set explicit percentages (example only)
     [--wallet 0x...] [--mode private-key|privy|ledger] [--rpc https://...]
     [--threshold 5] [--slippage 0.5] [--poll 30]
-  targets set TSLA 30                   Change one percentage; redistribute the rest
+  targets set AAPL 30                   Change one percentage; redistribute the rest
   targets replace <ASSET=percent,...>   Replace all five targets explicitly
   check                                Fresh read/plan/quote; never sign
   start [--background]                 Arm deterministic automatic rebalancing
@@ -31,7 +32,8 @@ const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
   graph                                Print the app graph edges
   events                               Read retained notification events
   events ack <id>                      Mark an event handled in the agent session
-Native ETH is gas-only; the portfolio is USDG + TSLA, AAPL, NVDA and AMZN tokens.
+Native ETH is gas-only; select USDG + four stocks from the verified manifest.
+Supported stocks: ${Object.keys(ASSETS).filter(id => id !== 'USDG').join(', ')}.
 Privy and Ledger execution are deferred. Never pass a private key as a CLI argument.
 `;
 
@@ -110,7 +112,7 @@ async function main() {
         let targets: Config['targets'];
         if (args[1] === 'set' && args[2] && args[3]) targets = redistributeTargets(config.targets, args[2], percentToBps(args[3]));
         else if (args[1] === 'replace' && args[2]) targets = parseTargets(args[2]);
-        else throw new Error('Use targets set TSLA 30 or targets replace with all five percentages');
+        else throw new Error('Use targets set AAPL 30 or targets replace with all five percentages');
         await atomicWriteJson(CONFIG_PATH, validateConfig({ ...config, targets }));
         print({ targets, effective: 'next graph evaluation; an already-broadcast transaction still settles' });
       }); return;

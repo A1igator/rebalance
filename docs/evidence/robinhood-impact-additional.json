@@ -1,0 +1,958 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Read-only direct USDG v3 route check for ABCL and IBRX, not an ethical rating or portfolio change. No wallet keys, signing or broadcasts.",
+  "metadataSource": "https://api.robinhood.com/rhj/assets; snapshot: docs/evidence/robinhood-assets-2026-09-04.csv",
+  "candidates": [
+    {
+      "symbol": "ABCL",
+      "name": "Abcellera Biologics \u2022 Robinhood Token",
+      "chain_id": "4663",
+      "contract_address": "0x3139D77Ace0cbAA5bDfD38bD1F1911a794AF0B0e",
+      "status": "ASSET_STATUS_ACTIVE"
+    },
+    {
+      "symbol": "IBRX",
+      "name": "ImmunityBio, \u2022 Robinhood Token",
+      "chain_id": "4663",
+      "contract_address": "0x7c148F74ac7445D1F28366b7FcDC6792a9Fcd0Cf",
+      "status": "ASSET_STATUS_ACTIVE"
+    }
+  ],
+  "endpoint": "https://rpc.mainnet.chain.robinhood.com",
+  "contracts": {
+    "USDG": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+    "UniswapV3Factory": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+    "QuoterV2": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7"
+  },
+  "observations": [
+    {
+      "label": "eth_chainId",
+      "timestamp": "2026-09-05T01:50:14.646256+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_chainId",
+        "params": []
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": "0x1237"
+      }
+    },
+    {
+      "label": "eth_blockNumber",
+      "timestamp": "2026-09-05T01:50:14.646541+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "eth_blockNumber",
+        "params": []
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "result": "0x3434882"
+      }
+    },
+    {
+      "label": "snapshotBlock",
+      "timestamp": "2026-09-05T01:50:14.947113+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 10,
+        "method": "eth_getBlockByNumber",
+        "params": [
+          "0x3434882",
+          false
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 10,
+        "result": {
+          "baseFeePerGas": "0x180aa1f0",
+          "difficulty": "0x1",
+          "extraData": "0x9d7a0bea10c7419a577478bbdcde6caca7891ad7355505a16c3b69fd8b1f4da1",
+          "gasLimit": "0x4000000000000",
+          "gasUsed": "0x377cd1",
+          "hash": "0xd49f54b72361c5a1be02d06610417f9a0b5b7c365cf108ee8b6752f3185152b8",
+          "l1BlockNumber": "0x18b52ec",
+          "logsBloom": "0x00000080004000000022000650280000000000001022081002020008040028000000000100001100000001086100020100006000842020200000812180a0020001091000241040280000001820200080000008101000002260020044c04000800000014002440000028020000180080080000010000040000004027404082200000000000000004040010000200002100808001001202120420000008004040202241220080020800000102008a00000940049c000a010100400012000008002c0210502020080000888000004000002008480022022080108000101082024000090000080000808044000004128024002840000011008002020004002044000",
+          "miner": "0xa4b000000000000000000073657175656e636572",
+          "mixHash": "0x00000000000007b200000000018b52ec000000000000003d0000000000000000",
+          "nonce": "0x0000000000036e65",
+          "number": "0x3434882",
+          "parentHash": "0x14be0730e4cc92d6cd6b81c8fe4a54b8de1f15a3a83bea2264980ed7bb0410ce",
+          "receiptsRoot": "0xa99549d8d6e979d5c1cec4bf9bd4d9f4f6f4cf6c6c03d114ef64f1593545459f",
+          "sendCount": "0x7b2",
+          "sendRoot": "0x9d7a0bea10c7419a577478bbdcde6caca7891ad7355505a16c3b69fd8b1f4da1",
+          "sha3Uncles": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+          "size": "0x3d3e",
+          "stateRoot": "0x256bcdfef7aee9d99bdb2bf4e90b528a32d4a7e2f57d03b537a9e5d9918633b6",
+          "timestamp": "0x6a9b7556",
+          "transactions": [
+            "0x75175661cdaf16ab6766097461c68ad45b090fe1ef368980c98080ee866fe883",
+            "0x68c83a7df53655ff846ed9d48080093171ad178710353efd4a6b7a14e3cd7212",
+            "0x3ae84e29a807fced9748048ae0e5ed032f30fe7837752b13a8277ac0b0219554",
+            "0x88a5574ca1538e45296475fa12961dc954208532f41a0c8965d5cb1faea51c10",
+            "0x928a964c4ec106778322543e68a07fc66c763229a5c2af4daaa2fad5dd39742c",
+            "0x32fac9423cf4074a1b1cb3dc97029e493547d389c0ea036460bf47a27a1f3059",
+            "0x985aa570582d4af52a81d89366b1baca0147dc9d0ad6bbbf5d547383208bb1a0",
+            "0x01a301e1593708e40cb94d923c328420a7795d4ef3c54ae66c7802559c726cf4",
+            "0x05ee95b60244b9cd36eccc46d0a57fc3e54c0a80c3bb0ac7d5fec91d3ba6c16c",
+            "0x664c155bcc8923da6fbd9881ae5f44e50ea4e37543feb953941612fe68d814e9",
+            "0xea3621cd25601e69b41f17c15701922fe18cd1a3e16c1d4fa829584f0947ab4d",
+            "0xa041494fad634f40b7b6614b5ff66a18a730ca45b0410568e7d65ddbf8ddc393",
+            "0x08a2640f177dc8c0d830772c9f6f63f589865bebf4b8fc2413b7329487bb427d",
+            "0xe526e87775e3f3ca4d82dffbe4240b8879803c4b480247efc196202dfe565498",
+            "0x2aad55fa209f1bea711e46253b129b4ba96f65ee1d6139a5e3c5f707211879ff",
+            "0x358f4624e624a65ef7d6c59373846b2cd740fb33da281328804d9646da234166",
+            "0x1ca42c64f59ce3b0ff009a51d9b628063479b88065559c4c00df677398b35fa5",
+            "0x88f7a46cbbadf1acde6d1a08b7f865e76c09cb4b0de29c3676783170905f63b0",
+            "0x3e913e09140f7161132ce8599ad9cc139fb3271bd6c6a3b5351023f251173554",
+            "0x0ac2083fb63dc2cf395eb2572ecf69b916bcb182797ee5f01355a0de05f604f0",
+            "0xc05ee1403984f60c0006e999876937865ee839037e232b9fe60a789fa246b58a",
+            "0xee7098e44833048eed4ee13e3772c27862c3b34ff4d5e48f758871af0ee8763e",
+            "0x00745b388f23038c199258a4315a7387c3f9298d979f27c4ed07fbbaf884c8a3",
+            "0xde1910d7a4e03cf1c672e22d54664c0bc2fb7d4d0af40acf5da8b5757d633643",
+            "0x31e48ea7d881865f111a45fe92f9e698d4895d248b24fae91245cab3bd2611a9",
+            "0x20ee35805e0cba23616aee2c76398ec0250660b6df179c11c718f34a9d133931",
+            "0x4bfada9f4b6f0cf34c8822f7a13ee63a1e775a39c16c47fe705a9e02eec6e1fb",
+            "0x6d0b011190da38cb6c7f9c79d412262935cc2795e54dd54596f8b5e2088d9624",
+            "0x9e991544780da37f4a9558da1f9a5e7b74076d63d5bbd4d912c07048e720213e"
+          ],
+          "transactionsRoot": "0xb3e855a64da1decce760a889273ef52d6097ffa5c262da7f8e6d04ec798a72b5",
+          "uncles": []
+        }
+      }
+    },
+    {
+      "label": "ABCL.code",
+      "timestamp": "2026-09-05T01:50:14.947310+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 11,
+        "method": "eth_getCode",
+        "params": [
+          "0x3139D77Ace0cbAA5bDfD38bD1F1911a794AF0B0e",
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 11,
+        "result": "0x6080604052600a600c565b005b60186014601a565b609d565b565b5f7f000000000000000000000000e10b6f6b275de231345c20d14ab812db62151b006001600160a01b0316635c60da1b6040518163ffffffff1660e01b8152600401602060405180830381865afa1580156076573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906098919060ba565b905090565b365f5f375f5f365f845af43d5f5f3e80801560b6573d5ff35b3d5ffd5b5f6020828403121560c9575f5ffd5b81516001600160a01b038116811460de575f5ffd5b939250505056fea2646970667358221220e296a217a10765339b402e91ead95bcbcf74e678d7c756705f097d88cc2554b064736f6c63430008210033"
+      }
+    },
+    {
+      "label": "ABCL.symbol()",
+      "timestamp": "2026-09-05T01:50:14.947415+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 12,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x3139D77Ace0cbAA5bDfD38bD1F1911a794AF0B0e",
+            "data": "0x95d89b41"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 12,
+        "result": "0x000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000044142434c00000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "ABCL.decimals()",
+      "timestamp": "2026-09-05T01:50:15.058614+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 13,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x3139D77Ace0cbAA5bDfD38bD1F1911a794AF0B0e",
+            "data": "0x313ce567"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 13,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000012"
+      }
+    },
+    {
+      "label": "ABCL.oraclePaused()",
+      "timestamp": "2026-09-05T01:50:15.069909+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 14,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x3139D77Ace0cbAA5bDfD38bD1F1911a794AF0B0e",
+            "data": "0x7706ba52"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 14,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "ABCL.uiMultiplier()",
+      "timestamp": "2026-09-05T01:50:15.072529+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 15,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x3139D77Ace0cbAA5bDfD38bD1F1911a794AF0B0e",
+            "data": "0xa60bf13d"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 15,
+        "result": "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+      }
+    },
+    {
+      "label": "pool.ABCL.100",
+      "timestamp": "2026-09-05T01:50:15.175743+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 16,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee820000000000000000000000003139d77ace0cbaa5bdfd38bd1f1911a794af0b0e0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000000064"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 16,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "pool.ABCL.500",
+      "timestamp": "2026-09-05T01:50:15.193658+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 17,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee820000000000000000000000003139d77ace0cbaa5bdfd38bd1f1911a794af0b0e0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d16800000000000000000000000000000000000000000000000000000000000001f4"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 17,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "pool.ABCL.3000",
+      "timestamp": "2026-09-05T01:50:15.202263+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 18,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee820000000000000000000000003139d77ace0cbaa5bdfd38bd1f1911a794af0b0e0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000000bb8"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 18,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "pool.ABCL.10000",
+      "timestamp": "2026-09-05T01:50:15.348053+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 19,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee820000000000000000000000003139d77ace0cbaa5bdfd38bd1f1911a794af0b0e0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000002710"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 19,
+        "result": "0x0000000000000000000000006ed779291769df8c1a3556f86f859192622505ff"
+      }
+    },
+    {
+      "label": "IBRX.code",
+      "timestamp": "2026-09-05T01:50:15.348412+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 20,
+        "method": "eth_getCode",
+        "params": [
+          "0x7c148F74ac7445D1F28366b7FcDC6792a9Fcd0Cf",
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 20,
+        "result": "0x6080604052600a600c565b005b60186014601a565b609d565b565b5f7f000000000000000000000000e10b6f6b275de231345c20d14ab812db62151b006001600160a01b0316635c60da1b6040518163ffffffff1660e01b8152600401602060405180830381865afa1580156076573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906098919060ba565b905090565b365f5f375f5f365f845af43d5f5f3e80801560b6573d5ff35b3d5ffd5b5f6020828403121560c9575f5ffd5b81516001600160a01b038116811460de575f5ffd5b939250505056fea2646970667358221220e296a217a10765339b402e91ead95bcbcf74e678d7c756705f097d88cc2554b064736f6c63430008210033"
+      }
+    },
+    {
+      "label": "IBRX.symbol()",
+      "timestamp": "2026-09-05T01:50:15.349726+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 21,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x7c148F74ac7445D1F28366b7FcDC6792a9Fcd0Cf",
+            "data": "0x95d89b41"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 21,
+        "result": "0x000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000044942525800000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "IBRX.decimals()",
+      "timestamp": "2026-09-05T01:50:15.460314+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 22,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x7c148F74ac7445D1F28366b7FcDC6792a9Fcd0Cf",
+            "data": "0x313ce567"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 22,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000012"
+      }
+    },
+    {
+      "label": "IBRX.oraclePaused()",
+      "timestamp": "2026-09-05T01:50:15.468174+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 23,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x7c148F74ac7445D1F28366b7FcDC6792a9Fcd0Cf",
+            "data": "0x7706ba52"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 23,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "IBRX.uiMultiplier()",
+      "timestamp": "2026-09-05T01:50:15.475066+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 24,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x7c148F74ac7445D1F28366b7FcDC6792a9Fcd0Cf",
+            "data": "0xa60bf13d"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 24,
+        "result": "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+      }
+    },
+    {
+      "label": "pool.IBRX.100",
+      "timestamp": "2026-09-05T01:50:15.577591+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 25,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee820000000000000000000000007c148f74ac7445d1f28366b7fcdc6792a9fcd0cf0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000000064"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 25,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "pool.IBRX.500",
+      "timestamp": "2026-09-05T01:50:15.596349+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 26,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee820000000000000000000000007c148f74ac7445d1f28366b7fcdc6792a9fcd0cf0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d16800000000000000000000000000000000000000000000000000000000000001f4"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 26,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "pool.IBRX.3000",
+      "timestamp": "2026-09-05T01:50:15.597549+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 27,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee820000000000000000000000007c148f74ac7445d1f28366b7fcdc6792a9fcd0cf0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000000bb8"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 27,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "pool.IBRX.10000",
+      "timestamp": "2026-09-05T01:50:15.690159+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 28,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee820000000000000000000000007c148f74ac7445d1f28366b7fcdc6792a9fcd0cf0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000002710"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 28,
+        "result": "0x00000000000000000000000086509c1cc350a928fa6472d72a6915c31e8340f0"
+      }
+    },
+    {
+      "label": "pool.ABCL.10000.token0()",
+      "timestamp": "2026-09-05T01:50:15.988007+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 100,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x6ed779291769df8c1a3556f86f859192622505ff",
+            "data": "0x0dfe1681"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 100,
+        "result": "0x0000000000000000000000003139d77ace0cbaa5bdfd38bd1f1911a794af0b0e"
+      }
+    },
+    {
+      "label": "pool.ABCL.10000.token1()",
+      "timestamp": "2026-09-05T01:50:15.988225+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 101,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x6ed779291769df8c1a3556f86f859192622505ff",
+            "data": "0xd21220a7"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 101,
+        "result": "0x0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168"
+      }
+    },
+    {
+      "label": "pool.ABCL.10000.factory()",
+      "timestamp": "2026-09-05T01:50:15.988329+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 102,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x6ed779291769df8c1a3556f86f859192622505ff",
+            "data": "0xc45a0155"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 102,
+        "result": "0x0000000000000000000000001f7d7550b1b028f7571e69a784071f0205fd2efa"
+      }
+    },
+    {
+      "label": "pool.ABCL.10000.fee()",
+      "timestamp": "2026-09-05T01:50:16.289859+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 103,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x6ed779291769df8c1a3556f86f859192622505ff",
+            "data": "0xddca3f43"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 103,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000002710"
+      }
+    },
+    {
+      "label": "pool.ABCL.10000.liquidity()",
+      "timestamp": "2026-09-05T01:50:16.320905+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 104,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x6ed779291769df8c1a3556f86f859192622505ff",
+            "data": "0x1a686502"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 104,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "quote.ABCL.10000.ABCL.USDG.10000000000000000",
+      "timestamp": "2026-09-05T01:50:16.396991+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 105,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a0000000000000000000000003139d77ace0cbaa5bdfd38bd1f1911a794af0b0e0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168000000000000000000000000000000000000000000000000002386f26fc1000000000000000000000000000000000000000000000000000000000000000027100000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 105,
+        "error": {
+          "code": 3,
+          "message": "execution reverted: Unexpected error",
+          "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+        }
+      }
+    },
+    {
+      "label": "quote.ABCL.10000.USDG.ABCL.10000000",
+      "timestamp": "2026-09-05T01:50:16.461747+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 106,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000003139d77ace0cbaa5bdfd38bd1f1911a794af0b0e000000000000000000000000000000000000000000000000000000000098968000000000000000000000000000000000000000000000000000000000000027100000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 106,
+        "error": {
+          "code": 3,
+          "message": "execution reverted: Unexpected error",
+          "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+        }
+      }
+    },
+    {
+      "label": "pool.IBRX.10000.token0()",
+      "timestamp": "2026-09-05T01:50:16.511385+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 107,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x86509c1cc350a928fa6472d72a6915c31e8340f0",
+            "data": "0x0dfe1681"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 107,
+        "result": "0x0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168"
+      }
+    },
+    {
+      "label": "pool.IBRX.10000.token1()",
+      "timestamp": "2026-09-05T01:50:16.518407+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 108,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x86509c1cc350a928fa6472d72a6915c31e8340f0",
+            "data": "0xd21220a7"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 108,
+        "result": "0x0000000000000000000000007c148f74ac7445d1f28366b7fcdc6792a9fcd0cf"
+      }
+    },
+    {
+      "label": "pool.IBRX.10000.factory()",
+      "timestamp": "2026-09-05T01:50:16.589096+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 109,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x86509c1cc350a928fa6472d72a6915c31e8340f0",
+            "data": "0xc45a0155"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 109,
+        "result": "0x0000000000000000000000001f7d7550b1b028f7571e69a784071f0205fd2efa"
+      }
+    },
+    {
+      "label": "pool.IBRX.10000.fee()",
+      "timestamp": "2026-09-05T01:50:16.634934+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 110,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x86509c1cc350a928fa6472d72a6915c31e8340f0",
+            "data": "0xddca3f43"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 110,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000002710"
+      }
+    },
+    {
+      "label": "pool.IBRX.10000.liquidity()",
+      "timestamp": "2026-09-05T01:50:16.644113+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 111,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x86509c1cc350a928fa6472d72a6915c31e8340f0",
+            "data": "0x1a686502"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 111,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "quote.IBRX.10000.IBRX.USDG.10000000000000000",
+      "timestamp": "2026-09-05T01:50:16.704163+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 112,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a0000000000000000000000007c148f74ac7445d1f28366b7fcdc6792a9fcd0cf0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168000000000000000000000000000000000000000000000000002386f26fc1000000000000000000000000000000000000000000000000000000000000000027100000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 112,
+        "error": {
+          "code": 3,
+          "message": "execution reverted: Unexpected error",
+          "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+        }
+      }
+    },
+    {
+      "label": "quote.IBRX.10000.USDG.IBRX.10000000",
+      "timestamp": "2026-09-05T01:50:16.750329+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 113,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000007c148f74ac7445d1f28366b7fcdc6792a9fcd0cf000000000000000000000000000000000000000000000000000000000098968000000000000000000000000000000000000000000000000000000000000027100000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x3434882"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 113,
+        "error": {
+          "code": 3,
+          "message": "execution reverted: Unexpected error",
+          "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+        }
+      }
+    }
+  ],
+  "snapshotBlock": "0x3434882",
+  "discoveredPools": [
+    {
+      "symbol": "ABCL",
+      "fee": 10000,
+      "address": "0x6ed779291769df8c1a3556f86f859192622505ff"
+    },
+    {
+      "symbol": "IBRX",
+      "fee": 10000,
+      "address": "0x86509c1cc350a928fa6472d72a6915c31e8340f0"
+    }
+  ],
+  "summary": {
+    "chainId": 4663,
+    "blockNumber": 54741122,
+    "blockHash": "0xd49f54b72361c5a1be02d06610417f9a0b5b7c365cf108ee8b6752f3185152b8",
+    "blockTimestampUtc": "2026-09-05T01:50:14+00:00",
+    "results": [
+      {
+        "symbol": "ABCL",
+        "token": "0x3139D77Ace0cbAA5bDfD38bD1F1911a794AF0B0e",
+        "decimals": 18,
+        "oraclePaused": false,
+        "uiMultiplier": "1000000000000000000",
+        "status": "no-successful-direct-v3-sample-quote",
+        "pools": [
+          {
+            "symbol": "ABCL",
+            "fee": 10000,
+            "address": "0x6ed779291769df8c1a3556f86f859192622505ff",
+            "activeLiquidity": "0",
+            "quotes": [
+              {
+                "tokenIn": "ABCL",
+                "tokenOut": "USDG",
+                "amountInRaw": "10000000000000000",
+                "amountOutRaw": null,
+                "error": {
+                  "code": 3,
+                  "message": "execution reverted: Unexpected error",
+                  "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+                }
+              },
+              {
+                "tokenIn": "USDG",
+                "tokenOut": "ABCL",
+                "amountInRaw": "10000000",
+                "amountOutRaw": null,
+                "error": {
+                  "code": 3,
+                  "message": "execution reverted: Unexpected error",
+                  "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+                }
+              }
+            ]
+          }
+        ],
+        "bestSampleQuotes": [
+          null,
+          null
+        ]
+      },
+      {
+        "symbol": "IBRX",
+        "token": "0x7c148F74ac7445D1F28366b7FcDC6792a9Fcd0Cf",
+        "decimals": 18,
+        "oraclePaused": false,
+        "uiMultiplier": "1000000000000000000",
+        "status": "no-successful-direct-v3-sample-quote",
+        "pools": [
+          {
+            "symbol": "IBRX",
+            "fee": 10000,
+            "address": "0x86509c1cc350a928fa6472d72a6915c31e8340f0",
+            "activeLiquidity": "0",
+            "quotes": [
+              {
+                "tokenIn": "IBRX",
+                "tokenOut": "USDG",
+                "amountInRaw": "10000000000000000",
+                "amountOutRaw": null,
+                "error": {
+                  "code": 3,
+                  "message": "execution reverted: Unexpected error",
+                  "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+                }
+              },
+              {
+                "tokenIn": "USDG",
+                "tokenOut": "IBRX",
+                "amountInRaw": "10000000",
+                "amountOutRaw": null,
+                "error": {
+                  "code": 3,
+                  "message": "execution reverted: Unexpected error",
+                  "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+                }
+              }
+            ]
+          }
+        ],
+        "bestSampleQuotes": [
+          null,
+          null
+        ]
+      }
+    ],
+    "limits": "Direct Uniswap v3 fee tiers 100/500/3000/10000 only. Sample0.01stock and10USDG eth_call, no funded sender simulation or receipt. No portfolio changes, ethical scoring, v4, multihop or RFQ checks."
+  }
+}

@@ -1,0 +1,1711 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Public read-only MSFT/AMD direct USDG v3 route verification; no portfolio edits, wallet access, signing or broadcast.",
+  "metadataSource": "https://api.robinhood.com/rhj/assets; snapshot: docs/evidence/robinhood-assets-2026-09-04.csv",
+  "candidates": [
+    {
+      "symbol": "AMD",
+      "name": "AMD \u2022 Robinhood Token",
+      "chain_id": "4663",
+      "contract_address": "0x86923f96303D656E4aa86D9d42D1e57ad2023fdC",
+      "status": "ASSET_STATUS_ACTIVE"
+    },
+    {
+      "symbol": "MSFT",
+      "name": "Microsoft \u2022 Robinhood Token",
+      "chain_id": "4663",
+      "contract_address": "0xe93237C50D904957Cf27E7B1133b510C669c2e74",
+      "status": "ASSET_STATUS_ACTIVE"
+    }
+  ],
+  "endpoint": "https://rpc.mainnet.chain.robinhood.com",
+  "contracts": {
+    "USDG": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+    "UniswapV3Factory": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+    "QuoterV2": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7"
+  },
+  "observations": [
+    {
+      "label": "eth_chainId",
+      "timestamp": "2026-09-05T02:03:46.473987+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_chainId",
+        "params": []
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": "0x1237"
+      }
+    },
+    {
+      "label": "eth_blockNumber",
+      "timestamp": "2026-09-05T02:03:46.474669+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "eth_blockNumber",
+        "params": []
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "result": "0x34367ef"
+      }
+    },
+    {
+      "label": "snapshotBlock",
+      "timestamp": "2026-09-05T02:03:46.840963+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 10,
+        "method": "eth_getBlockByNumber",
+        "params": [
+          "0x34367ef",
+          false
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 10,
+        "result": {
+          "baseFeePerGas": "0x18963080",
+          "difficulty": "0x1",
+          "extraData": "0x9d7a0bea10c7419a577478bbdcde6caca7891ad7355505a16c3b69fd8b1f4da1",
+          "gasLimit": "0x4000000000000",
+          "gasUsed": "0x32482a",
+          "hash": "0xbc1b1d5d86c1d5d6f23ee7e44d445bf029096bda8e5ff67f24ffca54be46df5d",
+          "l1BlockNumber": "0x18b5330",
+          "logsBloom": "0x1100008005000000020010020008100004110000100008000020000020000081100800000040000100200001000242000e0040400400210000820300882002000404000000404208004000080c281008005024000000002050002000002d100002000008020808401000008049000840000040008000400010088154040a4020102020481800000001000000000200000008020001100020020060000000104002010002c001001010400028000008a00800c0800000900e004002400000000008c0050a00100042000100040020100000c00400042100010844008040102800001000000000004402440000010001408004a000910000000810a0000e040000",
+          "miner": "0xa4b000000000000000000073657175656e636572",
+          "mixHash": "0x00000000000007b200000000018b5330000000000000003d0000000000000000",
+          "nonce": "0x0000000000036e9c",
+          "number": "0x34367ef",
+          "parentHash": "0xe0eb375593bf2604c5c674a78950af5339cdf6a0404417e38fd717e2ab93bfd7",
+          "receiptsRoot": "0x3c0b6e9489c329fe3f8b4acfe1889cd72f6523853177ca3f66a7cd79ff232bdd",
+          "sendCount": "0x7b2",
+          "sendRoot": "0x9d7a0bea10c7419a577478bbdcde6caca7891ad7355505a16c3b69fd8b1f4da1",
+          "sha3Uncles": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+          "size": "0x7f6c",
+          "stateRoot": "0x0b5a45ca3adb011d34e5f4f1feb8216f7d38291554a44c5a22b1ebaad1cf1880",
+          "timestamp": "0x6a9b7881",
+          "transactions": [
+            "0xf79d3854334742185b21ece93ac8fdbf40376299d9db653fc2cc7e7c27661484",
+            "0x006204b711365f238f323b0e755012c7833bca814bc5734fc40b34983eb1aa5d",
+            "0xb1d28384b7161c9213dea3fc0740e3fa3cda2e7d0ee64e86c26092d07eb703fc",
+            "0xdd14788b1bd47b15c79dd59748d73c9d50c53946b21e7e8808b5c49389c44795",
+            "0xe9f67757ee42d3fa6fbcc66358c81aea207c32c6e40ed70e765b49150ba253da",
+            "0x1b3453e6a396ac9cb978785d1affc54ed65120d386a2677f34fd515e191980f0",
+            "0xb1ceb48d0c3beac69437acbbaf75a941698b6c267d1bcff189fe5326fa7a3fe5",
+            "0xfb34e876eca6d652d669fba2062e7235d96d38152f52332bba0224de6bd62bcd",
+            "0x3ca9d881750c5bcb210c508e97007d0d59e62dda801e243f3231bc0f83c8ba14",
+            "0xe6afbb2ab2d61518c3c4f5c22bdaa234d37f9b7f8e7cfbed2546d9dfdc428f7d"
+          ],
+          "transactionsRoot": "0xc666482338c79bab7ca47825e3990b36d3cb448fdfb9bbc594d61a2c61b73228",
+          "uncles": []
+        }
+      }
+    },
+    {
+      "label": "AMD.code",
+      "timestamp": "2026-09-05T02:03:46.841178+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 11,
+        "method": "eth_getCode",
+        "params": [
+          "0x86923f96303D656E4aa86D9d42D1e57ad2023fdC",
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 11,
+        "result": "0x6080604052600a600c565b005b60186014601a565b609d565b565b5f7f000000000000000000000000e10b6f6b275de231345c20d14ab812db62151b006001600160a01b0316635c60da1b6040518163ffffffff1660e01b8152600401602060405180830381865afa1580156076573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906098919060ba565b905090565b365f5f375f5f365f845af43d5f5f3e80801560b6573d5ff35b3d5ffd5b5f6020828403121560c9575f5ffd5b81516001600160a01b038116811460de575f5ffd5b939250505056fea2646970667358221220e296a217a10765339b402e91ead95bcbcf74e678d7c756705f097d88cc2554b064736f6c63430008210033"
+      }
+    },
+    {
+      "label": "AMD.symbol()",
+      "timestamp": "2026-09-05T02:03:46.841295+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 12,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x86923f96303D656E4aa86D9d42D1e57ad2023fdC",
+            "data": "0x95d89b41"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 12,
+        "result": "0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000003414d440000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "AMD.decimals()",
+      "timestamp": "2026-09-05T02:03:46.965800+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 13,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x86923f96303D656E4aa86D9d42D1e57ad2023fdC",
+            "data": "0x313ce567"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 13,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000012"
+      }
+    },
+    {
+      "label": "AMD.oraclePaused()",
+      "timestamp": "2026-09-05T02:03:46.965899+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 14,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x86923f96303D656E4aa86D9d42D1e57ad2023fdC",
+            "data": "0x7706ba52"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 14,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "AMD.uiMultiplier()",
+      "timestamp": "2026-09-05T02:03:47.031954+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 15,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x86923f96303D656E4aa86D9d42D1e57ad2023fdC",
+            "data": "0xa60bf13d"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 15,
+        "result": "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+      }
+    },
+    {
+      "label": "pool.AMD.100",
+      "timestamp": "2026-09-05T02:03:47.088875+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 16,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee8200000000000000000000000086923f96303d656e4aa86d9d42d1e57ad2023fdc0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000000064"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 16,
+        "result": "0x0000000000000000000000004ee16fe614f3a04f1510edf1932a41cbd5c4af9c"
+      }
+    },
+    {
+      "label": "pool.AMD.500",
+      "timestamp": "2026-09-05T02:03:47.097498+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 17,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee8200000000000000000000000086923f96303d656e4aa86d9d42d1e57ad2023fdc0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d16800000000000000000000000000000000000000000000000000000000000001f4"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 17,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "pool.AMD.3000",
+      "timestamp": "2026-09-05T02:03:47.152731+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 18,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee8200000000000000000000000086923f96303d656e4aa86d9d42d1e57ad2023fdc0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000000bb8"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 18,
+        "result": "0x00000000000000000000000048d284a2a4d3dc1b3da08231fe44317e7e7aa51f"
+      }
+    },
+    {
+      "label": "pool.AMD.10000",
+      "timestamp": "2026-09-05T02:03:47.214954+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 19,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee8200000000000000000000000086923f96303d656e4aa86d9d42d1e57ad2023fdc0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000002710"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 19,
+        "result": "0x000000000000000000000000d6af1dcb75cdae4f2efc403a58ef023a51edc686"
+      }
+    },
+    {
+      "label": "MSFT.code",
+      "timestamp": "2026-09-05T02:03:47.229710+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 20,
+        "method": "eth_getCode",
+        "params": [
+          "0xe93237C50D904957Cf27E7B1133b510C669c2e74",
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 20,
+        "result": "0x6080604052600a600c565b005b60186014601a565b609d565b565b5f7f000000000000000000000000e10b6f6b275de231345c20d14ab812db62151b006001600160a01b0316635c60da1b6040518163ffffffff1660e01b8152600401602060405180830381865afa1580156076573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906098919060ba565b905090565b365f5f375f5f365f845af43d5f5f3e80801560b6573d5ff35b3d5ffd5b5f6020828403121560c9575f5ffd5b81516001600160a01b038116811460de575f5ffd5b939250505056fea2646970667358221220e296a217a10765339b402e91ead95bcbcf74e678d7c756705f097d88cc2554b064736f6c63430008210033"
+      }
+    },
+    {
+      "label": "MSFT.symbol()",
+      "timestamp": "2026-09-05T02:03:47.253452+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 21,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xe93237C50D904957Cf27E7B1133b510C669c2e74",
+            "data": "0x95d89b41"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 21,
+        "result": "0x000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000044d53465400000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "MSFT.decimals()",
+      "timestamp": "2026-09-05T02:03:47.332347+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 22,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xe93237C50D904957Cf27E7B1133b510C669c2e74",
+            "data": "0x313ce567"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 22,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000012"
+      }
+    },
+    {
+      "label": "MSFT.oraclePaused()",
+      "timestamp": "2026-09-05T02:03:47.336406+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 23,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xe93237C50D904957Cf27E7B1133b510C669c2e74",
+            "data": "0x7706ba52"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 23,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "MSFT.uiMultiplier()",
+      "timestamp": "2026-09-05T02:03:47.378179+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 24,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xe93237C50D904957Cf27E7B1133b510C669c2e74",
+            "data": "0xa60bf13d"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 24,
+        "result": "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+      }
+    },
+    {
+      "label": "pool.MSFT.100",
+      "timestamp": "2026-09-05T02:03:47.489945+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 25,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee82000000000000000000000000e93237c50d904957cf27e7b1133b510c669c2e740000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000000064"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 25,
+        "result": "0x0000000000000000000000003d69ea64810300877b938e9ad9916c25912c08f5"
+      }
+    },
+    {
+      "label": "pool.MSFT.500",
+      "timestamp": "2026-09-05T02:03:47.491856+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 26,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee82000000000000000000000000e93237c50d904957cf27e7b1133b510c669c2e740000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d16800000000000000000000000000000000000000000000000000000000000001f4"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 26,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "pool.MSFT.3000",
+      "timestamp": "2026-09-05T02:03:47.554070+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 27,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee82000000000000000000000000e93237c50d904957cf27e7b1133b510c669c2e740000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000000bb8"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 27,
+        "result": "0x000000000000000000000000eb60bcd1d920ad6e102690ccfc6fb488899e1510"
+      }
+    },
+    {
+      "label": "pool.MSFT.10000",
+      "timestamp": "2026-09-05T02:03:47.600984+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 28,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee82000000000000000000000000e93237c50d904957cf27e7b1133b510c669c2e740000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000002710"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 28,
+        "result": "0x0000000000000000000000002ea9292113514ed84fd16aa4ad1e416537e39c8c"
+      }
+    },
+    {
+      "label": "pool.AMD.100.token0()",
+      "timestamp": "2026-09-05T02:03:48.054574+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 100,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x4ee16fe614f3a04f1510edf1932a41cbd5c4af9c",
+            "data": "0x0dfe1681"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 100,
+        "result": "0x0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168"
+      }
+    },
+    {
+      "label": "pool.AMD.100.token1()",
+      "timestamp": "2026-09-05T02:03:48.054781+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 101,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x4ee16fe614f3a04f1510edf1932a41cbd5c4af9c",
+            "data": "0xd21220a7"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 101,
+        "result": "0x00000000000000000000000086923f96303d656e4aa86d9d42d1e57ad2023fdc"
+      }
+    },
+    {
+      "label": "pool.AMD.100.factory()",
+      "timestamp": "2026-09-05T02:03:48.054911+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 102,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x4ee16fe614f3a04f1510edf1932a41cbd5c4af9c",
+            "data": "0xc45a0155"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 102,
+        "result": "0x0000000000000000000000001f7d7550b1b028f7571e69a784071f0205fd2efa"
+      }
+    },
+    {
+      "label": "pool.AMD.100.fee()",
+      "timestamp": "2026-09-05T02:03:48.171775+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 103,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x4ee16fe614f3a04f1510edf1932a41cbd5c4af9c",
+            "data": "0xddca3f43"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 103,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000064"
+      }
+    },
+    {
+      "label": "pool.AMD.100.liquidity()",
+      "timestamp": "2026-09-05T02:03:48.179112+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 104,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x4ee16fe614f3a04f1510edf1932a41cbd5c4af9c",
+            "data": "0x1a686502"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 104,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "quote.AMD.100.AMD.USDG.10000000000000000",
+      "timestamp": "2026-09-05T02:03:48.181743+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 105,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a00000000000000000000000086923f96303d656e4aa86d9d42d1e57ad2023fdc0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168000000000000000000000000000000000000000000000000002386f26fc1000000000000000000000000000000000000000000000000000000000000000000640000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 105,
+        "error": {
+          "code": 3,
+          "message": "execution reverted: Unexpected error",
+          "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+        }
+      }
+    },
+    {
+      "label": "quote.AMD.100.USDG.AMD.10000000",
+      "timestamp": "2026-09-05T02:03:48.290034+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 106,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d16800000000000000000000000086923f96303d656e4aa86d9d42d1e57ad2023fdc000000000000000000000000000000000000000000000000000000000098968000000000000000000000000000000000000000000000000000000000000000640000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 106,
+        "error": {
+          "code": 3,
+          "message": "execution reverted: Unexpected error",
+          "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+        }
+      }
+    },
+    {
+      "label": "pool.AMD.3000.token0()",
+      "timestamp": "2026-09-05T02:03:48.291036+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 107,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x48d284a2a4d3dc1b3da08231fe44317e7e7aa51f",
+            "data": "0x0dfe1681"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 107,
+        "result": "0x0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168"
+      }
+    },
+    {
+      "label": "pool.AMD.3000.token1()",
+      "timestamp": "2026-09-05T02:03:48.377284+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 108,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x48d284a2a4d3dc1b3da08231fe44317e7e7aa51f",
+            "data": "0xd21220a7"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 108,
+        "result": "0x00000000000000000000000086923f96303d656e4aa86d9d42d1e57ad2023fdc"
+      }
+    },
+    {
+      "label": "pool.AMD.3000.factory()",
+      "timestamp": "2026-09-05T02:03:48.419934+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 109,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x48d284a2a4d3dc1b3da08231fe44317e7e7aa51f",
+            "data": "0xc45a0155"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 109,
+        "result": "0x0000000000000000000000001f7d7550b1b028f7571e69a784071f0205fd2efa"
+      }
+    },
+    {
+      "label": "pool.AMD.3000.fee()",
+      "timestamp": "2026-09-05T02:03:48.540412+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 110,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x48d284a2a4d3dc1b3da08231fe44317e7e7aa51f",
+            "data": "0xddca3f43"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 110,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000bb8"
+      }
+    },
+    {
+      "label": "pool.AMD.3000.liquidity()",
+      "timestamp": "2026-09-05T02:03:48.540699+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 111,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x48d284a2a4d3dc1b3da08231fe44317e7e7aa51f",
+            "data": "0x1a686502"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 111,
+        "result": "0x000000000000000000000000000000000000000000000000019e720ed5423397"
+      }
+    },
+    {
+      "label": "quote.AMD.3000.AMD.USDG.10000000000000000",
+      "timestamp": "2026-09-05T02:03:48.608103+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 112,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a00000000000000000000000086923f96303d656e4aa86d9d42d1e57ad2023fdc0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168000000000000000000000000000000000000000000000000002386f26fc100000000000000000000000000000000000000000000000000000000000000000bb80000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 112,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000487df6000000000000000000000000000000000000b2f245a4e6558424a1d03c72020f0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000001ae0b"
+      }
+    },
+    {
+      "label": "quote.AMD.3000.USDG.AMD.10000000",
+      "timestamp": "2026-09-05T02:03:48.653787+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 113,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d16800000000000000000000000086923f96303d656e4aa86d9d42d1e57ad2023fdc00000000000000000000000000000000000000000000000000000000009896800000000000000000000000000000000000000000000000000000000000000bb80000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 113,
+        "result": "0x000000000000000000000000000000000000000000000000004a55140a362e78000000000000000000000000000000000000b2f201d9bf46e529fc735da1f13a0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000001b1d6"
+      }
+    },
+    {
+      "label": "pool.AMD.10000.token0()",
+      "timestamp": "2026-09-05T02:03:48.658337+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 114,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xd6af1dcb75cdae4f2efc403a58ef023a51edc686",
+            "data": "0x0dfe1681"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 114,
+        "result": "0x0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168"
+      }
+    },
+    {
+      "label": "pool.AMD.10000.token1()",
+      "timestamp": "2026-09-05T02:03:48.749592+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 115,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xd6af1dcb75cdae4f2efc403a58ef023a51edc686",
+            "data": "0xd21220a7"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 115,
+        "result": "0x00000000000000000000000086923f96303d656e4aa86d9d42d1e57ad2023fdc"
+      }
+    },
+    {
+      "label": "pool.AMD.10000.factory()",
+      "timestamp": "2026-09-05T02:03:48.774556+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 116,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xd6af1dcb75cdae4f2efc403a58ef023a51edc686",
+            "data": "0xc45a0155"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 116,
+        "result": "0x0000000000000000000000001f7d7550b1b028f7571e69a784071f0205fd2efa"
+      }
+    },
+    {
+      "label": "pool.AMD.10000.fee()",
+      "timestamp": "2026-09-05T02:03:48.790234+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 117,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xd6af1dcb75cdae4f2efc403a58ef023a51edc686",
+            "data": "0xddca3f43"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 117,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000002710"
+      }
+    },
+    {
+      "label": "pool.AMD.10000.liquidity()",
+      "timestamp": "2026-09-05T02:03:48.866748+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 118,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xd6af1dcb75cdae4f2efc403a58ef023a51edc686",
+            "data": "0x1a686502"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 118,
+        "result": "0x000000000000000000000000000000000000000000000000001acc5665ed3f43"
+      }
+    },
+    {
+      "label": "quote.AMD.10000.AMD.USDG.10000000000000000",
+      "timestamp": "2026-09-05T02:03:48.912353+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 119,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a00000000000000000000000086923f96303d656e4aa86d9d42d1e57ad2023fdc0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168000000000000000000000000000000000000000000000000002386f26fc1000000000000000000000000000000000000000000000000000000000000000027100000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 119,
+        "result": "0x000000000000000000000000000000000000000000000000000000000047e9b4000000000000000000000000000000000000b30939c29574923a96223db81c5e0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000001ae1f"
+      }
+    },
+    {
+      "label": "quote.AMD.10000.USDG.AMD.10000000",
+      "timestamp": "2026-09-05T02:03:48.929559+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 120,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d16800000000000000000000000086923f96303d656e4aa86d9d42d1e57ad2023fdc000000000000000000000000000000000000000000000000000000000098968000000000000000000000000000000000000000000000000000000000000027100000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 120,
+        "result": "0x0000000000000000000000000000000000000000000000000049e0567cb269e9000000000000000000000000000000000000b30528091a9257082f3eba94655f0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000001d367"
+      }
+    },
+    {
+      "label": "pool.MSFT.100.token0()",
+      "timestamp": "2026-09-05T02:03:49.063235+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 121,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x3d69ea64810300877b938e9ad9916c25912c08f5",
+            "data": "0x0dfe1681"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 121,
+        "result": "0x0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168"
+      }
+    },
+    {
+      "label": "pool.MSFT.100.token1()",
+      "timestamp": "2026-09-05T02:03:49.065147+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 122,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x3d69ea64810300877b938e9ad9916c25912c08f5",
+            "data": "0xd21220a7"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 122,
+        "result": "0x000000000000000000000000e93237c50d904957cf27e7b1133b510c669c2e74"
+      }
+    },
+    {
+      "label": "pool.MSFT.100.factory()",
+      "timestamp": "2026-09-05T02:03:49.065222+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 123,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x3d69ea64810300877b938e9ad9916c25912c08f5",
+            "data": "0xc45a0155"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 123,
+        "result": "0x0000000000000000000000001f7d7550b1b028f7571e69a784071f0205fd2efa"
+      }
+    },
+    {
+      "label": "pool.MSFT.100.fee()",
+      "timestamp": "2026-09-05T02:03:49.184317+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 124,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x3d69ea64810300877b938e9ad9916c25912c08f5",
+            "data": "0xddca3f43"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 124,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000064"
+      }
+    },
+    {
+      "label": "pool.MSFT.100.liquidity()",
+      "timestamp": "2026-09-05T02:03:49.184904+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 125,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x3d69ea64810300877b938e9ad9916c25912c08f5",
+            "data": "0x1a686502"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 125,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "quote.MSFT.100.MSFT.USDG.10000000000000000",
+      "timestamp": "2026-09-05T02:03:49.192004+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 126,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a000000000000000000000000e93237c50d904957cf27e7b1133b510c669c2e740000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168000000000000000000000000000000000000000000000000002386f26fc1000000000000000000000000000000000000000000000000000000000000000000640000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 126,
+        "error": {
+          "code": 3,
+          "message": "execution reverted: Unexpected error",
+          "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+        }
+      }
+    },
+    {
+      "label": "quote.MSFT.100.USDG.MSFT.10000000",
+      "timestamp": "2026-09-05T02:03:49.302041+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 127,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168000000000000000000000000e93237c50d904957cf27e7b1133b510c669c2e74000000000000000000000000000000000000000000000000000000000098968000000000000000000000000000000000000000000000000000000000000000640000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 127,
+        "error": {
+          "code": 3,
+          "message": "execution reverted: Unexpected error",
+          "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+        }
+      }
+    },
+    {
+      "label": "pool.MSFT.3000.token0()",
+      "timestamp": "2026-09-05T02:03:49.303182+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 128,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xeb60bcd1d920ad6e102690ccfc6fb488899e1510",
+            "data": "0x0dfe1681"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 128,
+        "result": "0x0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168"
+      }
+    },
+    {
+      "label": "pool.MSFT.3000.token1()",
+      "timestamp": "2026-09-05T02:03:49.370527+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 129,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xeb60bcd1d920ad6e102690ccfc6fb488899e1510",
+            "data": "0xd21220a7"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 129,
+        "result": "0x000000000000000000000000e93237c50d904957cf27e7b1133b510c669c2e74"
+      }
+    },
+    {
+      "label": "pool.MSFT.3000.factory()",
+      "timestamp": "2026-09-05T02:03:49.422168+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 130,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xeb60bcd1d920ad6e102690ccfc6fb488899e1510",
+            "data": "0xc45a0155"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 130,
+        "result": "0x0000000000000000000000001f7d7550b1b028f7571e69a784071f0205fd2efa"
+      }
+    },
+    {
+      "label": "pool.MSFT.3000.fee()",
+      "timestamp": "2026-09-05T02:03:49.479964+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 131,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xeb60bcd1d920ad6e102690ccfc6fb488899e1510",
+            "data": "0xddca3f43"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 131,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000bb8"
+      }
+    },
+    {
+      "label": "pool.MSFT.3000.liquidity()",
+      "timestamp": "2026-09-05T02:03:49.482133+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 132,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xeb60bcd1d920ad6e102690ccfc6fb488899e1510",
+            "data": "0x1a686502"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 132,
+        "result": "0x0000000000000000000000000000000000000000000000000569f828b72fb778"
+      }
+    },
+    {
+      "label": "quote.MSFT.3000.MSFT.USDG.10000000000000000",
+      "timestamp": "2026-09-05T02:03:49.589325+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 133,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a000000000000000000000000e93237c50d904957cf27e7b1133b510c669c2e740000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168000000000000000000000000000000000000000000000000002386f26fc100000000000000000000000000000000000000000000000000000000000000000bb80000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 133,
+        "result": "0x00000000000000000000000000000000000000000000000000000000004c0c75000000000000000000000000000000000000aeb630f6246bcc422b22c799dc5300000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000018c28"
+      }
+    },
+    {
+      "label": "quote.MSFT.3000.USDG.MSFT.10000000",
+      "timestamp": "2026-09-05T02:03:49.667681+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 134,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168000000000000000000000000e93237c50d904957cf27e7b1133b510c669c2e7400000000000000000000000000000000000000000000000000000000009896800000000000000000000000000000000000000000000000000000000000000bb80000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 134,
+        "result": "0x0000000000000000000000000000000000000000000000000046db33a88eae0e000000000000000000000000000000000000aeb61d54cf413f2c833031aed5010000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000001b2e2"
+      }
+    },
+    {
+      "label": "pool.MSFT.10000.token0()",
+      "timestamp": "2026-09-05T02:03:49.669985+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 135,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x2ea9292113514ed84fd16aa4ad1e416537e39c8c",
+            "data": "0x0dfe1681"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 135,
+        "result": "0x0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168"
+      }
+    },
+    {
+      "label": "pool.MSFT.10000.token1()",
+      "timestamp": "2026-09-05T02:03:49.699874+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 136,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x2ea9292113514ed84fd16aa4ad1e416537e39c8c",
+            "data": "0xd21220a7"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 136,
+        "result": "0x000000000000000000000000e93237c50d904957cf27e7b1133b510c669c2e74"
+      }
+    },
+    {
+      "label": "pool.MSFT.10000.factory()",
+      "timestamp": "2026-09-05T02:03:49.788522+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 137,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x2ea9292113514ed84fd16aa4ad1e416537e39c8c",
+            "data": "0xc45a0155"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 137,
+        "result": "0x0000000000000000000000001f7d7550b1b028f7571e69a784071f0205fd2efa"
+      }
+    },
+    {
+      "label": "pool.MSFT.10000.fee()",
+      "timestamp": "2026-09-05T02:03:49.789762+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 138,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x2ea9292113514ed84fd16aa4ad1e416537e39c8c",
+            "data": "0xddca3f43"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 138,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000002710"
+      }
+    },
+    {
+      "label": "pool.MSFT.10000.liquidity()",
+      "timestamp": "2026-09-05T02:03:49.818118+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 139,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x2ea9292113514ed84fd16aa4ad1e416537e39c8c",
+            "data": "0x1a686502"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 139,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "quote.MSFT.10000.MSFT.USDG.10000000000000000",
+      "timestamp": "2026-09-05T02:03:49.905933+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 140,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a000000000000000000000000e93237c50d904957cf27e7b1133b510c669c2e740000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168000000000000000000000000000000000000000000000000002386f26fc1000000000000000000000000000000000000000000000000000000000000000027100000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 140,
+        "error": {
+          "code": 3,
+          "message": "execution reverted: Unexpected error",
+          "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+        }
+      }
+    },
+    {
+      "label": "quote.MSFT.10000.USDG.MSFT.10000000",
+      "timestamp": "2026-09-05T02:03:49.910399+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 141,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168000000000000000000000000e93237c50d904957cf27e7b1133b510c669c2e74000000000000000000000000000000000000000000000000000000000098968000000000000000000000000000000000000000000000000000000000000027100000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x34367ef"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 141,
+        "error": {
+          "code": 3,
+          "message": "execution reverted: Unexpected error",
+          "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+        }
+      }
+    }
+  ],
+  "snapshotBlock": "0x34367ef",
+  "discoveredPools": [
+    {
+      "symbol": "AMD",
+      "fee": 100,
+      "address": "0x4ee16fe614f3a04f1510edf1932a41cbd5c4af9c"
+    },
+    {
+      "symbol": "AMD",
+      "fee": 3000,
+      "address": "0x48d284a2a4d3dc1b3da08231fe44317e7e7aa51f"
+    },
+    {
+      "symbol": "AMD",
+      "fee": 10000,
+      "address": "0xd6af1dcb75cdae4f2efc403a58ef023a51edc686"
+    },
+    {
+      "symbol": "MSFT",
+      "fee": 100,
+      "address": "0x3d69ea64810300877b938e9ad9916c25912c08f5"
+    },
+    {
+      "symbol": "MSFT",
+      "fee": 3000,
+      "address": "0xeb60bcd1d920ad6e102690ccfc6fb488899e1510"
+    },
+    {
+      "symbol": "MSFT",
+      "fee": 10000,
+      "address": "0x2ea9292113514ed84fd16aa4ad1e416537e39c8c"
+    }
+  ],
+  "summary": {
+    "chainId": 4663,
+    "blockNumber": 54749167,
+    "blockHash": "0xbc1b1d5d86c1d5d6f23ee7e44d445bf029096bda8e5ff67f24ffca54be46df5d",
+    "blockTimestampUtc": "2026-09-05T02:03:45+00:00",
+    "results": [
+      {
+        "symbol": "AMD",
+        "token": "0x86923f96303D656E4aa86D9d42D1e57ad2023fdC",
+        "decimals": 18,
+        "oraclePaused": false,
+        "uiMultiplier": "1000000000000000000",
+        "status": "quoted-in-both-directions",
+        "pools": [
+          {
+            "symbol": "AMD",
+            "fee": 100,
+            "address": "0x4ee16fe614f3a04f1510edf1932a41cbd5c4af9c",
+            "activeLiquidity": "0",
+            "quotes": [
+              {
+                "tokenIn": "AMD",
+                "tokenOut": "USDG",
+                "amountInRaw": "10000000000000000",
+                "amountOutRaw": null,
+                "error": {
+                  "code": 3,
+                  "message": "execution reverted: Unexpected error",
+                  "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+                }
+              },
+              {
+                "tokenIn": "USDG",
+                "tokenOut": "AMD",
+                "amountInRaw": "10000000",
+                "amountOutRaw": null,
+                "error": {
+                  "code": 3,
+                  "message": "execution reverted: Unexpected error",
+                  "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+                }
+              }
+            ]
+          },
+          {
+            "symbol": "AMD",
+            "fee": 3000,
+            "address": "0x48d284a2a4d3dc1b3da08231fe44317e7e7aa51f",
+            "activeLiquidity": "116656048391205783",
+            "quotes": [
+              {
+                "tokenIn": "AMD",
+                "tokenOut": "USDG",
+                "amountInRaw": "10000000000000000",
+                "amountOutRaw": "4750838",
+                "error": null
+              },
+              {
+                "tokenIn": "USDG",
+                "tokenOut": "AMD",
+                "amountInRaw": "10000000",
+                "amountOutRaw": "20922692835618424",
+                "error": null
+              }
+            ]
+          },
+          {
+            "symbol": "AMD",
+            "fee": 10000,
+            "address": "0xd6af1dcb75cdae4f2efc403a58ef023a51edc686",
+            "activeLiquidity": "7543020843777859",
+            "quotes": [
+              {
+                "tokenIn": "AMD",
+                "tokenOut": "USDG",
+                "amountInRaw": "10000000000000000",
+                "amountOutRaw": "4712884",
+                "error": null
+              },
+              {
+                "tokenIn": "USDG",
+                "tokenOut": "AMD",
+                "amountInRaw": "10000000",
+                "amountOutRaw": "20794335363754473",
+                "error": null
+              }
+            ]
+          }
+        ],
+        "bestSampleQuotes": [
+          {
+            "fee": 3000,
+            "pool": "0x48d284a2a4d3dc1b3da08231fe44317e7e7aa51f",
+            "tokenIn": "AMD",
+            "tokenOut": "USDG",
+            "amountInRaw": "10000000000000000",
+            "amountOutRaw": "4750838",
+            "error": null
+          },
+          {
+            "fee": 3000,
+            "pool": "0x48d284a2a4d3dc1b3da08231fe44317e7e7aa51f",
+            "tokenIn": "USDG",
+            "tokenOut": "AMD",
+            "amountInRaw": "10000000",
+            "amountOutRaw": "20922692835618424",
+            "error": null
+          }
+        ]
+      },
+      {
+        "symbol": "MSFT",
+        "token": "0xe93237C50D904957Cf27E7B1133b510C669c2e74",
+        "decimals": 18,
+        "oraclePaused": false,
+        "uiMultiplier": "1000000000000000000",
+        "status": "quoted-in-both-directions",
+        "pools": [
+          {
+            "symbol": "MSFT",
+            "fee": 100,
+            "address": "0x3d69ea64810300877b938e9ad9916c25912c08f5",
+            "activeLiquidity": "0",
+            "quotes": [
+              {
+                "tokenIn": "MSFT",
+                "tokenOut": "USDG",
+                "amountInRaw": "10000000000000000",
+                "amountOutRaw": null,
+                "error": {
+                  "code": 3,
+                  "message": "execution reverted: Unexpected error",
+                  "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+                }
+              },
+              {
+                "tokenIn": "USDG",
+                "tokenOut": "MSFT",
+                "amountInRaw": "10000000",
+                "amountOutRaw": null,
+                "error": {
+                  "code": 3,
+                  "message": "execution reverted: Unexpected error",
+                  "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+                }
+              }
+            ]
+          },
+          {
+            "symbol": "MSFT",
+            "fee": 3000,
+            "address": "0xeb60bcd1d920ad6e102690ccfc6fb488899e1510",
+            "activeLiquidity": "390115696499996536",
+            "quotes": [
+              {
+                "tokenIn": "MSFT",
+                "tokenOut": "USDG",
+                "amountInRaw": "10000000000000000",
+                "amountOutRaw": "4983925",
+                "error": null
+              },
+              {
+                "tokenIn": "USDG",
+                "tokenOut": "MSFT",
+                "amountInRaw": "10000000",
+                "amountOutRaw": "19944263287483918",
+                "error": null
+              }
+            ]
+          },
+          {
+            "symbol": "MSFT",
+            "fee": 10000,
+            "address": "0x2ea9292113514ed84fd16aa4ad1e416537e39c8c",
+            "activeLiquidity": "0",
+            "quotes": [
+              {
+                "tokenIn": "MSFT",
+                "tokenOut": "USDG",
+                "amountInRaw": "10000000000000000",
+                "amountOutRaw": null,
+                "error": {
+                  "code": 3,
+                  "message": "execution reverted: Unexpected error",
+                  "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+                }
+              },
+              {
+                "tokenIn": "USDG",
+                "tokenOut": "MSFT",
+                "amountInRaw": "10000000",
+                "amountOutRaw": null,
+                "error": {
+                  "code": 3,
+                  "message": "execution reverted: Unexpected error",
+                  "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+                }
+              }
+            ]
+          }
+        ],
+        "bestSampleQuotes": [
+          {
+            "fee": 3000,
+            "pool": "0xeb60bcd1d920ad6e102690ccfc6fb488899e1510",
+            "tokenIn": "MSFT",
+            "tokenOut": "USDG",
+            "amountInRaw": "10000000000000000",
+            "amountOutRaw": "4983925",
+            "error": null
+          },
+          {
+            "fee": 3000,
+            "pool": "0xeb60bcd1d920ad6e102690ccfc6fb488899e1510",
+            "tokenIn": "USDG",
+            "tokenOut": "MSFT",
+            "amountInRaw": "10000000",
+            "amountOutRaw": "19944263287483918",
+            "error": null
+          }
+        ]
+      }
+    ],
+    "limits": "Direct Uniswap v3 fee tiers100/500/3000/10000 only;0.01stock and10USDG samples. No funded sender simulation or receipt. Quotes do not prove future execution, legal eligibility or independent stock valuation."
+  }
+}

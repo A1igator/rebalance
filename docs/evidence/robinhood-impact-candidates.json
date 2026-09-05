@@ -1,0 +1,2820 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Read-only route availability check for user-considered demonstration candidates. This does not score ethics or change allocations. No keys, wallets, signing or broadcasts.",
+  "metadataSource": "https://api.robinhood.com/rhj/assets; snapshot: docs/evidence/robinhood-assets-2026-09-04.csv",
+  "candidates": [
+    {
+      "symbol": "ELF",
+      "name": "e.l.f. Beauty \u2022 Robinhood Token",
+      "chain_id": "4663",
+      "contract_address": "0x39EC44Bee4F6A116c6F9B8De566848a985C53C60",
+      "status": "ASSET_STATUS_ACTIVE"
+    },
+    {
+      "symbol": "FLNC",
+      "name": "Fluence Energy \u2022 Robinhood Token",
+      "chain_id": "4663",
+      "contract_address": "0x282e87451E10fA6679BC7D76C69BE44cD3fC777C",
+      "status": "ASSET_STATUS_ACTIVE"
+    },
+    {
+      "symbol": "MRNA",
+      "name": "Moderna \u2022 Robinhood Token",
+      "chain_id": "4663",
+      "contract_address": "0x43B07D15cE533bEc5476d70C22a78a1B2B662155",
+      "status": "ASSET_STATUS_ACTIVE"
+    },
+    {
+      "symbol": "NVTS",
+      "name": "Navitas Semiconductor \u2022 Robinhood Token",
+      "chain_id": "4663",
+      "contract_address": "0xbE6702d7b70315376dC48a3293f24f0982F86386",
+      "status": "ASSET_STATUS_ACTIVE"
+    },
+    {
+      "symbol": "RIVN",
+      "name": "Rivian Automotive \u2022 Robinhood Token",
+      "chain_id": "4663",
+      "contract_address": "0xB1BF26c1D20ff267A4f93550d1E0d06ac40a114B",
+      "status": "ASSET_STATUS_ACTIVE"
+    },
+    {
+      "symbol": "RUN",
+      "name": "Sunrun \u2022 Robinhood Token",
+      "chain_id": "4663",
+      "contract_address": "0x756Bc80af765C82da966a788858d65aDF14f3793",
+      "status": "ASSET_STATUS_ACTIVE"
+    }
+  ],
+  "endpoint": "https://rpc.mainnet.chain.robinhood.com",
+  "observations": [
+    {
+      "label": "eth_chainId",
+      "timestamp": "2026-09-05T01:45:11.938042+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_chainId",
+        "params": []
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": "0x1237"
+      }
+    },
+    {
+      "label": "eth_blockNumber",
+      "timestamp": "2026-09-05T01:45:12.094924+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "eth_blockNumber",
+        "params": []
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "result": "0x3433cb8"
+      }
+    },
+    {
+      "label": "snapshotBlock",
+      "timestamp": "2026-09-05T01:45:12.547910+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 10,
+        "method": "eth_getBlockByNumber",
+        "params": [
+          "0x3433cb8",
+          false
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 10,
+        "result": {
+          "baseFeePerGas": "0x18768320",
+          "difficulty": "0x1",
+          "extraData": "0xed69597d314f65155227efc5f4502f265f5ffc797eff8ff3662593b8defe6617",
+          "gasLimit": "0x4000000000000",
+          "gasUsed": "0x668eed",
+          "hash": "0x9e6c4a017687e24638dcbbfdb37f33fdd1df8c47d7955810194ee3e33084ac41",
+          "l1BlockNumber": "0x18b52d2",
+          "logsBloom": "0x40c000a001000c120020410292488004001a02081004a80040028018340a0801404000000100910100802000400102004600004014202320028081110030e28a010114004010404880080038206200a081202c000010002830000244003510a000122440231401410800408009001800010060118004020200200274040f00220029380811200040c0400800000000000148800004a040244208402000401800022004024000040410403020080000818a0041c02180080801c20000000080200097040a00008001408000040420110020c090002420400808020000012038201690084020442004244c001141242040060488008514091000d0a22102040000",
+          "miner": "0xa4b000000000000000000073657175656e636572",
+          "mixHash": "0x00000000000007b100000000018b52d2000000000000003d0000000000000000",
+          "nonce": "0x0000000000036e46",
+          "number": "0x3433cb8",
+          "parentHash": "0xc80d6565c33ef56ff55b07d9d119b7681869b054a9ac7618bb13f2f4c9479b36",
+          "receiptsRoot": "0xa0107fba6329ed09b084bb4dfea8957a2e7c4de127126a4fa44909784ff6c594",
+          "sendCount": "0x7b1",
+          "sendRoot": "0xed69597d314f65155227efc5f4502f265f5ffc797eff8ff3662593b8defe6617",
+          "sha3Uncles": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+          "size": "0x6e87",
+          "stateRoot": "0x3857bbdad565757e921f1fbd6ee5b0467643db48a6cb272a56167c6951b8f351",
+          "timestamp": "0x6a9b7427",
+          "transactions": [
+            "0x3ae969fa43830b28ccf9e9b7a15d21b1075c3ef4ca6377deb6056acedac2f92c",
+            "0x5bfb422d6da56c56e3a06f95f295d935abf59434822c95fb159b8c442eeda3a2",
+            "0xd885d412b8898c64bde6396cfc07efa5d944cb28a8abfe5596c0576a7c1e699a",
+            "0xc80c7ea137e71339fd6ea60139600f9e4f4941502678a983997552f393b7fda0",
+            "0x47eb3ebbb765a2a1fe03983e311766608c44df991fabbb3d00eab9e71ef0dbbd",
+            "0x4947b1fb8180861699bbbb8f462c7eac140c9b06c7c2def0d871e0533c4789f5",
+            "0x4b2bc12f2781c63bf861c71bc38b8585e4083821feab269b2fbf585e74ab4a51",
+            "0x1d9bb27740fc217d71df34ebfc2b234438536b0cd03d9d1875f01b0621fdd4ec",
+            "0x10804501fdcf8e183bcd7060f3abe0b79b7823158e666777bc4b57033aa311f5",
+            "0x0660e471a13a8b0478d9f398ba96023b40e416a49c6304943640fda842cc9fb2",
+            "0x082fd5cf0e3c963ffa4bd39012be43b46f1f4eac9ff4f4d25c2b6736177447b8",
+            "0x93800760a4b7bccb1120ff8105c284af64f4906a9092e4c973e8d732b22fd8d9",
+            "0x24fc436a52470de1bd8862e34ec328ce3006b7da1bb8c730a3e558ecceded273",
+            "0x76ee2d8fe21739f45b12250281d48bd106c43d6329af72f46a7e7121331e6603",
+            "0xd4f5a4d0479e2b1461678da4174f40170789ee5dac8d212a1c16a7544ca0eb38",
+            "0x6d815dabfa390f3137b8a3aa88842eed8b6333c75f422e8e627d4e5446abbedc",
+            "0x4a7ab10ec88e49e2be337e23af9b4ae136e9bd6510fa6861013918727c793f76",
+            "0xbb7f74960b99578a66f7f3deaf80b2fc53fa5357c886160f23ba2b20785d119b",
+            "0xa9032a334fd21269fae68fd40dc8cecd12e875d6a35a5fdb3575fc08a4ac2f7b",
+            "0xbd31c4366ed472aa63ceef07881a8b9ae9d235b8e2e1adbe6070120be16e5791",
+            "0xc7e17b49facd8137055e5a9c581841cc8ce898930e4d794b567e5ece5950ca57",
+            "0xf7916404889a48aa9256acd44196c569344972450eaaffdbb4bfdec5268a7b4b",
+            "0xd89e8cc0a4870a896efac398625a97a6815bbbe920a3c334e0d221df3f62d438"
+          ],
+          "transactionsRoot": "0x2a47fa7e6724224aa8b5f7ad6dacaf687ee8fae62af3cb00f9a570abbdf1d7c9",
+          "uncles": []
+        }
+      }
+    },
+    {
+      "label": "RUN.code",
+      "timestamp": "2026-09-05T01:45:12.548092+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 11,
+        "method": "eth_getCode",
+        "params": [
+          "0x756Bc80af765C82da966a788858d65aDF14f3793",
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 11,
+        "result": "0x6080604052600a600c565b005b60186014601a565b609d565b565b5f7f000000000000000000000000e10b6f6b275de231345c20d14ab812db62151b006001600160a01b0316635c60da1b6040518163ffffffff1660e01b8152600401602060405180830381865afa1580156076573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906098919060ba565b905090565b365f5f375f5f365f845af43d5f5f3e80801560b6573d5ff35b3d5ffd5b5f6020828403121560c9575f5ffd5b81516001600160a01b038116811460de575f5ffd5b939250505056fea2646970667358221220e296a217a10765339b402e91ead95bcbcf74e678d7c756705f097d88cc2554b064736f6c63430008210033"
+      }
+    },
+    {
+      "label": "RUN.symbol()",
+      "timestamp": "2026-09-05T01:45:12.548196+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 12,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x756Bc80af765C82da966a788858d65aDF14f3793",
+            "data": "0x95d89b41"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 12,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000352554e0000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "RUN.decimals()",
+      "timestamp": "2026-09-05T01:45:12.660548+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 13,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x756Bc80af765C82da966a788858d65aDF14f3793",
+            "data": "0x313ce567"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 13,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000012"
+      }
+    },
+    {
+      "label": "RUN.oraclePaused()",
+      "timestamp": "2026-09-05T01:45:12.666308+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 14,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x756Bc80af765C82da966a788858d65aDF14f3793",
+            "data": "0x7706ba52"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 14,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "RUN.uiMultiplier()",
+      "timestamp": "2026-09-05T01:45:12.680721+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 15,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x756Bc80af765C82da966a788858d65aDF14f3793",
+            "data": "0xa60bf13d"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 15,
+        "result": "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+      }
+    },
+    {
+      "label": "pool.RUN.100",
+      "timestamp": "2026-09-05T01:45:12.827292+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 16,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee82000000000000000000000000756bc80af765c82da966a788858d65adf14f37930000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000000064"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 16,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "pool.RUN.500",
+      "timestamp": "2026-09-05T01:45:12.827731+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 17,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee82000000000000000000000000756bc80af765c82da966a788858d65adf14f37930000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d16800000000000000000000000000000000000000000000000000000000000001f4"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 17,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "pool.RUN.3000",
+      "timestamp": "2026-09-05T01:45:12.828849+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 18,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee82000000000000000000000000756bc80af765c82da966a788858d65adf14f37930000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000000bb8"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 18,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "pool.RUN.10000",
+      "timestamp": "2026-09-05T01:45:12.939805+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 19,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee82000000000000000000000000756bc80af765c82da966a788858d65adf14f37930000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000002710"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 19,
+        "result": "0x000000000000000000000000e6d0f53073041e12bc46759519499764a4b92d13"
+      }
+    },
+    {
+      "label": "FLNC.code",
+      "timestamp": "2026-09-05T01:45:12.941540+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 20,
+        "method": "eth_getCode",
+        "params": [
+          "0x282e87451E10fA6679BC7D76C69BE44cD3fC777C",
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 20,
+        "result": "0x6080604052600a600c565b005b60186014601a565b609d565b565b5f7f000000000000000000000000e10b6f6b275de231345c20d14ab812db62151b006001600160a01b0316635c60da1b6040518163ffffffff1660e01b8152600401602060405180830381865afa1580156076573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906098919060ba565b905090565b365f5f375f5f365f845af43d5f5f3e80801560b6573d5ff35b3d5ffd5b5f6020828403121560c9575f5ffd5b81516001600160a01b038116811460de575f5ffd5b939250505056fea2646970667358221220e296a217a10765339b402e91ead95bcbcf74e678d7c756705f097d88cc2554b064736f6c63430008210033"
+      }
+    },
+    {
+      "label": "FLNC.symbol()",
+      "timestamp": "2026-09-05T01:45:12.943970+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 21,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x282e87451E10fA6679BC7D76C69BE44cD3fC777C",
+            "data": "0x95d89b41"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 21,
+        "result": "0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000004464c4e4300000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "FLNC.decimals()",
+      "timestamp": "2026-09-05T01:45:13.056614+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 22,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x282e87451E10fA6679BC7D76C69BE44cD3fC777C",
+            "data": "0x313ce567"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 22,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000012"
+      }
+    },
+    {
+      "label": "FLNC.oraclePaused()",
+      "timestamp": "2026-09-05T01:45:13.058741+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 23,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x282e87451E10fA6679BC7D76C69BE44cD3fC777C",
+            "data": "0x7706ba52"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 23,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "FLNC.uiMultiplier()",
+      "timestamp": "2026-09-05T01:45:13.063736+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 24,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x282e87451E10fA6679BC7D76C69BE44cD3fC777C",
+            "data": "0xa60bf13d"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 24,
+        "result": "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+      }
+    },
+    {
+      "label": "pool.FLNC.100",
+      "timestamp": "2026-09-05T01:45:13.190305+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 25,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee82000000000000000000000000282e87451e10fa6679bc7d76c69be44cd3fc777c0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000000064"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 25,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "pool.FLNC.500",
+      "timestamp": "2026-09-05T01:45:13.192615+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 26,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee82000000000000000000000000282e87451e10fa6679bc7d76c69be44cd3fc777c0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d16800000000000000000000000000000000000000000000000000000000000001f4"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 26,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "pool.FLNC.3000",
+      "timestamp": "2026-09-05T01:45:13.195999+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 27,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee82000000000000000000000000282e87451e10fa6679bc7d76c69be44cd3fc777c0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000000bb8"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 27,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "pool.FLNC.10000",
+      "timestamp": "2026-09-05T01:45:13.351516+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 28,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee82000000000000000000000000282e87451e10fa6679bc7d76c69be44cd3fc777c0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000002710"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 28,
+        "result": "0x000000000000000000000000cacd42c86e2d79b48a5e02b1ca36e0806cc95955"
+      }
+    },
+    {
+      "label": "RIVN.code",
+      "timestamp": "2026-09-05T01:45:13.351805+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 29,
+        "method": "eth_getCode",
+        "params": [
+          "0xB1BF26c1D20ff267A4f93550d1E0d06ac40a114B",
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 29,
+        "result": "0x6080604052600a600c565b005b60186014601a565b609d565b565b5f7f000000000000000000000000e10b6f6b275de231345c20d14ab812db62151b006001600160a01b0316635c60da1b6040518163ffffffff1660e01b8152600401602060405180830381865afa1580156076573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906098919060ba565b905090565b365f5f375f5f365f845af43d5f5f3e80801560b6573d5ff35b3d5ffd5b5f6020828403121560c9575f5ffd5b81516001600160a01b038116811460de575f5ffd5b939250505056fea2646970667358221220e296a217a10765339b402e91ead95bcbcf74e678d7c756705f097d88cc2554b064736f6c63430008210033"
+      }
+    },
+    {
+      "label": "RIVN.symbol()",
+      "timestamp": "2026-09-05T01:45:13.353685+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 30,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xB1BF26c1D20ff267A4f93550d1E0d06ac40a114B",
+            "data": "0x95d89b41"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 30,
+        "result": "0x000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000045249564e00000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "RIVN.decimals()",
+      "timestamp": "2026-09-05T01:45:13.471206+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 31,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xB1BF26c1D20ff267A4f93550d1E0d06ac40a114B",
+            "data": "0x313ce567"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 31,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000012"
+      }
+    },
+    {
+      "label": "RIVN.oraclePaused()",
+      "timestamp": "2026-09-05T01:45:13.480165+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 32,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xB1BF26c1D20ff267A4f93550d1E0d06ac40a114B",
+            "data": "0x7706ba52"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 32,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "RIVN.uiMultiplier()",
+      "timestamp": "2026-09-05T01:45:13.492462+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 33,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xB1BF26c1D20ff267A4f93550d1E0d06ac40a114B",
+            "data": "0xa60bf13d"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 33,
+        "result": "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+      }
+    },
+    {
+      "label": "pool.RIVN.100",
+      "timestamp": "2026-09-05T01:45:13.583340+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 34,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee82000000000000000000000000b1bf26c1d20ff267a4f93550d1e0d06ac40a114b0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000000064"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 34,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "pool.RIVN.500",
+      "timestamp": "2026-09-05T01:45:13.589011+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 35,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee82000000000000000000000000b1bf26c1d20ff267a4f93550d1e0d06ac40a114b0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d16800000000000000000000000000000000000000000000000000000000000001f4"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 35,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "pool.RIVN.3000",
+      "timestamp": "2026-09-05T01:45:13.614790+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 36,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee82000000000000000000000000b1bf26c1d20ff267a4f93550d1e0d06ac40a114b0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000000bb8"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 36,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "pool.RIVN.10000",
+      "timestamp": "2026-09-05T01:45:13.723204+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 37,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee82000000000000000000000000b1bf26c1d20ff267a4f93550d1e0d06ac40a114b0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000002710"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 37,
+        "result": "0x000000000000000000000000b30a75b200d98a600a3766869344928e35823e23"
+      }
+    },
+    {
+      "label": "NVTS.code",
+      "timestamp": "2026-09-05T01:45:13.750768+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 38,
+        "method": "eth_getCode",
+        "params": [
+          "0xbE6702d7b70315376dC48a3293f24f0982F86386",
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 38,
+        "result": "0x6080604052600a600c565b005b60186014601a565b609d565b565b5f7f000000000000000000000000e10b6f6b275de231345c20d14ab812db62151b006001600160a01b0316635c60da1b6040518163ffffffff1660e01b8152600401602060405180830381865afa1580156076573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906098919060ba565b905090565b365f5f375f5f365f845af43d5f5f3e80801560b6573d5ff35b3d5ffd5b5f6020828403121560c9575f5ffd5b81516001600160a01b038116811460de575f5ffd5b939250505056fea2646970667358221220e296a217a10765339b402e91ead95bcbcf74e678d7c756705f097d88cc2554b064736f6c63430008210033"
+      }
+    },
+    {
+      "label": "NVTS.symbol()",
+      "timestamp": "2026-09-05T01:45:13.752771+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 39,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xbE6702d7b70315376dC48a3293f24f0982F86386",
+            "data": "0x95d89b41"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 39,
+        "result": "0x000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000044e56545300000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "NVTS.decimals()",
+      "timestamp": "2026-09-05T01:45:13.877527+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 40,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xbE6702d7b70315376dC48a3293f24f0982F86386",
+            "data": "0x313ce567"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 40,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000012"
+      }
+    },
+    {
+      "label": "NVTS.oraclePaused()",
+      "timestamp": "2026-09-05T01:45:13.934339+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 41,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xbE6702d7b70315376dC48a3293f24f0982F86386",
+            "data": "0x7706ba52"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 41,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "NVTS.uiMultiplier()",
+      "timestamp": "2026-09-05T01:45:13.939795+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 42,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xbE6702d7b70315376dC48a3293f24f0982F86386",
+            "data": "0xa60bf13d"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 42,
+        "result": "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+      }
+    },
+    {
+      "label": "pool.NVTS.100",
+      "timestamp": "2026-09-05T01:45:13.996939+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 43,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee82000000000000000000000000be6702d7b70315376dc48a3293f24f0982f863860000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000000064"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 43,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "pool.NVTS.500",
+      "timestamp": "2026-09-05T01:45:14.049979+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 44,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee82000000000000000000000000be6702d7b70315376dc48a3293f24f0982f863860000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d16800000000000000000000000000000000000000000000000000000000000001f4"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 44,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "pool.NVTS.3000",
+      "timestamp": "2026-09-05T01:45:14.082068+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 45,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee82000000000000000000000000be6702d7b70315376dc48a3293f24f0982f863860000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000000bb8"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 45,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "pool.NVTS.10000",
+      "timestamp": "2026-09-05T01:45:14.115020+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 46,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee82000000000000000000000000be6702d7b70315376dc48a3293f24f0982f863860000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000002710"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 46,
+        "result": "0x000000000000000000000000a6db97fb3e2dcb5de6ec43b04be6aa151905dc17"
+      }
+    },
+    {
+      "label": "ELF.code",
+      "timestamp": "2026-09-05T01:45:14.170508+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 47,
+        "method": "eth_getCode",
+        "params": [
+          "0x39EC44Bee4F6A116c6F9B8De566848a985C53C60",
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 47,
+        "result": "0x6080604052600a600c565b005b60186014601a565b609d565b565b5f7f000000000000000000000000e10b6f6b275de231345c20d14ab812db62151b006001600160a01b0316635c60da1b6040518163ffffffff1660e01b8152600401602060405180830381865afa1580156076573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906098919060ba565b905090565b365f5f375f5f365f845af43d5f5f3e80801560b6573d5ff35b3d5ffd5b5f6020828403121560c9575f5ffd5b81516001600160a01b038116811460de575f5ffd5b939250505056fea2646970667358221220e296a217a10765339b402e91ead95bcbcf74e678d7c756705f097d88cc2554b064736f6c63430008210033"
+      }
+    },
+    {
+      "label": "ELF.symbol()",
+      "timestamp": "2026-09-05T01:45:14.201286+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 48,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x39EC44Bee4F6A116c6F9B8De566848a985C53C60",
+            "data": "0x95d89b41"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 48,
+        "result": "0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000003454c460000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "ELF.decimals()",
+      "timestamp": "2026-09-05T01:45:14.236124+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 49,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x39EC44Bee4F6A116c6F9B8De566848a985C53C60",
+            "data": "0x313ce567"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 49,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000012"
+      }
+    },
+    {
+      "label": "ELF.oraclePaused()",
+      "timestamp": "2026-09-05T01:45:14.290256+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 50,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x39EC44Bee4F6A116c6F9B8De566848a985C53C60",
+            "data": "0x7706ba52"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 50,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "ELF.uiMultiplier()",
+      "timestamp": "2026-09-05T01:45:14.320729+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 51,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x39EC44Bee4F6A116c6F9B8De566848a985C53C60",
+            "data": "0xa60bf13d"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 51,
+        "result": "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+      }
+    },
+    {
+      "label": "pool.ELF.100",
+      "timestamp": "2026-09-05T01:45:14.399992+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 52,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee8200000000000000000000000039ec44bee4f6a116c6f9b8de566848a985c53c600000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000000064"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 52,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "pool.ELF.500",
+      "timestamp": "2026-09-05T01:45:14.463663+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 53,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee8200000000000000000000000039ec44bee4f6a116c6f9b8de566848a985c53c600000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d16800000000000000000000000000000000000000000000000000000000000001f4"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 53,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "pool.ELF.3000",
+      "timestamp": "2026-09-05T01:45:14.509915+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 54,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee8200000000000000000000000039ec44bee4f6a116c6f9b8de566848a985c53c600000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000000bb8"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 54,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "pool.ELF.10000",
+      "timestamp": "2026-09-05T01:45:14.519903+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 55,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee8200000000000000000000000039ec44bee4f6a116c6f9b8de566848a985c53c600000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000002710"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 55,
+        "result": "0x000000000000000000000000c7d6ced1b7746784a20a1201fa9eb4c676f1b0e3"
+      }
+    },
+    {
+      "label": "MRNA.code",
+      "timestamp": "2026-09-05T01:45:14.610149+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 56,
+        "method": "eth_getCode",
+        "params": [
+          "0x43B07D15cE533bEc5476d70C22a78a1B2B662155",
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 56,
+        "result": "0x6080604052600a600c565b005b60186014601a565b609d565b565b5f7f000000000000000000000000e10b6f6b275de231345c20d14ab812db62151b006001600160a01b0316635c60da1b6040518163ffffffff1660e01b8152600401602060405180830381865afa1580156076573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906098919060ba565b905090565b365f5f375f5f365f845af43d5f5f3e80801560b6573d5ff35b3d5ffd5b5f6020828403121560c9575f5ffd5b81516001600160a01b038116811460de575f5ffd5b939250505056fea2646970667358221220e296a217a10765339b402e91ead95bcbcf74e678d7c756705f097d88cc2554b064736f6c63430008210033"
+      }
+    },
+    {
+      "label": "MRNA.symbol()",
+      "timestamp": "2026-09-05T01:45:14.629088+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 57,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x43B07D15cE533bEc5476d70C22a78a1B2B662155",
+            "data": "0x95d89b41"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 57,
+        "result": "0x000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000044d524e4100000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "MRNA.decimals()",
+      "timestamp": "2026-09-05T01:45:14.645205+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 58,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x43B07D15cE533bEc5476d70C22a78a1B2B662155",
+            "data": "0x313ce567"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 58,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000012"
+      }
+    },
+    {
+      "label": "MRNA.oraclePaused()",
+      "timestamp": "2026-09-05T01:45:14.724554+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 59,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x43B07D15cE533bEc5476d70C22a78a1B2B662155",
+            "data": "0x7706ba52"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 59,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "MRNA.uiMultiplier()",
+      "timestamp": "2026-09-05T01:45:14.746457+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 60,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x43B07D15cE533bEc5476d70C22a78a1B2B662155",
+            "data": "0xa60bf13d"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 60,
+        "result": "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+      }
+    },
+    {
+      "label": "pool.MRNA.100",
+      "timestamp": "2026-09-05T01:45:14.760123+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 61,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee8200000000000000000000000043b07d15ce533bec5476d70c22a78a1b2b6621550000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000000064"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 61,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "pool.MRNA.500",
+      "timestamp": "2026-09-05T01:45:14.847406+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 62,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee8200000000000000000000000043b07d15ce533bec5476d70c22a78a1b2b6621550000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d16800000000000000000000000000000000000000000000000000000000000001f4"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 62,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "pool.MRNA.3000",
+      "timestamp": "2026-09-05T01:45:14.924963+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 63,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee8200000000000000000000000043b07d15ce533bec5476d70c22a78a1b2b6621550000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000000bb8"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 63,
+        "result": "0x000000000000000000000000b40196272a6d2eb5edf6d93bc4dc39856ad95e0e"
+      }
+    },
+    {
+      "label": "pool.MRNA.10000",
+      "timestamp": "2026-09-05T01:45:14.925278+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 64,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+            "data": "0x1698ee8200000000000000000000000043b07d15ce533bec5476d70c22a78a1b2b6621550000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d1680000000000000000000000000000000000000000000000000000000000002710"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 64,
+        "result": "0x000000000000000000000000a34d0667334074df2d5bfd259e79e6b9cf1fa8bf"
+      }
+    },
+    {
+      "label": "pool.RUN.10000.token0()",
+      "timestamp": "2026-09-05T01:46:22.871389+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 100,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xe6d0f53073041e12bc46759519499764a4b92d13",
+            "data": "0x0dfe1681"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 100,
+        "result": "0x0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168"
+      }
+    },
+    {
+      "label": "pool.RUN.10000.token1()",
+      "timestamp": "2026-09-05T01:46:22.871767+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 101,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xe6d0f53073041e12bc46759519499764a4b92d13",
+            "data": "0xd21220a7"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 101,
+        "result": "0x000000000000000000000000756bc80af765c82da966a788858d65adf14f3793"
+      }
+    },
+    {
+      "label": "pool.RUN.10000.factory()",
+      "timestamp": "2026-09-05T01:46:22.871849+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 102,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xe6d0f53073041e12bc46759519499764a4b92d13",
+            "data": "0xc45a0155"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 102,
+        "result": "0x0000000000000000000000001f7d7550b1b028f7571e69a784071f0205fd2efa"
+      }
+    },
+    {
+      "label": "pool.RUN.10000.fee()",
+      "timestamp": "2026-09-05T01:46:23.000779+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 103,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xe6d0f53073041e12bc46759519499764a4b92d13",
+            "data": "0xddca3f43"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 103,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000002710"
+      }
+    },
+    {
+      "label": "pool.RUN.10000.liquidity()",
+      "timestamp": "2026-09-05T01:46:23.083114+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 104,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xe6d0f53073041e12bc46759519499764a4b92d13",
+            "data": "0x1a686502"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 104,
+        "result": "0x00000000000000000000000000000000000000000000000000b02cbdd19d444b"
+      }
+    },
+    {
+      "label": "quote.RUN.10000.RUN.USDG.10000000000000000",
+      "timestamp": "2026-09-05T01:46:23.084715+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 105,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a000000000000000000000000756bc80af765c82da966a788858d65adf14f37930000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168000000000000000000000000000000000000000000000000002386f26fc1000000000000000000000000000000000000000000000000000000000000000027100000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 105,
+        "result": "0x000000000000000000000000000000000000000000000000000000000001537c00000000000000000000000000000000000526650fdba592e061fdd7ec89863600000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000018c4c"
+      }
+    },
+    {
+      "label": "quote.RUN.10000.USDG.RUN.10000000",
+      "timestamp": "2026-09-05T01:46:23.176305+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 106,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168000000000000000000000000756bc80af765c82da966a788858d65adf14f3793000000000000000000000000000000000000000000000000000000000098968000000000000000000000000000000000000000000000000000000000000027100000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 106,
+        "result": "0x0000000000000000000000000000000000000000000000000fa63c5a68087679000000000000000000000000000000000005264e1f474b903e2873d5b81f5f4e0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000001cd20"
+      }
+    },
+    {
+      "label": "pool.FLNC.10000.token0()",
+      "timestamp": "2026-09-05T01:46:23.195186+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 107,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xcacd42c86e2d79b48a5e02b1ca36e0806cc95955",
+            "data": "0x0dfe1681"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 107,
+        "result": "0x000000000000000000000000282e87451e10fa6679bc7d76c69be44cd3fc777c"
+      }
+    },
+    {
+      "label": "pool.FLNC.10000.token1()",
+      "timestamp": "2026-09-05T01:46:23.202481+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 108,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xcacd42c86e2d79b48a5e02b1ca36e0806cc95955",
+            "data": "0xd21220a7"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 108,
+        "result": "0x0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168"
+      }
+    },
+    {
+      "label": "pool.FLNC.10000.factory()",
+      "timestamp": "2026-09-05T01:46:23.312558+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 109,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xcacd42c86e2d79b48a5e02b1ca36e0806cc95955",
+            "data": "0xc45a0155"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 109,
+        "result": "0x0000000000000000000000001f7d7550b1b028f7571e69a784071f0205fd2efa"
+      }
+    },
+    {
+      "label": "pool.FLNC.10000.fee()",
+      "timestamp": "2026-09-05T01:46:23.314411+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 110,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xcacd42c86e2d79b48a5e02b1ca36e0806cc95955",
+            "data": "0xddca3f43"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 110,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000002710"
+      }
+    },
+    {
+      "label": "pool.FLNC.10000.liquidity()",
+      "timestamp": "2026-09-05T01:46:23.318707+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 111,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xcacd42c86e2d79b48a5e02b1ca36e0806cc95955",
+            "data": "0x1a686502"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 111,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "quote.FLNC.10000.FLNC.USDG.10000000000000000",
+      "timestamp": "2026-09-05T01:46:23.437026+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 112,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a000000000000000000000000282e87451e10fa6679bc7d76c69be44cd3fc777c0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168000000000000000000000000000000000000000000000000002386f26fc1000000000000000000000000000000000000000000000000000000000000000027100000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 112,
+        "error": {
+          "code": 3,
+          "message": "execution reverted: Unexpected error",
+          "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+        }
+      }
+    },
+    {
+      "label": "quote.FLNC.10000.USDG.FLNC.10000000",
+      "timestamp": "2026-09-05T01:46:23.438308+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 113,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168000000000000000000000000282e87451e10fa6679bc7d76c69be44cd3fc777c000000000000000000000000000000000000000000000000000000000098968000000000000000000000000000000000000000000000000000000000000027100000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 113,
+        "error": {
+          "code": 3,
+          "message": "execution reverted: Unexpected error",
+          "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+        }
+      }
+    },
+    {
+      "label": "pool.RIVN.10000.token0()",
+      "timestamp": "2026-09-05T01:46:23.440972+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 114,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xb30a75b200d98a600a3766869344928e35823e23",
+            "data": "0x0dfe1681"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 114,
+        "result": "0x0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168"
+      }
+    },
+    {
+      "label": "pool.RIVN.10000.token1()",
+      "timestamp": "2026-09-05T01:46:23.608308+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 115,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xb30a75b200d98a600a3766869344928e35823e23",
+            "data": "0xd21220a7"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 115,
+        "result": "0x000000000000000000000000b1bf26c1d20ff267a4f93550d1e0d06ac40a114b"
+      }
+    },
+    {
+      "label": "pool.RIVN.10000.factory()",
+      "timestamp": "2026-09-05T01:46:23.609017+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 116,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xb30a75b200d98a600a3766869344928e35823e23",
+            "data": "0xc45a0155"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 116,
+        "result": "0x0000000000000000000000001f7d7550b1b028f7571e69a784071f0205fd2efa"
+      }
+    },
+    {
+      "label": "pool.RIVN.10000.fee()",
+      "timestamp": "2026-09-05T01:46:23.610752+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 117,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xb30a75b200d98a600a3766869344928e35823e23",
+            "data": "0xddca3f43"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 117,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000002710"
+      }
+    },
+    {
+      "label": "pool.RIVN.10000.liquidity()",
+      "timestamp": "2026-09-05T01:46:23.718908+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 118,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xb30a75b200d98a600a3766869344928e35823e23",
+            "data": "0x1a686502"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 118,
+        "result": "0x0000000000000000000000000000000000000000000000000196676d7239208b"
+      }
+    },
+    {
+      "label": "quote.RIVN.10000.RIVN.USDG.10000000000000000",
+      "timestamp": "2026-09-05T01:46:23.725241+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 119,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a000000000000000000000000b1bf26c1d20ff267a4f93550d1e0d06ac40a114b0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168000000000000000000000000000000000000000000000000002386f26fc1000000000000000000000000000000000000000000000000000000000000000027100000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 119,
+        "result": "0x00000000000000000000000000000000000000000000000000000000000283b0000000000000000000000000000000000003bd74cb9006bfa96fdd040b015bb800000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000018c3a"
+      }
+    },
+    {
+      "label": "quote.RIVN.10000.USDG.RIVN.10000000",
+      "timestamp": "2026-09-05T01:46:23.734187+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 120,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168000000000000000000000000b1bf26c1d20ff267a4f93550d1e0d06ac40a114b000000000000000000000000000000000000000000000000000000000098968000000000000000000000000000000000000000000000000000000000000027100000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 120,
+        "result": "0x00000000000000000000000000000000000000000000000008410533d7158b27000000000000000000000000000000000003bd6f82625054a2fadc743fb4d23b0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000001b1b8"
+      }
+    },
+    {
+      "label": "pool.NVTS.10000.token0()",
+      "timestamp": "2026-09-05T01:46:23.837531+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 121,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xa6db97fb3e2dcb5de6ec43b04be6aa151905dc17",
+            "data": "0x0dfe1681"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 121,
+        "result": "0x0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168"
+      }
+    },
+    {
+      "label": "pool.NVTS.10000.token1()",
+      "timestamp": "2026-09-05T01:46:23.846809+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 122,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xa6db97fb3e2dcb5de6ec43b04be6aa151905dc17",
+            "data": "0xd21220a7"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 122,
+        "result": "0x000000000000000000000000be6702d7b70315376dc48a3293f24f0982f86386"
+      }
+    },
+    {
+      "label": "pool.NVTS.10000.factory()",
+      "timestamp": "2026-09-05T01:46:23.876090+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 123,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xa6db97fb3e2dcb5de6ec43b04be6aa151905dc17",
+            "data": "0xc45a0155"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 123,
+        "result": "0x0000000000000000000000001f7d7550b1b028f7571e69a784071f0205fd2efa"
+      }
+    },
+    {
+      "label": "pool.NVTS.10000.fee()",
+      "timestamp": "2026-09-05T01:46:23.962522+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 124,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xa6db97fb3e2dcb5de6ec43b04be6aa151905dc17",
+            "data": "0xddca3f43"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 124,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000002710"
+      }
+    },
+    {
+      "label": "pool.NVTS.10000.liquidity()",
+      "timestamp": "2026-09-05T01:46:23.963337+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 125,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xa6db97fb3e2dcb5de6ec43b04be6aa151905dc17",
+            "data": "0x1a686502"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 125,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "quote.NVTS.10000.NVTS.USDG.10000000000000000",
+      "timestamp": "2026-09-05T01:46:23.992211+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 126,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a000000000000000000000000be6702d7b70315376dc48a3293f24f0982f863860000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168000000000000000000000000000000000000000000000000002386f26fc1000000000000000000000000000000000000000000000000000000000000000027100000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 126,
+        "error": {
+          "code": 3,
+          "message": "execution reverted: Unexpected error",
+          "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+        }
+      }
+    },
+    {
+      "label": "quote.NVTS.10000.USDG.NVTS.10000000",
+      "timestamp": "2026-09-05T01:46:24.132381+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 127,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168000000000000000000000000be6702d7b70315376dc48a3293f24f0982f86386000000000000000000000000000000000000000000000000000000000098968000000000000000000000000000000000000000000000000000000000000027100000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 127,
+        "error": {
+          "code": 3,
+          "message": "execution reverted: Unexpected error",
+          "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+        }
+      }
+    },
+    {
+      "label": "pool.ELF.10000.token0()",
+      "timestamp": "2026-09-05T01:46:24.132675+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 128,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xc7d6ced1b7746784a20a1201fa9eb4c676f1b0e3",
+            "data": "0x0dfe1681"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 128,
+        "result": "0x00000000000000000000000039ec44bee4f6a116c6f9b8de566848a985c53c60"
+      }
+    },
+    {
+      "label": "pool.ELF.10000.token1()",
+      "timestamp": "2026-09-05T01:46:24.132870+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 129,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xc7d6ced1b7746784a20a1201fa9eb4c676f1b0e3",
+            "data": "0xd21220a7"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 129,
+        "result": "0x0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168"
+      }
+    },
+    {
+      "label": "pool.ELF.10000.factory()",
+      "timestamp": "2026-09-05T01:46:24.255384+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 130,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xc7d6ced1b7746784a20a1201fa9eb4c676f1b0e3",
+            "data": "0xc45a0155"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 130,
+        "result": "0x0000000000000000000000001f7d7550b1b028f7571e69a784071f0205fd2efa"
+      }
+    },
+    {
+      "label": "pool.ELF.10000.fee()",
+      "timestamp": "2026-09-05T01:46:24.257301+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 131,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xc7d6ced1b7746784a20a1201fa9eb4c676f1b0e3",
+            "data": "0xddca3f43"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 131,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000002710"
+      }
+    },
+    {
+      "label": "pool.ELF.10000.liquidity()",
+      "timestamp": "2026-09-05T01:46:24.258201+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 132,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xc7d6ced1b7746784a20a1201fa9eb4c676f1b0e3",
+            "data": "0x1a686502"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 132,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "quote.ELF.10000.ELF.USDG.10000000000000000",
+      "timestamp": "2026-09-05T01:46:24.368860+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 133,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a00000000000000000000000039ec44bee4f6a116c6f9b8de566848a985c53c600000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168000000000000000000000000000000000000000000000000002386f26fc1000000000000000000000000000000000000000000000000000000000000000027100000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 133,
+        "error": {
+          "code": 3,
+          "message": "execution reverted: Unexpected error",
+          "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+        }
+      }
+    },
+    {
+      "label": "quote.ELF.10000.USDG.ELF.10000000",
+      "timestamp": "2026-09-05T01:46:24.382289+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 134,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d16800000000000000000000000039ec44bee4f6a116c6f9b8de566848a985c53c60000000000000000000000000000000000000000000000000000000000098968000000000000000000000000000000000000000000000000000000000000027100000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 134,
+        "error": {
+          "code": 3,
+          "message": "execution reverted: Unexpected error",
+          "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+        }
+      }
+    },
+    {
+      "label": "pool.MRNA.3000.token0()",
+      "timestamp": "2026-09-05T01:46:24.442912+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 135,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xb40196272a6d2eb5edf6d93bc4dc39856ad95e0e",
+            "data": "0x0dfe1681"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 135,
+        "result": "0x00000000000000000000000043b07d15ce533bec5476d70c22a78a1b2b662155"
+      }
+    },
+    {
+      "label": "pool.MRNA.3000.token1()",
+      "timestamp": "2026-09-05T01:46:24.481328+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 136,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xb40196272a6d2eb5edf6d93bc4dc39856ad95e0e",
+            "data": "0xd21220a7"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 136,
+        "result": "0x0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168"
+      }
+    },
+    {
+      "label": "pool.MRNA.3000.factory()",
+      "timestamp": "2026-09-05T01:46:24.519743+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 137,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xb40196272a6d2eb5edf6d93bc4dc39856ad95e0e",
+            "data": "0xc45a0155"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 137,
+        "result": "0x0000000000000000000000001f7d7550b1b028f7571e69a784071f0205fd2efa"
+      }
+    },
+    {
+      "label": "pool.MRNA.3000.fee()",
+      "timestamp": "2026-09-05T01:46:24.558003+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 138,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xb40196272a6d2eb5edf6d93bc4dc39856ad95e0e",
+            "data": "0xddca3f43"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 138,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000bb8"
+      }
+    },
+    {
+      "label": "pool.MRNA.3000.liquidity()",
+      "timestamp": "2026-09-05T01:46:24.656561+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 139,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xb40196272a6d2eb5edf6d93bc4dc39856ad95e0e",
+            "data": "0x1a686502"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 139,
+        "result": "0x00000000000000000000000000000000000000000000000003463ba8d91d73a9"
+      }
+    },
+    {
+      "label": "quote.MRNA.3000.MRNA.USDG.10000000000000000",
+      "timestamp": "2026-09-05T01:46:24.658339+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 140,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a00000000000000000000000043b07d15ce533bec5476d70c22a78a1b2b6621550000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168000000000000000000000000000000000000000000000000002386f26fc100000000000000000000000000000000000000000000000000000000000000000bb80000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 140,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000161de000000000000000000000000000000000000000000000ca49fedd4e5f89e9d43300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000018cc2"
+      }
+    },
+    {
+      "label": "quote.MRNA.3000.USDG.MRNA.10000000",
+      "timestamp": "2026-09-05T01:46:24.753561+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 141,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d16800000000000000000000000043b07d15ce533bec5476d70c22a78a1b2b66215500000000000000000000000000000000000000000000000000000000009896800000000000000000000000000000000000000000000000000000000000000bb80000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 141,
+        "result": "0x00000000000000000000000000000000000000000000000000f3a3d267d3626f00000000000000000000000000000000000000000000ca4a341488d9a346c3890000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001c61c"
+      }
+    },
+    {
+      "label": "pool.MRNA.10000.token0()",
+      "timestamp": "2026-09-05T01:46:24.766245+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 142,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xa34d0667334074df2d5bfd259e79e6b9cf1fa8bf",
+            "data": "0x0dfe1681"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 142,
+        "result": "0x00000000000000000000000043b07d15ce533bec5476d70c22a78a1b2b662155"
+      }
+    },
+    {
+      "label": "pool.MRNA.10000.token1()",
+      "timestamp": "2026-09-05T01:46:24.821867+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 143,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xa34d0667334074df2d5bfd259e79e6b9cf1fa8bf",
+            "data": "0xd21220a7"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 143,
+        "result": "0x0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168"
+      }
+    },
+    {
+      "label": "pool.MRNA.10000.factory()",
+      "timestamp": "2026-09-05T01:46:24.869481+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 144,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xa34d0667334074df2d5bfd259e79e6b9cf1fa8bf",
+            "data": "0xc45a0155"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 144,
+        "result": "0x0000000000000000000000001f7d7550b1b028f7571e69a784071f0205fd2efa"
+      }
+    },
+    {
+      "label": "pool.MRNA.10000.fee()",
+      "timestamp": "2026-09-05T01:46:24.889212+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 145,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xa34d0667334074df2d5bfd259e79e6b9cf1fa8bf",
+            "data": "0xddca3f43"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 145,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000002710"
+      }
+    },
+    {
+      "label": "pool.MRNA.10000.liquidity()",
+      "timestamp": "2026-09-05T01:46:24.936400+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 146,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xa34d0667334074df2d5bfd259e79e6b9cf1fa8bf",
+            "data": "0x1a686502"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 146,
+        "result": "0x000000000000000000000000000000000000000000000000020b4b35d94c3a92"
+      }
+    },
+    {
+      "label": "quote.MRNA.10000.MRNA.USDG.10000000000000000",
+      "timestamp": "2026-09-05T01:46:24.990103+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 147,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a00000000000000000000000043b07d15ce533bec5476d70c22a78a1b2b6621550000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168000000000000000000000000000000000000000000000000002386f26fc1000000000000000000000000000000000000000000000000000000000000000027100000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 147,
+        "result": "0x000000000000000000000000000000000000000000000000000000000015e43800000000000000000000000000000000000000000000c9f778d1559c798a1a0500000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000018ce1"
+      }
+    },
+    {
+      "label": "quote.MRNA.10000.USDG.MRNA.10000000",
+      "timestamp": "2026-09-05T01:46:25.005342+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 148,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7",
+            "data": "0xc6a5026a0000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d16800000000000000000000000043b07d15ce533bec5476d70c22a78a1b2b662155000000000000000000000000000000000000000000000000000000000098968000000000000000000000000000000000000000000000000000000000000027100000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "0x3433cb8"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 148,
+        "result": "0x00000000000000000000000000000000000000000000000000f2b399fc1ffd4600000000000000000000000000000000000000000000c9f7cd6d98b3b01b15ac0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000001afbd"
+      }
+    }
+  ],
+  "snapshotBlock": "0x3433cb8",
+  "contracts": {
+    "USDG": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+    "UniswapV3Factory": "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA",
+    "QuoterV2": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7"
+  },
+  "discoveredPools": [
+    {
+      "symbol": "RUN",
+      "fee": 10000,
+      "address": "0xe6d0f53073041e12bc46759519499764a4b92d13"
+    },
+    {
+      "symbol": "FLNC",
+      "fee": 10000,
+      "address": "0xcacd42c86e2d79b48a5e02b1ca36e0806cc95955"
+    },
+    {
+      "symbol": "RIVN",
+      "fee": 10000,
+      "address": "0xb30a75b200d98a600a3766869344928e35823e23"
+    },
+    {
+      "symbol": "NVTS",
+      "fee": 10000,
+      "address": "0xa6db97fb3e2dcb5de6ec43b04be6aa151905dc17"
+    },
+    {
+      "symbol": "ELF",
+      "fee": 10000,
+      "address": "0xc7d6ced1b7746784a20a1201fa9eb4c676f1b0e3"
+    },
+    {
+      "symbol": "MRNA",
+      "fee": 3000,
+      "address": "0xb40196272a6d2eb5edf6d93bc4dc39856ad95e0e"
+    },
+    {
+      "symbol": "MRNA",
+      "fee": 10000,
+      "address": "0xa34d0667334074df2d5bfd259e79e6b9cf1fa8bf"
+    }
+  ],
+  "summary": {
+    "chainId": 4663,
+    "blockNumber": 54738104,
+    "blockHash": "0x9e6c4a017687e24638dcbbfdb37f33fdd1df8c47d7955810194ee3e33084ac41",
+    "blockTimestampUtc": "2026-09-05T01:45:11+00:00",
+    "feeTiersChecked": [
+      100,
+      500,
+      3000,
+      10000
+    ],
+    "sampleStockRaw": "10000000000000000",
+    "sampleUsdgRaw": "10000000",
+    "results": [
+      {
+        "symbol": "ELF",
+        "token": "0x39EC44Bee4F6A116c6F9B8De566848a985C53C60",
+        "decimals": 18,
+        "oraclePaused": false,
+        "uiMultiplier": "1000000000000000000",
+        "status": "no-successful-direct-v3-sample-quote",
+        "pools": [
+          {
+            "symbol": "ELF",
+            "fee": 10000,
+            "address": "0xc7d6ced1b7746784a20a1201fa9eb4c676f1b0e3",
+            "activeLiquidity": "0",
+            "quotes": [
+              {
+                "tokenIn": "ELF",
+                "tokenOut": "USDG",
+                "amountInRaw": "10000000000000000",
+                "amountOutRaw": null,
+                "amountOutFormatted": null,
+                "error": {
+                  "code": 3,
+                  "message": "execution reverted: Unexpected error",
+                  "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+                }
+              },
+              {
+                "tokenIn": "USDG",
+                "tokenOut": "ELF",
+                "amountInRaw": "10000000",
+                "amountOutRaw": null,
+                "amountOutFormatted": null,
+                "error": {
+                  "code": 3,
+                  "message": "execution reverted: Unexpected error",
+                  "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+                }
+              }
+            ],
+            "bidirectionalSampleQuotes": false
+          }
+        ],
+        "bestSampleQuotes": [
+          null,
+          null
+        ]
+      },
+      {
+        "symbol": "FLNC",
+        "token": "0x282e87451E10fA6679BC7D76C69BE44cD3fC777C",
+        "decimals": 18,
+        "oraclePaused": false,
+        "uiMultiplier": "1000000000000000000",
+        "status": "no-successful-direct-v3-sample-quote",
+        "pools": [
+          {
+            "symbol": "FLNC",
+            "fee": 10000,
+            "address": "0xcacd42c86e2d79b48a5e02b1ca36e0806cc95955",
+            "activeLiquidity": "0",
+            "quotes": [
+              {
+                "tokenIn": "FLNC",
+                "tokenOut": "USDG",
+                "amountInRaw": "10000000000000000",
+                "amountOutRaw": null,
+                "amountOutFormatted": null,
+                "error": {
+                  "code": 3,
+                  "message": "execution reverted: Unexpected error",
+                  "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+                }
+              },
+              {
+                "tokenIn": "USDG",
+                "tokenOut": "FLNC",
+                "amountInRaw": "10000000",
+                "amountOutRaw": null,
+                "amountOutFormatted": null,
+                "error": {
+                  "code": 3,
+                  "message": "execution reverted: Unexpected error",
+                  "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+                }
+              }
+            ],
+            "bidirectionalSampleQuotes": false
+          }
+        ],
+        "bestSampleQuotes": [
+          null,
+          null
+        ]
+      },
+      {
+        "symbol": "MRNA",
+        "token": "0x43B07D15cE533bEc5476d70C22a78a1B2B662155",
+        "decimals": 18,
+        "oraclePaused": false,
+        "uiMultiplier": "1000000000000000000",
+        "status": "quoted-in-both-directions",
+        "pools": [
+          {
+            "symbol": "MRNA",
+            "fee": 3000,
+            "address": "0xb40196272a6d2eb5edf6d93bc4dc39856ad95e0e",
+            "activeLiquidity": "235941626866660265",
+            "quotes": [
+              {
+                "tokenIn": "MRNA",
+                "tokenOut": "USDG",
+                "amountInRaw": "10000000000000000",
+                "amountOutRaw": "1449440",
+                "amountOutFormatted": "1.44944",
+                "error": null
+              },
+              {
+                "tokenIn": "USDG",
+                "tokenOut": "MRNA",
+                "amountInRaw": "10000000",
+                "amountOutRaw": "68578543421055599",
+                "amountOutFormatted": "0.068578543421055599",
+                "error": null
+              }
+            ],
+            "bidirectionalSampleQuotes": true
+          },
+          {
+            "symbol": "MRNA",
+            "fee": 10000,
+            "address": "0xa34d0667334074df2d5bfd259e79e6b9cf1fa8bf",
+            "activeLiquidity": "147294107470674578",
+            "quotes": [
+              {
+                "tokenIn": "MRNA",
+                "tokenOut": "USDG",
+                "amountInRaw": "10000000000000000",
+                "amountOutRaw": "1434680",
+                "amountOutFormatted": "1.43468",
+                "error": null
+              },
+              {
+                "tokenIn": "USDG",
+                "tokenOut": "MRNA",
+                "amountInRaw": "10000000",
+                "amountOutRaw": "68314418305301830",
+                "amountOutFormatted": "0.06831441830530183",
+                "error": null
+              }
+            ],
+            "bidirectionalSampleQuotes": true
+          }
+        ],
+        "bestSampleQuotes": [
+          {
+            "fee": 3000,
+            "pool": "0xb40196272a6d2eb5edf6d93bc4dc39856ad95e0e",
+            "tokenIn": "MRNA",
+            "tokenOut": "USDG",
+            "amountInRaw": "10000000000000000",
+            "amountOutRaw": "1449440",
+            "amountOutFormatted": "1.44944",
+            "error": null
+          },
+          {
+            "fee": 3000,
+            "pool": "0xb40196272a6d2eb5edf6d93bc4dc39856ad95e0e",
+            "tokenIn": "USDG",
+            "tokenOut": "MRNA",
+            "amountInRaw": "10000000",
+            "amountOutRaw": "68578543421055599",
+            "amountOutFormatted": "0.068578543421055599",
+            "error": null
+          }
+        ]
+      },
+      {
+        "symbol": "NVTS",
+        "token": "0xbE6702d7b70315376dC48a3293f24f0982F86386",
+        "decimals": 18,
+        "oraclePaused": false,
+        "uiMultiplier": "1000000000000000000",
+        "status": "no-successful-direct-v3-sample-quote",
+        "pools": [
+          {
+            "symbol": "NVTS",
+            "fee": 10000,
+            "address": "0xa6db97fb3e2dcb5de6ec43b04be6aa151905dc17",
+            "activeLiquidity": "0",
+            "quotes": [
+              {
+                "tokenIn": "NVTS",
+                "tokenOut": "USDG",
+                "amountInRaw": "10000000000000000",
+                "amountOutRaw": null,
+                "amountOutFormatted": null,
+                "error": {
+                  "code": 3,
+                  "message": "execution reverted: Unexpected error",
+                  "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+                }
+              },
+              {
+                "tokenIn": "USDG",
+                "tokenOut": "NVTS",
+                "amountInRaw": "10000000",
+                "amountOutRaw": null,
+                "amountOutFormatted": null,
+                "error": {
+                  "code": 3,
+                  "message": "execution reverted: Unexpected error",
+                  "data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010556e6578706563746564206572726f7200000000000000000000000000000000"
+                }
+              }
+            ],
+            "bidirectionalSampleQuotes": false
+          }
+        ],
+        "bestSampleQuotes": [
+          null,
+          null
+        ]
+      },
+      {
+        "symbol": "RIVN",
+        "token": "0xB1BF26c1D20ff267A4f93550d1E0d06ac40a114B",
+        "decimals": 18,
+        "oraclePaused": false,
+        "uiMultiplier": "1000000000000000000",
+        "status": "quoted-in-both-directions",
+        "pools": [
+          {
+            "symbol": "RIVN",
+            "fee": 10000,
+            "address": "0xb30a75b200d98a600a3766869344928e35823e23",
+            "activeLiquidity": "114392560309969035",
+            "quotes": [
+              {
+                "tokenIn": "RIVN",
+                "tokenOut": "USDG",
+                "amountInRaw": "10000000000000000",
+                "amountOutRaw": "164784",
+                "amountOutFormatted": "0.164784",
+                "error": null
+              },
+              {
+                "tokenIn": "USDG",
+                "tokenOut": "RIVN",
+                "amountInRaw": "10000000",
+                "amountOutRaw": "594762345999600423",
+                "amountOutFormatted": "0.594762345999600423",
+                "error": null
+              }
+            ],
+            "bidirectionalSampleQuotes": true
+          }
+        ],
+        "bestSampleQuotes": [
+          {
+            "fee": 10000,
+            "pool": "0xb30a75b200d98a600a3766869344928e35823e23",
+            "tokenIn": "RIVN",
+            "tokenOut": "USDG",
+            "amountInRaw": "10000000000000000",
+            "amountOutRaw": "164784",
+            "amountOutFormatted": "0.164784",
+            "error": null
+          },
+          {
+            "fee": 10000,
+            "pool": "0xb30a75b200d98a600a3766869344928e35823e23",
+            "tokenIn": "USDG",
+            "tokenOut": "RIVN",
+            "amountInRaw": "10000000",
+            "amountOutRaw": "594762345999600423",
+            "amountOutFormatted": "0.594762345999600423",
+            "error": null
+          }
+        ]
+      },
+      {
+        "symbol": "RUN",
+        "token": "0x756Bc80af765C82da966a788858d65aDF14f3793",
+        "decimals": 18,
+        "oraclePaused": false,
+        "uiMultiplier": "1000000000000000000",
+        "status": "quoted-in-both-directions",
+        "pools": [
+          {
+            "symbol": "RUN",
+            "fee": 10000,
+            "address": "0xe6d0f53073041e12bc46759519499764a4b92d13",
+            "activeLiquidity": "49588789678261323",
+            "quotes": [
+              {
+                "tokenIn": "RUN",
+                "tokenOut": "USDG",
+                "amountInRaw": "10000000000000000",
+                "amountOutRaw": "86908",
+                "amountOutFormatted": "0.086908",
+                "error": null
+              },
+              {
+                "tokenIn": "USDG",
+                "tokenOut": "RUN",
+                "amountInRaw": "10000000",
+                "amountOutRaw": "1127655115692996217",
+                "amountOutFormatted": "1.127655115692996217",
+                "error": null
+              }
+            ],
+            "bidirectionalSampleQuotes": true
+          }
+        ],
+        "bestSampleQuotes": [
+          {
+            "fee": 10000,
+            "pool": "0xe6d0f53073041e12bc46759519499764a4b92d13",
+            "tokenIn": "RUN",
+            "tokenOut": "USDG",
+            "amountInRaw": "10000000000000000",
+            "amountOutRaw": "86908",
+            "amountOutFormatted": "0.086908",
+            "error": null
+          },
+          {
+            "fee": 10000,
+            "pool": "0xe6d0f53073041e12bc46759519499764a4b92d13",
+            "tokenIn": "USDG",
+            "tokenOut": "RUN",
+            "amountInRaw": "10000000",
+            "amountOutRaw": "1127655115692996217",
+            "amountOutFormatted": "1.127655115692996217",
+            "error": null
+          }
+        ]
+      }
+    ],
+    "limits": "A successful eth_call is not a funded wallet simulation or transaction receipt. Results cover direct Uniswap v3 USDG pairs and these sample amounts only; no v4, multihop, RFQ, ethical scoring or legal eligibility was checked. No portfolio/configuration changes were made."
+  }
+}

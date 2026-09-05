@@ -34,6 +34,9 @@ export async function initialStatus(): Promise<Status> {
 
 function withCurrentTargets(portfolio: Portfolio | null, config: Config): Portfolio | null {
   if (!portfolio) return null;
+  const ids = portfolio.positions.map(position => position.id);
+  if (ids.length !== Object.keys(config.targets).length || new Set(ids).size !== ids.length ||
+      ids.some(id => !Object.hasOwn(config.targets, id))) return null;
   return { ...portfolio, positions: portfolio.positions.map(position => ({
     ...position, targetBps: config.targets[position.id],
     driftBps: position.weightBps - config.targets[position.id],
@@ -50,6 +53,13 @@ export async function status(): Promise<Status> {
     state.mode = config.mode;
     state.config = { targets: config.targets };
     state.portfolio = withCurrentTargets(state.portfolio, config);
+    if (!state.portfolio) {
+      state.updatedAt = null;
+      delete state.nativeBalance;
+      delete state.blockNumber;
+      delete state.valuationNote;
+      delete state.proposal;
+    }
     if (JSON.stringify(saved?.config?.targets) !== JSON.stringify(config.targets)) delete state.proposal;
   }
   const [lock, stopped] = await Promise.all([
@@ -82,11 +92,12 @@ export async function tick(execute: boolean): Promise<Status> {
   if (configured && previous?.wallet?.toLowerCase() === configured.wallet.toLowerCase()) {
     // Keep the last observation visible while waiting for a receipt or a market
     // to reopen. Its original timestamp remains the chart's freshness signal.
+    const retained = withCurrentTargets(previous.portfolio, configured);
     Object.assign(state, {
       wallet: configured.wallet, mode: configured.mode, config: { targets: configured.targets },
-      portfolio: withCurrentTargets(previous.portfolio, configured), updatedAt: previous.updatedAt,
-      nativeBalance: previous.nativeBalance, blockNumber: previous.blockNumber,
-      valuationNote: previous.valuationNote, operation: previous.operation,
+      portfolio: retained, updatedAt: retained ? previous.updatedAt : null,
+      nativeBalance: retained ? previous.nativeBalance : undefined, blockNumber: retained ? previous.blockNumber : undefined,
+      valuationNote: retained ? previous.valuationNote : undefined, operation: previous.operation,
     });
   }
   let config: Config;

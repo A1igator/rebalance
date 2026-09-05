@@ -13,7 +13,7 @@ Run commands from the Rebalance repository. If dependencies are missing, install
 
 Use only public wallet metadata and CLI status. Never read, print, copy, or inspect private-key files, secret environment values, seed phrases, or credentials. `wallet create` handles key generation locally and returns the public address. Do not replace an existing wallet to resolve an error.
 
-The initial live signer is `private-key` on Robinhood mainnet, chain ID 4663. Privy and Ledger are deferred adapters; do not present them as working signing options. The portfolio has five assets: USDG, TSLA, AAPL, NVDA, and AMZN. Use the app's verified asset manifest and public status; do not substitute similarly named tokens or assume a listed asset has an executable route. Native ETH is reserved for gas and is excluded from the pie and target weights.
+The initial live signer is `private-key` on Robinhood mainnet, chain ID 4663. Privy and Ledger are deferred adapters; do not present them as working signing options. Each portfolio selects USDG and four stocks from the verified manifest. The current demo uses AAPL, NVDA, MSFT and AMD; earlier TSLA/AMZN/RUN/MRNA selections remain supported. Read [the demo rationale](../../docs/DEMO_PORTFOLIO.md) when discussing the demo theme or selecting replacements. Use the app's verified asset manifest and public status; do not substitute similarly named tokens or assume a listed asset has an executable route. Native ETH is reserved for gas and is excluded from the pie and target weights.
 
 ## Translate the requested operation
 
@@ -21,7 +21,7 @@ The initial live signer is `private-key` on Robinhood mainnet, chain ID 4663. Pr
 | --- | --- |
 | Show wallet, configuration, holdings, or operation state | `npm run cli -- status` |
 | Create a local wallet | `npm run cli -- wallet create` |
-| Set the complete allocation | `npm run cli -- configure --targets USDG=20,TSLA=20,AAPL=20,NVDA=20,AMZN=20` |
+| Set the complete allocation | `npm run cli -- configure --targets USDG=20,AAPL=20,NVDA=20,MSFT=20,AMD=20` |
 | Change one existing target | `npm run cli -- targets set USDG 30` |
 | Inspect current holdings and preview the deterministic plan | `npm run cli -- check` |
 | Start automatic local rebalancing | `npm run cli -- start --background` |
@@ -31,7 +31,9 @@ The initial live signer is `private-key` on Robinhood mainnet, chain ID 4663. Pr
 | Inspect persisted notification events | `npm run cli -- events` |
 | Acknowledge a handled event | `npm run cli -- events ack ID` |
 
-The numbers above are syntax examples, not recommendations or authorized allocations. Substitute the user's percentages for all five symbols. Never invent investment weights; replace `ID` with an actual event ID. If the user has not supplied targets and none are saved, finish independent setup and ask for the desired five-asset split before configuring. Targets must total 100%; the CLI accepts percentages with up to two decimal places and stores integer basis points.
+The numbers above are syntax examples, not recommendations or authorized allocations. Substitute the user's percentages for all five symbols. Use supplied/saved weights or an explicit delegation to choose demo weights; replace `ID` with an actual event ID. If none of those apply, finish independent setup and ask for the desired five-asset split before configuring. Targets must total 100%; the CLI accepts percentages with up to two decimal places and stores integer basis points.
+
+Changing the selected symbols replaces the tracked allocation; it does not liquidate removed tokens. Inspect holdings first and account for any held asset before removing it. Recheck the new selection through `check`; catalog listing alone does not prove route availability.
 
 For a one-target change, the CLI proportionally redistributes the remainder among the other configured assets. Report the resulting full allocation. If the prior targets cannot be redistributed, request a complete split instead of guessing.
 

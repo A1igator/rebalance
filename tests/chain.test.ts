@@ -25,6 +25,8 @@ const POOLS: Record<string, Record<number, Address>> = {
   AAPL: { 500: "0xaae0d815ee56e4092a5e5c2911e676fea50b2d6d", 3000: "0x783c9bbb765047cfdd2b84b92b2ca9f11d34b7ed", 10000: "0x3714aa8105de1f384481b425788af413748c1837" },
   NVDA: { 100: "0xb75d2d02b0ec3de50d32e40a4f1a8dae8acc4333", 500: "0xd4eb21209c4d6093f80b5b84f5c45cc093ea14a3", 3000: "0xb944cec30bd4175855215d767adc81f39e5f7e2b", 10000: "0xc277560df3689a401ba7dedd7626168b234ceb5e" },
   AMZN: { 100: "0x7b242dfa849419242e3733308d5c91fe2a7dae7e", 3000: "0x8ac92da74ab5f3b1d024dc1943ad7e15dc4179ef", 10000: "0x25967b7ca2d06aa46e47e188231ca78c87ef1fd7" },
+  // Synthetic local fixture only; no live RUN pool identity is asserted here.
+  RUN: { 500: "0x000000000000000000000000000000000000000a" },
 };
 const ZERO: Address = "0x0000000000000000000000000000000000000000";
 const WALLET: Address = "0x0000000000000000000000000000000000000001";
@@ -51,7 +53,10 @@ const TRANSACTION_ABI = parseAbi([
 
 type RpcRequest = { id: number; method: string; params: unknown[] };
 
-function fixture(t: TestContext) {
+const originalTargets = { USDG: 2_000, TSLA: 2_000, AAPL: 2_000, NVDA: 2_000, AMZN: 2_000 };
+
+function fixture(t: TestContext, targets: Record<string, number> = originalTargets) {
+  const selectedAssets = Object.values(ASSETS).filter(asset => Object.hasOwn(targets, asset.id));
   const state = {
     now: 1_788_570_000n,
     timestamp: 1_788_570_000n,
@@ -61,11 +66,11 @@ function fixture(t: TestContext) {
     omitTimestamp: false,
     allowance: 0n,
     native: ETHER,
-    balances: { USDG: 5_000n * 10n ** 6n, TSLA: 2n * ETHER, AAPL: 2n * ETHER, NVDA: 2n * ETHER, AMZN: 2n * ETHER } as Record<string, bigint>,
-    decimals: { USDG: 6, TSLA: 18, AAPL: 18, NVDA: 18, AMZN: 18 } as Record<string, number>,
-    symbols: { USDG: "USDG", TSLA: "TSLA", AAPL: "AAPL", NVDA: "NVDA", AMZN: "AMZN" } as Record<string, string>,
+    balances: Object.fromEntries(selectedAssets.map(asset => [asset.id, asset.id === 'USDG' ? 5_000n * 10n ** 6n : 2n * ETHER])),
+    decimals: Object.fromEntries(selectedAssets.map(asset => [asset.id, asset.decimals])),
+    symbols: Object.fromEntries(selectedAssets.map(asset => [asset.id, asset.symbol])) as Record<string, string>,
     paused: new Set<string>(),
-    multipliers: { TSLA: ETHER, AAPL: 2n * ETHER, NVDA: ETHER, AMZN: ETHER } as Record<string, bigint>,
+    multipliers: Object.fromEntries(selectedAssets.map(asset => [asset.id, asset.id === 'AAPL' ? 2n * ETHER : ETHER])),
     factory: FACTORY,
     poolOverride: undefined as Address | undefined,
     emptyCode: undefined as Address | undefined,
@@ -76,7 +81,8 @@ function fixture(t: TestContext) {
   };
   const uint = (value: bigint | number) => encodeAbiParameters([{ type: "uint256" }], [BigInt(value)]);
   const address = (value: Address) => encodeAbiParameters([{ type: "address" }], [value]);
-  const canonical = new Set([...Object.values(ASSETS).map(a => a.address), FACTORY, QUOTER, ROUTER, ...Object.values(POOLS).flatMap(p => Object.values(p))].map((a) => a.toLowerCase()));
+  const selectedPools = selectedAssets.filter(asset => asset.id !== 'USDG').flatMap(asset => Object.values(POOLS[asset.id]));
+  const canonical = new Set([...selectedAssets.map(a => a.address), FACTORY, QUOTER, ROUTER, ...selectedPools].map((a) => a.toLowerCase()));
   t.mock.method(Date, "now", () => Number(state.now) * 1_000);
   t.mock.method(globalThis, "fetch", async (input: string | URL | Request, options?: RequestInit) => {
     assert.equal(String(input), "http://chain-fixture.invalid/");
@@ -100,7 +106,7 @@ function fixture(t: TestContext) {
       assert.equal(params.at(-1), toHex(state.blockNumber), "State reads must use the selected block");
       if (method === "eth_getCode") {
         const target = String(params[0]).toLowerCase();
-        assert(canonical.has(target), "Only canonical token/router/pool addresses are checked");
+        assert(canonical.has(target), "Only selected token/router/pool addresses are checked");
         result = target === state.emptyCode?.toLowerCase() ? "0x" : "0x6000";
       } else if (method === "eth_getBalance") {
         assert.equal(getAddress(String(params[0])), WALLET);
@@ -108,7 +114,7 @@ function fixture(t: TestContext) {
       } else if (method === "eth_call") {
         const call = params[0] as { to: Address; data: Hex };
         const target = getAddress(call.to);
-        const asset = Object.values(ASSETS).find(a => getAddress(a.address) === target)?.id;
+        const asset = selectedAssets.find(a => getAddress(a.address) === target)?.id;
         const decoded = decodeFunctionData({ abi: RPC_ABI, data: call.data });
         switch (decoded.functionName) {
           case "symbol":
@@ -145,7 +151,7 @@ function fixture(t: TestContext) {
           case "getPool":
             assert.equal(target, FACTORY);
             assert.equal(decoded.args[1], USDG);
-            const stock = Object.values(ASSETS).find(a => a.address === decoded.args[0]);
+            const stock = selectedAssets.find(a => a.address === decoded.args[0]);
             assert(stock && stock.id !== "USDG");
             result = address(state.poolOverride ?? POOLS[stock.id]![decoded.args[2]] ?? ZERO);
             break;
@@ -155,7 +161,7 @@ function fixture(t: TestContext) {
             assert.equal(sqrtPriceLimitX96, 0n);
             const sellStock = getAddress(tokenIn) !== getAddress(USDG);
             assert.equal(getAddress(sellStock ? tokenOut : tokenIn), getAddress(USDG));
-            assert(Object.values(ASSETS).some(a => a.id !== "USDG" && getAddress(a.address) === getAddress(sellStock ? tokenIn : tokenOut)));
+            assert(selectedAssets.some(a => a.id !== "USDG" && getAddress(a.address) === getAddress(sellStock ? tokenIn : tokenOut)));
             const output = sellStock
               ? (state.forward[fee]! * amountIn) / SAMPLE
               : (state.reverse[fee]! * amountIn) / 10_000_000n;
@@ -177,7 +183,7 @@ function fixture(t: TestContext) {
   });
   const config: ChainConfig = {
     rpcUrl: "http://chain-fixture.invalid", wallet: WALLET,
-    targets: { USDG: 2_000, TSLA: 2_000, AAPL: 2_000, NVDA: 2_000, AMZN: 2_000 }, slippageBps: 50, deadlineSeconds: 60,
+    targets, slippageBps: 50, deadlineSeconds: 60,
   };
   return { state, config, chain: createChain(config) };
 }
@@ -334,14 +340,52 @@ test("corporate-action pause blocks observations, quotes and approvals in either
   assert.equal((await chain.transaction(trade, initial)).kind, "approval");
 });
 
-test("configuration requires all five assets and offers no WETH wrap feature", (t) => {
+test("configuration requires exactly USDG plus four supported stocks and offers no WETH wrap feature", (t) => {
   const { chain, config } = fixture(t);
   assert.equal(Object.hasOwn(chain, "wrapTransaction"), false);
   assert.equal(Object.hasOwn(ASSETS, "WETH"), false);
   assert.throws(() => createChain({ ...config, targets: { WETH: 5_000, USDG: 5_000 } }), /Targets/);
   assert.throws(() => createChain({ ...config, targets: { ...config.targets, TSLA: 2_001 } }), /Targets/);
+  assert.throws(() => createChain({ ...config, targets: { ...config.targets, RUN: 0 } }), /Targets/);
+  assert.throws(() => createChain({ ...config, targets: { TSLA: 2000, AAPL: 2000, NVDA: 2000, AMZN: 2000, RUN: 2000 } }), /Targets/);
+  assert.throws(() => createChain({ ...config, targets: { USDG: 2000, TSLA: 2000, AAPL: 2000, NVDA: 2000, UNKNOWN: 2000 } }), /Targets/);
   assert.throws(() => createChain({ ...config, slippageBps: 10_000 }), /Slippage/);
   assert.throws(() => createChain({ ...config, slippageBps: 0.5 }), /Slippage/);
   assert.throws(() => createChain({ ...config, deadlineSeconds: 0 }), /Deadline/);
   assert.throws(() => createChain({ ...config, wallet: ZERO }), /Wallet/);
+});
+
+test("an alternate selection reads and prices only its stocks, ignoring an unselected stock's pause and pools", async t => {
+  const targets = { USDG: 500, AAPL: 2375, NVDA: 2375, AMZN: 2375, RUN: 2375 };
+  const { state, chain } = fixture(t, targets);
+  state.paused.add('TSLA');
+  state.emptyCode = ASSETS.TSLA.address;
+  const snapshot = await chain.snapshot();
+  assert.deepEqual(snapshot.portfolio.positions.map(position => position.id), Object.keys(targets));
+  assert.deepEqual(Object.keys(snapshot.multipliers), ['AAPL', 'NVDA', 'AMZN', 'RUN']);
+  const poolsRead = state.requests.filter(request => request.method === 'eth_call').flatMap(request => {
+    const decoded = decodeFunctionData({ abi: RPC_ABI, data: (request.params[0] as { data: Hex }).data });
+    return decoded.functionName === 'getPool' ? [decoded.args[0].toLowerCase()] : [];
+  });
+  assert.equal(poolsRead.length, 16);
+  assert.equal(poolsRead.includes(ASSETS.TSLA.address.toLowerCase()), false);
+  assert.equal(poolsRead.includes(ASSETS.MRNA.address.toLowerCase()), false);
+  assert.ok(poolsRead.includes(ASSETS.RUN.address.toLowerCase()));
+  const runTrade = { ...trade, sellAssetId: 'RUN' };
+  const quoted = await chain.quote(runTrade);
+  assert.equal(quoted.fee, 500);
+  assert.equal((await chain.transaction(runTrade, quoted)).kind, 'approval');
+});
+
+test("known but unconfigured stocks cannot be quoted or used to build transactions", async t => {
+  const { state, chain } = fixture(t);
+  const previous = { amountOut: 1n, minimumOut: 1n, fee: 500, blockNumber: 100n };
+  for (const unconfigured of [
+    { ...trade, sellAssetId: 'RUN' },
+    { ...trade, sellAssetId: 'USDG', buyAssetId: 'MRNA' },
+  ]) {
+    await assert.rejects(chain.quote(unconfigured), /configured stock/);
+    await assert.rejects(chain.transaction(unconfigured, previous), /configured stock/);
+  }
+  assert.deepEqual(state.requests, [], 'unconfigured trades must fail before any RPC request');
 });

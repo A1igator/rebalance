@@ -52,7 +52,7 @@ flowchart TD
 | Execute | An authorized running configuration and current plan | Submission result and a durable transaction identity |
 | Receipt/recovery | Pending identity and RPC transaction/receipt observations | A resolved result or an unresolved state that blocks blind replacement |
 
-Local configuration, status, and transaction records connect the stages. The signing key is separate from public status and is consumed by the local signer, never supplied to the coding agent or browser. Status can expose the current graph node and recent trace; the chart only reads this state.
+Local configuration, status, and transaction records connect the stages. The signing key is separate from public status and is consumed by the local signer, never supplied to the coding agent or browser. CLI status exposes the current graph node and recent trace. The UI displays only a pie chart with ticker/percentage labels: current holdings when funded, explicitly labeled saved targets when empty, and an unavailable/stale indication when a refresh fails. It has no dashboard sections.
 
 Changing a target does not fabricate a new holding. A submitted transaction does not immediately count as a successful rebalance. Receipt feedback resolves its recorded identity, and a subsequent observation measures the actual portfolio again. The next plan uses those observations rather than an LLM's description of the previous outcome.
 

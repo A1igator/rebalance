@@ -36,8 +36,10 @@ export function validateConfig(value: unknown): Config {
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search) {
     throw new Error('Use an HTTP(S) RPC URL without credentials or query parameters');
   }
-  if (!c.targets || Object.keys(c.targets).sort().join(',') !== Object.keys(ASSETS).sort().join(',')) {
-    throw new Error(`Specify all five targets: ${Object.keys(ASSETS).join(', ')}`);
+  if (!c.targets || typeof c.targets !== 'object' || Array.isArray(c.targets) ||
+      Object.keys(c.targets).length !== 5 || !Object.hasOwn(c.targets, 'USDG') ||
+      Object.keys(c.targets).some(id => !Object.hasOwn(ASSETS, id))) {
+    throw new Error('Select exactly USDG plus four supported stock targets');
   }
   for (const weight of Object.values(c.targets)) {
     if (!Number.isInteger(weight) || weight < 0 || weight > 10000) throw new Error('Targets must be integer basis points');
@@ -70,7 +72,7 @@ export function parseTargets(input: string): Record<string, number> {
   for (const pair of input.split(',')) {
     const [asset, percent, extra] = pair.split('=');
     if (!asset || percent === undefined || extra !== undefined || Object.hasOwn(targets, asset)) {
-      throw new Error('Targets format: USDG=20,TSLA=20,AAPL=20,NVDA=20,AMZN=20; no duplicate assets');
+      throw new Error('Targets format: ASSET=percent,... (USDG plus four supported stocks); no duplicate assets');
     }
     targets[asset] = percentToBps(percent);
   }
