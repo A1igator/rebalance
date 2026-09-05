@@ -1,6 +1,6 @@
 # Ledger Agent Stack integration assessment
 
-Research: **2026-09-04**. No package installation, runtime probe, account discovery, hardware test or transaction has occurred. These are documentation/source findings, not a working integration. Read the [minimal-scope decisions](prompts/006-minimal-mvp.md) and [session-key discussion](prompts/007-session-key-reconsideration.md) alongside the current plan.
+Research: **2026-09-04**. No package installation, runtime probe, account discovery, hardware test or transaction has occurred. These are documentation/source findings, not a working integration. Read the [minimal-scope decisions](prompts/006-minimal-mvp.md) and [latest direct-signing decision](prompts/008-direct-signing-and-ledger-connect.md) alongside the current plan.
 
 ## Reuse strategy
 
@@ -40,8 +40,8 @@ Retain a small local broker for a credential the application actually needs, suc
 
 For [Ledger judging](https://ethglobal.com/events/ethonline2026/prizes/ledger), demonstrate real device-confirmed rebalancing and rejection, plus a Ring-backed allowed/denied operation if adopted. Keep device feedback pending until tested. No installation count or speculative broker substitutes for working evidence.
 
-## Session delegation under consideration
+## Current Ledger flow
 
-Ledger's public roadmap lists agent intents, queued approvals and bounded autonomy as coming soon. It is a product direction, not a verified current session API. DMK can provide device review in our planned adapter; an existing account/session module could add unattended execution after Ledger authorizes the session. [Roadmap](https://shop.ledger.com/pages/ledger-agent-stack)
+Use direct hardware signing with current Agent Stack components. Session-key/delegation work is cancelled; the earlier discussion remains in prompt history. Track the configured public address without a device. On connection or startup with the device attached, reconcile earlier sends, refresh balances/drift and prepare a fresh quote if rebalancing is still needed. Queue one agent-visible request, retaining it if the agent is unavailable.
 
-Assess one module with permitted rebalance operations, recipient, expiry and owner revocation, but no spending/usage caps or accounting. A session needs enforceable account/contract authorization; an ordinary Ledger EOA signature over local JSON is insufficient. Verify the selected chain and actual allowed/rejected operations before adopting it. If successful, describe the demo as Ledger-authorized session execution: subsequent swaps are signed by the session key, not freshly approved on the device. The chart remains view only.
+Check device/app readiness and the configured account before signing. Connection or Ring decryption is not transaction approval. Physical confirmation remains required for each signing operation. Keep monitoring after rejection without repeatedly reopening its prompt. Demonstrate disconnected drift tracking, connection, the fresh request and device signing/rejection; the chart remains view only.

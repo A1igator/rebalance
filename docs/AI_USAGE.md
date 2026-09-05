@@ -64,6 +64,14 @@ The assistant rechecked Ledger's roadmap and reviewed primary session/account do
 
 Validation: active-document consistency review, local Markdown links and Git whitespace checks. No application code, package/skill installation, wallet, key, runtime probe, transaction, hardware test, deployment or external sponsor submission was created. Research candidates are not adopted dependencies.
 
+## Direct signing and Ledger connection prompt — 2026-09-04
+
+Human decision: cancel session keys and maximize current Ledger Agent Stack compatibility for the demo. Raw-key/Privy sign automatically; Ledger tracks drift and prompts to rebalance on connection. Exact requests and the review task are in [the prompt record](prompts/008-direct-signing-and-ledger-connect.md).
+
+Codex updated `PLAN.md`, `README.md`, `AGENTS.md`, `CLAUDE.md`, `docs/PRIVY.md`, `docs/RESEARCH.md`, `docs/LEDGER_AGENT_STACK.md`, `docs/HACKATHON.md`, `docs/LEDGER_FEEDBACK.md` and this disclosure; created the new prompt record. The active documents remove the session feasibility milestone and define saved-address monitoring, fresh connection-triggered requests, physical confirmation, notification deduplication and pending-send reconciliation. An independent reviewer checked connection/readiness and recovery semantics. Ledger/Privy prize features remain; spending caps/budget accounting remain excluded.
+
+Validation: documentation consistency, local Markdown-link and Git whitespace checks. Historical prompts and disclosure entries remain unchanged. No application code, dependencies, wallet, keys, device connection, live notification integration, transaction or sponsor submission was created. Connection behavior is planned, not tested hardware functionality.
+
 ## Development log template
 
 For each material implementation session, append:

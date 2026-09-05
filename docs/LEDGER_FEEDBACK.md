@@ -13,6 +13,7 @@ Complete with actual evidence:
 - Selected-chain domain and transaction signing behavior, including meaningful device display.
 - Context resolution, any credentials or external requests, and local-operation limitations.
 - Confirm/reject/disconnect results and protection of the proposal-to-authorization boundary.
+- Drift tracking without the device, connection/app readiness detection, one fresh agent prompt on connect and reconciliation of earlier sends.
 - Specific confusing flows, gaps and suggested improvements; screenshots or PRs if useful.
 - Reproduction instructions and exact code links.
 
