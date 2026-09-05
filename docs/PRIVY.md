@@ -28,14 +28,14 @@ Keep supported Privy-native contract/method or signer restrictions for a focused
 
 The view-only chart is compatible. Agent-only user controls are also plausible with SDK/REST, but verify actual provisioning/authentication flows instead of claiming that the existing CLI has no browser step. Developer account setup and wallet ownership/authorization configuration remain unresolved.
 
-Privy lists **Robinhood Testnet** in its gas-sponsorship network support. This is useful compatibility evidence, not proof that every desired transaction, mainnet gas feature or policy is supported. The project also considers Base; verify the selected chain and wallet capabilities in an integration spike. [Gas network support](https://docs.privy.io/wallets/gas-and-asset-management/gas/overview)
+The project now targets Robinhood or Base **mainnet**. Verify the selected chain's actual wallet signing/submission and authorization behavior. The earlier Robinhood Testnet gas-sponsorship listing does not establish mainnet support or sponsorship. Gas sponsorship is not required for this MVP; use ordinary fee payment when appropriate. [Gas network support](https://docs.privy.io/wallets/gas-and-asset-management/gas/overview)
 
 Privy supports private-key import/export, but importing a key places signing in its API-managed model; it does not implement this project's local raw-key backend. Exporting and doing everything locally may weaken the claim that Privy is core. Keep these concepts separate. [Private-key import](https://docs.privy.io/wallets/wallets/import-a-wallet/private-key), [export](https://docs.privy.io/wallets/wallets/export)
 
 ## Delivery gates
 
 - [ ] Core raw-key/Uniswap flow and deterministic tests are working.
-- [ ] A concrete Privy wallet flow offers user value and executes real supported operations in the demo environment.
+- [ ] A concrete Privy wallet flow offers user value and executes real supported mainnet operations with receipt evidence.
 - [ ] Agent-mediated setup/control, ownership, credentials and network support are verified, with a focused demonstration of supported Privy authorization restrictions and no spending limits.
 - [ ] Swaps execute with the coding agent closed and no per-trade human input; a pending transaction/provider-request record prevents duplicate sends.
 - [x] Owner accepts Privy's TEE-based hosted signing for the optional mode; local backends remain independent by design.

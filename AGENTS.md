@@ -12,7 +12,7 @@ This is an ETHOnline 2026 **Start from Scratch** project. Read `PLAN.md`, `docs/
 - Retain correct swap mechanics: integer amounts, valid target weights, correct network/assets/recipient, usable prices/routes, normal slippage/expiry, sufficient balance/gas and receipt tracking before another trade. Do not silently switch signers/accounts or duplicate unresolved transactions.
 - Cloud LLM assistance and Privy's TEE are accepted. Keep secrets outside chat, source control and logs using local/provider setup or the focused Ring integration.
 - Maximize applicable Ledger Agent Stack reuse and pin adopted versions/licenses. Read `docs/LEDGER_AGENT_STACK.md`; shared EVM config includes Robinhood/Base, and the CLI quote guard is not a blanket chain restriction.
-- Robinhood remains viable; other L2s are allowed. Read `docs/NETWORK.md`, choose one working integration and preserve truthful asset/liquidity/verification claims. Begin with an actual testnet swap; simulation is a test tool.
+- All live integration, deployments and demo transactions use mainnet: Robinhood 4663 first, Base 8453 as the alternative. Read `docs/NETWORK.md`, verify live assets/routes and preserve truthful stock/liquidity/verification claims. No testnet milestones or mock-stock/test-pool demo fallback. Local unit/fork tests remain development checks.
 - Keep application storage/calculation/chart local, bundle UI assets and avoid application telemetry. Disclose external RPC, Ledger or Privy dependencies accurately.
 - Test the core arithmetic, automatic/device-confirmed execution and basic recovery. Record actual results; no invented hardware, network or sponsor evidence.
 

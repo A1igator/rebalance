@@ -4,11 +4,13 @@ Research date: **2026-09-04**. These findings come from primary documentation, n
 
 Current decisions are in [PLAN.md](../PLAN.md), [network candidates](NETWORK.md) and the [Ledger Agent Stack assessment](LEDGER_AGENT_STACK.md). Robinhood remains viable, with Base as an alternative. Raw-key/Privy swaps sign automatically with no spending caps or budget accounting. Ledger tracks drift while disconnected and prompts for a fresh rebalance on connection, requiring physical confirmation. Session keys and the earlier custom vault/budget architecture are out of scope.
 
+Live integration and demo are now mainnet-only: Robinhood 4663 first, Base 8453 as the alternative. Local tests remain development checks. Earlier testnet milestones and mock-stock/test-pool fallback plans are superseded.
+
 ## Robinhood network and assets
 
-Robinhood documents mainnet **4663** and testnet **46630**, with ETH gas, an Arbitrum L2 architecture and Ethereum blob data availability. Public RPC access is available but does not prove returned state. [Network reference](https://docs.robinhood.com/chain/connecting/)
+Robinhood documents mainnet **4663**, with ETH gas, an Arbitrum L2 architecture and Ethereum blob data availability. Public RPC access is available but does not prove returned state. [Network reference](https://docs.robinhood.com/chain/connecting/)
 
-Stock Tokens are issuer-backed debt securities that provide economic exposure; they are not direct ownership of the underlying shares. Mint/redemption and transfer/access restrictions remain part of the asset model. Real-asset eligibility must be checked for the actual participant and use; do not infer it from a local timezone. Use labelled simulated/test assets until acquisition and demo eligibility are verified. [Stock Token reference](https://docs.robinhood.com/chain/stock-tokens/)
+Stock Tokens are issuer-backed debt securities that provide economic exposure; they are not direct ownership of the underlying shares. Mint/redemption and transfer/access restrictions remain part of the asset model. Real-asset eligibility must be checked for the actual participant and use; do not infer it from a local timezone. If stock acquisition or tradability is unverified, demonstrate other supported live assets and leave stock execution incomplete. [Stock Token reference](https://docs.robinhood.com/chain/stock-tokens/)
 
 The platform documents RFQ trading at launch and AMM composability. A Uniswap deployment does not establish liquid pools for a particular stock. Verify token contracts, tradability, pool identity, depth and price sources as separate gates. [Trading integration](https://docs.robinhood.com/chain/building-with-stock-tokens/), [canonical contracts](https://docs.robinhood.com/chain/contracts/)
 
@@ -18,9 +20,9 @@ Stock price feeds already incorporate corporate-action multipliers. They update 
 
 Uniswap's **July 1, 2026** announcement states that v2, v3, v4 and UniswapX are live on Robinhood mainnet. Direct protocol integration is therefore a plausible path. [Launch announcement](https://developers.uniswap.org/docs/changelog/completed-notifications/uniswapx-live-on-robinhood-chain)
 
-The official v4 registry lists Robinhood mainnet contracts. Testnet 46630 was not listed in the v4 testnet table reviewed. Choose and record one supported version, contract set, route and license during the first spike. Do not infer addresses from another chain. Verify chain ID, deployed code and any proxy implementation against canonical sources before signing. [Canonical v4 deployments](https://developers.uniswap.org/docs/protocols/v4/deployments)
+The official v4 registry lists Robinhood mainnet contracts. Choose and record one supported version, contract set, route and license during the first spike. Do not infer addresses from another chain. Verify chain ID, deployed code and any proxy implementation against canonical sources before signing. [Canonical v4 deployments](https://developers.uniswap.org/docs/protocols/v4/deployments)
 
-If target testnet deployments/liquidity are unavailable, use a clearly labelled local fork or a test deployment of upstream contracts under their applicable licenses. Distinguish upstream protocol work from the original rebalancer implementation. Do not call a self-deployed test pool an official deployment or suggest that mock stock tokens represent real equities.
+If the required Robinhood route is unavailable, evaluate Base mainnet or another supported live asset pair. Local forks/fixtures may test the implementation but do not replace mainnet integration evidence. Distinguish upstream protocol work from the original rebalancer and preserve applicable licenses.
 
 ## Local verification
 
@@ -34,7 +36,7 @@ Decision: support a labelled RPC integration first; evaluate node/light-client a
 
 ## Ledger
 
-Scheduling update, **2026-09-04**: the owner's device is expected in a couple of days. Defer physical integration and verification until arrival is confirmed; proceed with deterministic core, Ledger component evaluation and an actual raw-key testnet Uniswap flow. Local simulation remains a test tool. The findings below are design references, not hardware evidence.
+Scheduling update, **2026-09-04**: the owner's device is expected in a couple of days. Defer physical integration and verification until arrival is confirmed; proceed with deterministic core, Ledger component evaluation and an actual raw-key mainnet Uniswap flow. Local simulation remains a test tool. The findings below are design references, not hardware evidence.
 
 Current Ethereum Signer Kit documentation supports raw transactions and EIP-712 typed data. Its default context module requires a Ledger-issued `originToken`; a custom context interface is documented. Hardware signing support does not prove meaningful display for this project's chain and policy. [Signer reference](https://developers.ledger.com/docs/device-interaction/dmk-ts/references/signers/eth)
 
@@ -50,9 +52,9 @@ Privy is the third planned prize target with an optional automatic signer mode. 
 
 | Gate | Required evidence | If unavailable |
 | --- | --- | --- |
-| Assets and acquisition | Canonical addresses, transfer behavior, actual eligibility and allowed demo use | Test/simulated assets |
-| Uniswap integration | Canonical contracts/code, supported route, pool state and sufficient depth | Labelled fork/test pools |
-| Price data | Correct feed semantics/decimals, usable prices and normal swap output bounds | Skip trading if inputs are unavailable; label test assets accurately |
+| Assets and acquisition | Canonical addresses, transfer behavior, actual eligibility and allowed demo use | Use another supported live asset; mark stock execution incomplete |
+| Uniswap integration | Canonical contracts/code, supported route, pool state and sufficient depth | Evaluate another live pair or Base mainnet; no testnet/test-pool substitute |
+| Price data | Correct feed semantics/decimals, usable prices and normal swap output bounds | Skip trading if inputs are unavailable |
 | Ledger | Physical device signing/display and local context path | Disclose gap; no completed Ledger claim |
 | Automatic execution | Correct amount/recipient/route, basic pending-transaction recovery and actual receipt | Stop on invalid data or unresolved send; no spending/accounting subsystem |
 | Light verification | Working selected-chain verification path, including relevant native token behavior and finality assumptions | Document RPC/full-node modes |

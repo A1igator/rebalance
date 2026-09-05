@@ -72,6 +72,14 @@ Codex updated `PLAN.md`, `README.md`, `AGENTS.md`, `CLAUDE.md`, `docs/PRIVY.md`,
 
 Validation: documentation consistency, local Markdown-link and Git whitespace checks. Historical prompts and disclosure entries remain unchanged. No application code, dependencies, wallet, keys, device connection, live notification integration, transaction or sponsor submission was created. Connection behavior is planned, not tested hardware functionality.
 
+## Mainnet-only live integration and demo — 2026-09-04
+
+Human decision: use mainnet for all live integration, deployments and demo transactions. The exact request and review prompt are recorded in [the mainnet prompt](prompts/009-mainnet-only.md).
+
+Codex updated `PLAN.md`, `README.md`, `AGENTS.md`, `CLAUDE.md`, `docs/NETWORK.md`, `docs/RESEARCH.md`, `docs/PRIVY.md` and this disclosure; created the new prompt record. A parallel reviewer identified stale testnet milestones, mock-asset/test-pool fallbacks and the limits of prior Privy testnet compatibility evidence. Active milestones now target Robinhood mainnet first, Base mainnet as the alternative, with live assets and actual receipts. Local tests remain development checks. Existing signer modes, no-session/no-budget scope and sponsor features are preserved.
+
+Validation: documentation consistency, local Markdown links and Git whitespace checks. Historical records remain intact. No gas-price measurement, runtime RPC probe, wallet, secret, application code, dependency, deployment or transaction was created. Mainnet is the planned execution environment, not an already completed integration.
+
 ## Development log template
 
 For each material implementation session, append:

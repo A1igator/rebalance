@@ -4,6 +4,8 @@ Created: **2026-09-04**. Track: **ETHOnline 2026, Start from Scratch**. Status: 
 
 The [latest decision](docs/prompts/008-direct-signing-and-ledger-connect.md) returns to direct signing and removes the session-key feasibility work. Raw-key/Privy swaps are automatic; Ledger tracks drift and prompts to rebalance when connected. The [simplification decision](docs/prompts/006-minimal-mvp.md) still excludes spending caps and budget accounting while retaining sponsor-specific features. Earlier discussions remain in Git as history. Cloud LLM input and Privy's TEE signing are accepted. Physical Ledger testing waits for the device to arrive.
 
+The [mainnet decision](docs/prompts/009-mainnet-only.md) makes all live integration, deployments and demo transactions mainnet-only. Robinhood mainnet (4663) is the first target; Base mainnet (8453) is the alternative. Local tests remain development checks, with no testnet milestone.
+
 ## 1. What we are building
 
 A local portfolio rebalancer with Claude Code/Codex as its only application command interface and a **view-only pie chart**. Ask the agent to change ETH from 20% to 30%; deterministic code updates the complete allocation and handles subsequent rebalancing.
@@ -73,13 +75,13 @@ Keep this inside the Privy integration rather than a generic cross-signer permis
 
 ## 6. Network and assets
 
-Robinhood remains viable; Base is an alternative under the user's any-L2 preference. Verify the existing integration path and choose one network before implementation depends on it. Base Sepolia is a documented Uniswap testnet candidate. Keep the detailed evidence in [NETWORK.md](docs/NETWORK.md).
+Use Robinhood mainnet (4663) first, with Base mainnet (8453) as the alternative under the user's any-L2 preference. Verify a usable existing Uniswap route and Ledger integration on the selected mainnet. All broadcasts and project deployments target mainnet; do not switch to a testnet when an integration is unavailable. Keep the detailed evidence in [NETWORK.md](docs/NETWORK.md).
 
-The first milestone is an **actual automatic raw-key testnet Uniswap swap, receipt and chart update**. Local fixtures/forks are tests, not the deliverable. Start with two or three supported test assets and a quote asset. Label stock-like test tokens as test tokens; do not claim real equity exposure.
+The first milestone is an **actual automatic raw-key mainnet Uniswap swap, receipt and chart update**. Local fixtures/forks are development tests. Start with two or three supported live assets and a quote asset, using canonical token identities and an executable route. ETH/USDC is a candidate to verify. Do not deploy mock-stock tokens or test pools as a substitute for the live demo.
 
 Actual stock swaps require usable Uniswap liquidity and correct token/price behavior. Base's B20 stocks use native precompiles; validate canonical identities and documented semantics rather than requiring ordinary token bytecode. Handle stock feed pauses/trading hours and corporate-action multipliers correctly. These facts are documented in the network research; do not add a generalized asset-validation framework.
 
-Use a clearly labelled RPC mode initially. A compatible existing local node/light client can follow the working swap; no custom light-client development is in the MVP. The local app and accepted cloud LLM/Privy services have distinct trust boundaries. Public chain activity and issuer/oracle/chain assumptions remain. Mainnet trading is outside this planning task.
+Use a clearly labelled RPC mode initially. A compatible existing local node/light client can follow the working swap; no custom light-client development is in the MVP. The local app and accepted cloud LLM/Privy services have distinct trust boundaries. Public chain activity and issuer/oracle/chain assumptions remain. The repository is still planning-only; no mainnet transaction or wallet setup has occurred yet.
 
 ## 7. Delivery sequence and evidence
 
@@ -88,8 +90,8 @@ Dates are 2026, America/Toronto. The [hackathon checklist](docs/HACKATHON.md) re
 | When | Deliverable |
 | --- | --- |
 | Sep 4 | Commit the simplified plan, prompts and research; preserve owner-bypass main protection |
-| Sep 5 | Pin reusable components, select network/assets/route and implement config/planner |
-| Sep 6 | Automatic raw-key testnet swap with receipt; agent CLI and view-only chart |
+| Sep 5 | Pin reusable components, verify the selected mainnet/assets/route and implement config/planner |
+| Sep 6 | Automatic raw-key mainnet swap with receipt; agent CLI and view-only chart |
 | Sep 7 | Working drift loop and basic pending-transaction recovery; first check-in before 23:59 |
 | After device arrival, Sep 8 target | Ledger connect-triggered rebalance prompt, signing/display/rejection and focused Key Ring broker demo; delivery date is not assumed |
 | Sep 9 | Real automatic Privy swap and supported scoped-authorization demo through the same loop |
@@ -97,6 +99,6 @@ Dates are 2026, America/Toronto. The [hackathon checklist](docs/HACKATHON.md) re
 | Sep 11–12 | Actual sponsor feedback, setup/code/receipt links and human-narrated demo |
 | Sep 13 before noon | Owner submits the completed entry |
 
-Acceptance covers correct integer allocation/trade calculation; actual automatic raw-key and Privy swaps without model calls; Ledger drift tracking while disconnected, a fresh prompt on connection and actual confirmation/rejection; correct route/amount/slippage settings; no duplicate send after restart; and a chart that only displays information. Add focused evidence for Ledger Ring credential handling and Privy's supported authorization restrictions. Test these behaviors without building a generic security-testing platform.
+Acceptance covers correct integer allocation/trade calculation; actual automatic raw-key and Privy mainnet swaps without model calls; Ledger drift tracking while disconnected, a fresh prompt on connection and actual mainnet signing/confirmation or rejection; correct route/amount/slippage settings; no duplicate send after restart; and a chart that only displays information. Add focused evidence for Ledger Ring credential handling and Privy's supported authorization restrictions. Use local tests for correctness and actual mainnet receipts for live integration evidence, without building a generic security-testing platform.
 
 Planned partners remain **Uniswap, Ledger and Privy**. Show substantive integrations, preserve dependency attribution, complete required feedback and record only evidence actually obtained. See [Privy](docs/PRIVY.md), [Ledger feedback](docs/LEDGER_FEEDBACK.md), [Uniswap feedback](FEEDBACK.md) and [AI provenance](docs/AI_USAGE.md).

@@ -4,14 +4,14 @@ Checked **2026-09-04** using official documentation and Ledger source. No RPC pr
 
 ## Decision
 
-The original target, **Robinhood Chain**, remains viable. The user accepts any L2 and asked about Base, so **Base is a recommended alternative**, especially for an initial testnet route and a documented light-client candidate. Do not force a switch based on the incorrect claim that Ledger only supports Ethereum mainnet: its shared EVM configuration includes both candidates. [Ledger assessment](LEDGER_AGENT_STACK.md)
+All live integration, deployments and demo transactions are **mainnet-only**, per the [user's decision](prompts/009-mainnet-only.md). **Robinhood Chain mainnet is the first target**, with **Base mainnet as the alternative** under the any-L2 preference. Base also has a documented light-client candidate. Ledger's shared EVM configuration includes both; its CLI quote guard is not a blanket L2 restriction. [Ledger assessment](LEDGER_AGENT_STACK.md)
 
-| Candidate | Network IDs | Evidence and open work |
+| Candidate | Mainnet ID | Evidence and open work |
 | --- | --- | --- |
-| Robinhood | Mainnet 4663; testnet 46630 | Original stock-token target; EVM/Nitro chain, existing Ledger EVM configs and official mainnet Uniswap deployments. Verify testnet route, token metadata and actual stock liquidity. |
-| Base | Mainnet 8453; Base Sepolia 84532 | Live Coinbase tokenized stocks, official Uniswap mainnet/testnet deployments and documented Helios support. Verify stock-pair liquidity and B20 verification behavior. |
+| Robinhood | 4663 | Original stock-token target; EVM/Nitro chain, existing Ledger EVM config and official mainnet Uniswap deployments. Verify the live route, token metadata and stock liquidity. |
+| Base | 8453 | Live Coinbase tokenized stocks, official Uniswap mainnet deployments and documented Helios support. Verify stock-pair liquidity and B20 verification behavior. |
 
-Prefer testing the existing Robinhood integration path before building a new chain adapter. Base Sepolia is a documented fallback/first-network candidate if Robinhood testnet routing is unavailable. Record the selected manifest before implementation depends on it; never silently switch configured networks.
+Verify the existing Robinhood mainnet integration path first. If its required route is unavailable, evaluate Base mainnet. Record the selected manifest before implementation depends on it; never silently switch configured networks or fall back to a testnet.
 
 ## Stocks and Uniswap
 
@@ -21,9 +21,9 @@ Base's stocks use native B20 precompiles rather than ordinary per-token deployed
 
 Robinhood documents issuer-backed stock exposure, token transfer/access conditions, RFQ trading and AMM composability. Canonical assets, participant eligibility, acquisition and usable AMM routes remain separate gates. [Stock Tokens](https://docs.robinhood.com/chain/stock-tokens/), [integration](https://docs.robinhood.com/chain/building-with-stock-tokens/), [network reference](https://docs.robinhood.com/chain/connecting/)
 
-The official [Uniswap v4 deployment registry](https://developers.uniswap.org/docs/protocols/v4/deployments) lists Base and Base Sepolia, as well as Robinhood mainnet. The reviewed testnet table did not establish Robinhood testnet deployments. Verify exact contract identities and available pools instead of inferring addresses across chains.
+The official [Uniswap v4 deployment registry](https://developers.uniswap.org/docs/protocols/v4/deployments) lists Base and Robinhood mainnet. Verify exact contract identities and available pools instead of inferring addresses across chains.
 
-First demonstrate an actual Uniswap testnet swap using supported liquid test assets; ETH/USDC is a candidate, not a verified route. Canonical stock holdings can be displayed independently, but a claim of stock rebalancing requires actual executable stock routes and valid price/transfer behavior. Label test stock tokens plainly. Using Aerodrome alone would not demonstrate our Uniswap integration. Local simulations/forks are tests, not network receipts.
+First demonstrate an actual Uniswap mainnet swap using supported live assets; ETH/USDC is a candidate, not a verified route. Canonical stock holdings can be displayed independently, but a claim of stock rebalancing requires actual executable stock routes and valid price/transfer behavior. If stocks lack a usable route, demonstrate the supported live pair and mark stock execution incomplete; do not substitute mock stocks or test pools. Using Aerodrome alone would not demonstrate our Uniswap integration. Local simulations/forks remain development tests, with actual mainnet receipts required for the demo.
 
 ## Local verification
 
@@ -36,5 +36,5 @@ Robinhood's documented [Nitro full node](https://docs.robinhood.com/chain/run-a-
 - Pin the Ledger package/source and verify network registry, quote/build coverage, final chain ID and later hardware display/signing.
 - Verify network IDs, canonical assets/decimals/semantics, Uniswap router/pool identities and actual route depth.
 - Select and validate price sources, market-calendar behavior, pauses, sequencer status and independent slippage/price bounds.
-- Complete an actual testnet transaction and receipt, clearly distinguished from a simulation.
-- Record the selected chain and verification mode; mainnet trading is outside this planning task.
+- Complete an actual mainnet transaction and receipt, clearly distinguished from a local test/simulation.
+- Record the selected mainnet and verification mode. The current repository remains planning-only; no wallet setup or transaction has occurred.
