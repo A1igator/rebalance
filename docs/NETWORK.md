@@ -4,15 +4,15 @@ Initial documentation review: **2026-09-04**. Subsequent public mainnet RPC chec
 
 ## Decision
 
-**Robinhood is the sole chain family**. The [original mainnet decision](prompts/010-robinhood-only.md) remains the implemented configuration, chain ID 4663. The [latest instruction](prompts/016-fees-and-testnet.md) authorizes testnet 46630 before the full demo when fees exceed roughly one cent; the [fee check](FEE_CHECK.md) met that condition. Testnet migration is pending verification of stock assets and routes, and trading remains unarmed. Ledger's shared EVM configuration includes Robinhood; its CLI quote guard is not a blanket L2 restriction. [Ledger assessment](LEDGER_AGENT_STACK.md)
+**Robinhood mainnet (4663) is the selected network**. The [latest instruction](prompts/017-mainnet-cadence-codex.md) accepts the measured mainnet fees and cancels the conditional testnet migration in [prompt 016](prompts/016-fees-and-testnet.md). Preserve the [fee and testnet research](FEE_CHECK.md) as history. The funded wallet, asset basket and weights are unchanged; the raw-key monitor remains unarmed pending the user's local start. Ledger's shared EVM configuration includes Robinhood; its CLI quote guard is not a blanket L2 restriction. [Ledger assessment](LEDGER_AGENT_STACK.md)
 
-Verify Robinhood's existing integration path, canonical assets and live Uniswap route. If a required route is unavailable, evaluate another supported live pair on Robinhood or record the unresolved integration. Do not switch to another chain family or reuse mainnet token/router addresses on testnet. Pin the network-specific manifest before implementation depends on it.
+Verify Robinhood's existing integration path, canonical assets and live Uniswap route. If a required route is unavailable, evaluate another supported live pair on Robinhood or record the unresolved integration. Do not switch chain families or infer token/router identities across networks. The active manifest remains mainnet-specific; the historical testnet candidate is not adopted.
 
 ## Stocks and Uniswap
 
 Robinhood documents issuer-backed stock exposure, token transfer/access conditions, RFQ trading and AMM composability. Canonical assets, participant eligibility, acquisition and usable AMM routes remain separate gates. [Stock Tokens](https://docs.robinhood.com/chain/stock-tokens/), [integration](https://docs.robinhood.com/chain/building-with-stock-tokens/), [network reference](https://docs.robinhood.com/chain/connecting/)
 
-Use Robinhood's documented stock-token metadata, transfer behavior and price-feed semantics. Its documented feeds incorporate corporate-action multipliers and operate 24/5; verify canonical feeds, freshness and pauses before valuation. Do not apply another chain's token/precompile assumptions. [Price-feed reference](https://docs.robinhood.com/chain/oracles-and-price-feeds/)
+Use Robinhood's documented stock-token metadata, transfer behavior and price-feed semantics. Its documented feeds incorporate corporate-action multipliers and operate 24/5. Current runtime values actual ERC20 units through fresh DEX quotes in USDG, without applying another multiplier or depending on those share-price feeds. Advisory `oraclePaused()` is a corporate-action signal, not proof of market hours. DEX quotes may differ from underlying stock prices, including outside stock-market hours. [Price-feed reference](https://docs.robinhood.com/chain/oracles-and-price-feeds/)
 
 The official [Uniswap v4 deployment registry](https://developers.uniswap.org/docs/protocols/v4/deployments) lists Robinhood mainnet. Verify exact contract identities and available pools instead of inferring addresses across chains.
 
@@ -25,7 +25,7 @@ Robinhood's documented [Nitro full node](https://docs.robinhood.com/chain/run-a-
 ## Close before implementation claims
 
 - Pin the Ledger package/source and verify network registry, quote/build coverage, final chain ID and later hardware display/signing.
-- Preserve the chain 4663 asset/router evidence; separately verify chain 46630 assets/decimals/semantics, router/pool identities and actual route depth before any testnet migration.
-- Select and validate price sources, market-calendar behavior, pauses, sequencer status and independent slippage/price bounds.
-- Resolve the fee/testnet asset decision and obtain a receipt on the selected Robinhood network, clearly identifying network and token provenance.
+- Preserve chain 4663 asset/router evidence; historical chain 46630 observations are not an active migration path or proof of testnet stock support.
+- Validate fresh DEX quotes of actual token units, advisory corporate-action pauses and ordinary slippage/expiry handling. Do not claim independent share-price, market-calendar or sequencer verification.
+- Validate the persisted one-hour cycle interval and ten-minute active window, then obtain a user-started mainnet receipt with explicit network and token provenance. Pending receipts must reconcile before the interval gate.
 - The manifest and live read-only evidence are recorded in `RWA_CHECK.md`; verification remains RPC mode. The application and local wallet now exist. No funded swap or receipt has occurred.

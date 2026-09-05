@@ -1,8 +1,10 @@
-# Robinhood fee check and pending testnet migration
+# Robinhood fee check and testnet research
+
+**Current decision:** the user accepted mainnet fees in [prompt 017](prompts/017-mainnet-cadence-codex.md) and canceled the conditional testnet migration. The original measurements and then-pending choice below are preserved as history; the decision update at the end supersedes that choice.
 
 Observed **September 4, 2026, 22:26–22:39 EDT** (September 5, 02:26–02:39 UTC). This is a point-in-time measurement, not a fixed fee quote.
 
-The [latest human instruction](prompts/016-fees-and-testnet.md) requests Robinhood testnet before the full demo if mainnet fees are not near one US cent. The measured costs exceed that target. Mainnet funding is confirmed, but **execution remains unarmed and no app approval or swap was submitted**. Current runtime and manifests still use mainnet 4663; a completed testnet migration is not claimed.
+The [then-current human instruction](prompts/016-fees-and-testnet.md) requested Robinhood testnet before the full demo if mainnet fees were not near one US cent. The measured costs exceeded that target. Mainnet funding was confirmed, but **execution remained unarmed and no app approval or swap was submitted**. Runtime and manifests still used mainnet 4663; a completed testnet migration was not claimed.
 
 ## Measured network fees
 
@@ -31,3 +33,13 @@ Robinhood documents testnet **46630**, RPC `https://rpc.testnet.chain.robinhood.
 [Retained testnet observations](evidence/robinhood-testnet-check.json) include RPC requests, block identity, metadata, sources and unresolved checks. Large bytecode responses are summarized with byte counts and SHA-256 hashes; this does not constitute an upstream bytecode comparison.
 
 Changing only the chain ID/RPC would leave the app using invalid asset and router assumptions. The user has been asked to choose between clearly labeled demo-issued stock tokens with new testnet pools, or retaining the existing issuer-backed mainnet basket at the measured fees. No answer, mock-token substitution, pool deployment or mainnet fee exception is assumed. Until resolved, preserve the funded wallet and keep execution stopped. This is a demo-network decision, not a new spending-cap or budget-accounting feature.
+
+## Decision update — 2026-09-05
+
+The user subsequently said: “It's fine just do it with those fees for now.” The full [instruction and implementation response](prompts/017-mainnet-cadence-codex.md) retain **Robinhood mainnet 4663**, cancel the conditional testnet migration and request less frequent rebalancing. The measured approval estimate was about **5.84¢**, and the unrelated sample swap cost about **13.20¢** at the recorded ETH/USD price. These remain point-in-time observations, not a fixed price or a cost bound for this portfolio.
+
+A [later comparison retained separately](evidence/robinhood-mainnet-fees-overnight.json), observed at **05:57:15.981 UTC on September 5**, estimated the same 10-USDG approval at **5.90¢** and a [different third-party single-pool swap](https://robinhoodchain.blockscout.com/tx/0xec6eee207be1b936047f3068442bb04c0d2a6c20e2e0fbf916fd81baa2a9f637) at **13.24¢**, using **$2,451.69 per ETH**. The estimate was unsigned; the sample again traded WETH into another token, not this app's stock basket. This is another timestamped comparison, not an overnight price series or completed portfolio rebalance.
+
+The implementation response sets default cycle starts one hour apart, with a fixed ten-minute active window for sequential approval/swap legs and the existing five-percentage-point drift trigger. Timing persists across restarts and target changes; receipt reconciliation runs before the interval gate. This reduces cycle frequency without adding a gas budget, spending cap or one-transaction-per-hour guarantee.
+
+The mainnet wallet, assets, weights and dependencies are unchanged. Testnet stock support remains unverified research rather than a required next step. The funded raw-key monitor remains unarmed pending the user's local start. No app approval, stock swap or live receipt is claimed by this update.

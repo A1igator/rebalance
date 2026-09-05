@@ -3,7 +3,7 @@ import type { Operation } from './transactions.js';
 
 export const GRAPH = {
   intent: ['config'], config: ['reconcile', 'wait'], reconcile: ['observe', 'wait'],
-  observe: ['plan'], plan: ['quote', 'wait'], quote: ['execute', 'wait'],
+  observe: ['plan'], plan: ['interval', 'wait'], interval: ['quote', 'wait'], quote: ['execute', 'wait'],
   execute: ['receipt'], receipt: ['reconcile'], wait: ['config'], error: ['config'],
 } as const;
 export type Node = keyof typeof GRAPH;
@@ -12,7 +12,8 @@ export type GraphDependencies = {
   configured(): Promise<boolean>;
   reconcile(): Promise<{ blocked: boolean; operation: Operation | null }>;
   observe(): Promise<Portfolio>;
-  plan(portfolio: Portfolio): TradePlan | null;
+  plan(portfolio: Portfolio): TradePlan | null | Promise<TradePlan | null>;
+  interval(): Promise<Operation | null>;
   quote(trade: TradePlan): Promise<unknown>;
   execute(trade: TradePlan, quote: unknown): Promise<Operation>;
   publish(graph: GraphState, operation: Operation | null): Promise<void>;
@@ -39,8 +40,11 @@ export async function runGraph(deps: GraphDependencies): Promise<GraphState> {
     await enter('observe');
     const portfolio = await deps.observe();
     await enter('plan');
-    const trade = deps.plan(portfolio);
+    const trade = await deps.plan(portfolio);
     if (!trade) return await enter('wait');
+    await enter('interval');
+    const waiting = await deps.interval();
+    if (waiting) { operation = waiting; return await enter('wait'); }
     await enter('quote');
     const quote = await deps.quote(trade);
     if (!deps.canExecute) {

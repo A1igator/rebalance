@@ -8,7 +8,7 @@ Ask the agent to change a target. Integer arithmetic redistributes the other wei
 
 **Implemented:** deterministic core, five-asset Uniswap v3 adapter, local raw-key signing, durable pending-transaction recovery, agent CLI/skill, read-only chart and an optional Claude notification channel. Live read-only routes and snapshots passed; **no funded approval/swap receipt has been produced yet**. Privy execution, Ledger hardware signing/connection handling and Key Ring remain subsequent milestones. Selecting those modes never falls back to a software signer.
 
-The funded demo remains stopped under the [latest fee/network decision](docs/FEE_CHECK.md). Measured mainnet fees exceed the user's roughly one-cent target, so a move to Robinhood testnet is pending verification of its stock assets and routes. Testnet support is not yet implemented.
+The [latest decision](docs/prompts/017-mainnet-cadence-codex.md) accepts the measured mainnet fees and cancels the conditional testnet migration. The funded demo retains its network, wallet and allocation; its monitor remains unarmed pending the user's local start. [Earlier fee and testnet research](docs/FEE_CHECK.md) is preserved as history.
 
 ## Use through your agent
 
@@ -37,7 +37,9 @@ npm run cli -- start --background
 npm run cli -- stop
 ```
 
-`check` reads/plans/quotes without signing. `start` arms automatic raw-key execution under the saved targets; no per-swap agent or human confirmation is required. Fund the selected Robinhood wallet with the actual portfolio tokens and native ETH for gas before a live run. Defaults are 5 percentage points of drift, 0.5% swap slippage, 120-second expiry and 30-second polling, all visible in local configuration. Partial target edits proportionally redistribute the remaining weights. Select USDG and four stocks from the [verified manifest](src/assets.ts); only those five enter monitoring and valuation. Replacing symbols changes the tracked allocation and does not automatically liquidate tokens removed from it. Our demo wallet was empty when its selection changed.
+`check` reads/plans/quotes without signing. `start` arms automatic raw-key execution under the saved targets; no per-swap agent or human confirmation is required. Fund the selected Robinhood wallet with the actual portfolio tokens and native ETH for gas before a live run. Defaults are 5 percentage points of drift, one hour between rebalance cycle starts, 0.5% swap slippage, 120-second expiry and 30-second polling. Each cycle has a fixed ten-minute active window for sequential approval/swap legs; expiry is bounded by that window. Receipt reconciliation runs first, even between cycles. Cycle timing survives restarts and target edits, so polling does not cause a fresh rebalance every 30 seconds. This limits frequency without introducing a spending cap or promising one transaction per hour.
+
+Partial target edits proportionally redistribute the remaining weights. Select USDG and four stocks from the [verified manifest](src/assets.ts); only those five enter monitoring and valuation. Replacing symbols changes the tracked allocation and does not automatically liquidate tokens removed from it. Our demo wallet was empty when its selection changed.
 
 The UI is one pie chart with ticker/percentage labels, with no header, footer or dashboard sections. It shows current holdings when funded, otherwise explicitly labeled saved targets. Operation details stay in the agent conversation. The chart is at [127.0.0.1:4663](http://127.0.0.1:4663). It contains no editing, wallet-connect or signing controls. `status`, `graph` and `events` are the agent's read interfaces. `stop` prevents new work; an already submitted transaction still settles.
 
@@ -47,6 +49,8 @@ The UI is one pie chart with ticker/percentage labels, with no header, footer or
 
 The optional [notification channel](docs/NOTIFICATIONS.md) feeds retained events into the **same running Claude session**. With `/rc`, that session can be used from a phone. Ledger drift alerts and completed-rebalance alerts are distinct; completion requires a confirmed swap and a fresh portfolio within the drift threshold. Phone pushes are Claude-controlled and require user setup. The channel neither signs nor relays permissions. Trading remains independent of it.
 
+For Codex, use [native Remote](https://learn.chatgpt.com/docs/remote-connections) to continue the existing conversation from the mobile app. A native [current-chat scheduled task](https://learn.chatgpt.com/docs/automations), configured as a five-minute heartbeat, checks retained events only and reports meaningful new events. It does not trade or create a custom Codex app-server/MCP bridge. The desktop host must remain available; mobile pairing and notification delivery depend on the user's setup and are not yet verified. See the same notification guide for setup and retained-event handling.
+
 ## What the evidence establishes
 
 - [Current demo](docs/DEMO_PORTFOLIO.md): recognizable technology names, full Robinhood catalog snapshot and additional MSFT/AMD route checks.
@@ -54,7 +58,7 @@ The optional [notification channel](docs/NOTIFICATIONS.md) feeds retained events
 - [Implementation](src/chain.ts): direct Uniswap QuoterV2, exact token approvals and SwapRouter02 deadline multicalls. [Execution](src/transactions.ts) and [graph](src/graph.ts) contain dispatch/recovery behavior.
 - Values are **DEX estimates in USDG**, not independent USD share-price oracles. Actual token units are quoted without applying corporate-action multipliers twice. Advisory `oraclePaused()` blocks new activity during relevant corporate actions. DEX and underlying stock-market prices can differ.
 - Current chain verification is **RPC mode**, not a light client or fully trustless operation. Issuer, chain and RPC dependencies remain. Token compatibility does not establish user eligibility or direct ownership of shares; see the official access details linked in the RWA report.
-- The app bundles its UI locally and has no application telemetry or cloud LLM dependency. Optional Claude notifications share selected events with the configured agent session.
+- The app bundles its UI locally and has no application telemetry or cloud LLM dependency. Optional Claude or Codex notifications share selected events with the configured agent session.
 
 ## Hackathon record
 

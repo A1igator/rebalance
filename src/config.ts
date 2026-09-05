@@ -24,11 +24,13 @@ export type Config = {
   slippageBps: number;
   deadlineSeconds: number;
   pollSeconds: number;
+  rebalanceIntervalSeconds: number;
 };
 
 export function validateConfig(value: unknown): Config {
   if (!value || typeof value !== 'object') throw new Error('Configuration must be an object');
-  const c = value as Config;
+  const c = { ...value as Config };
+  if (c.rebalanceIntervalSeconds === undefined) c.rebalanceIntervalSeconds = 3600;
   if (c.version !== 1 || c.chainId !== 4663) throw new Error('Only Robinhood mainnet (4663) is supported');
   if (!isAddress(c.wallet, { strict: false })) throw new Error('Invalid public wallet address');
   if (!['private-key', 'privy', 'ledger'].includes(c.mode)) throw new Error('Unknown signing mode');
@@ -48,6 +50,7 @@ export function validateConfig(value: unknown): Config {
   for (const [name, min, max] of [
     ['driftThresholdBps', 0, 10000], ['slippageBps', 1, 9999],
     ['deadlineSeconds', 15, 600], ['pollSeconds', 5, 3600],
+    ['rebalanceIntervalSeconds', 1, 604800],
   ] as const) {
     if (!Number.isInteger(c[name]) || c[name] < min || c[name] > max) throw new Error(`Invalid ${name} (${min}–${max})`);
   }

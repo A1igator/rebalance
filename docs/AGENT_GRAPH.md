@@ -1,6 +1,6 @@
 # Rebalance's agent graph
 
-The user's existing Codex or Claude Code conversation is the interactive interface. A project skill translates intent into CLI operations. The local runner then executes a graph of deterministic stages with shared state and transaction feedback. It does not call another model, spawn subagents, or require an agent framework. Core trading requires no MCP server; an optional notification channel can deliver events into the running Claude conversation.
+The user's existing Codex or Claude Code conversation is the interactive interface. A project skill translates intent into CLI operations. The local runner then executes a graph of deterministic stages with shared state and transaction feedback. It does not call another model, spawn subagents, or require an agent framework. Core trading requires no MCP server. Outside trading, Claude uses an optional notification channel and Codex uses a scheduled follow-up in this conversation.
 
 The separation of target ownership, shared state, and external observations takes inspiration from [Rob Cressy's “Loops to Graphs” article](https://robcressy.com/blog/loops-to-graphs-ai-agent-systems). The user decides the allocation; the application measures drift and carries out that choice.
 
@@ -10,21 +10,27 @@ flowchart TD
   config[Config: validate and save target weights]
   observe[Observe: balances and route quotes from RPC]
   plan[Plan: deterministic integer arithmetic]
+  interval[Interval: check persisted cycle timing]
+  quote[Quote: refresh the proposed swap]
   execute[Execute: prepare and submit transaction]
   receipt[Receipt: reconcile the recorded transaction]
   recovery[Recovery: preserve unresolved transaction identity]
   state[(Local shared state)]
   chart[Read-only local chart and CLI status]
   events[(Persisted public notification events)]
-  channel[Optional MCP notification channel]
-  push[Claude-decided mobile push via Remote Control]
+  channel[Claude MCP notification channel]
+  heartbeat[Codex notification check every five minutes]
+  push[Agent app notifications through native Remote]
 
   intent -->|Project skill and CLI| config
   config --> state
   state --> observe
   observe --> plan
   plan -->|No trade needed; next scheduled check| observe
-  plan -->|Runner explicitly started| execute
+  plan -->|Trade proposed| interval
+  interval -->|Cooling down; keep observing| observe
+  interval -->|Eligible| quote
+  quote -->|Runner explicitly started| execute
   execute -->|Persist pending identity| state
   execute --> receipt
   receipt -->|Observed success or failure| state
@@ -38,7 +44,9 @@ flowchart TD
   state -->|Public results and errors| intent
   state --> events
   events --> channel
+  events --> heartbeat
   channel -->|Same running conversation| intent
+  heartbeat -->|Same conversation; report new events only| intent
   intent -->|Notifications only| push
 ```
 
@@ -49,12 +57,15 @@ flowchart TD
 | Intent/config | The user's request and saved public configuration | Validated targets and execution settings |
 | Observe | Configuration, wallet address, RPC chain state and route quotes | Balances, quote-derived values and current weights |
 | Plan | Observed portfolio and configured targets | A deterministic trade proposal or no-trade result |
+| Interval | Persisted cycle timing and configured minimum interval | Eligibility or cooling-down status before new execution |
 | Execute | An authorized running configuration and current plan | Submission result and a durable transaction identity |
 | Receipt/recovery | Pending identity and RPC transaction/receipt observations | A resolved result or an unresolved state that blocks blind replacement |
 
 Local configuration, status, and transaction records connect the stages. The signing key is separate from public status and is consumed by the local signer, never supplied to the coding agent or browser. CLI status exposes the current graph node and recent trace. The UI displays only a pie chart with ticker/percentage labels: current holdings when funded, explicitly labeled saved targets when empty, and an unavailable/stale indication when a refresh fails. It has no dashboard sections.
 
 Changing a target does not fabricate a new holding. A submitted transaction does not immediately count as a successful rebalance. Receipt feedback resolves its recorded identity, and a subsequent observation measures the actual portfolio again. The next plan uses those observations rather than an LLM's description of the previous outcome.
+
+The default drift trigger is five percentage points. By default, cycle starts are at least one hour apart, with up to ten minutes for each cycle's sequential approval/swap legs. A fresh no-trade result closes the active window early. The local `cycle.json` record survives restart and target changes. No monetary cap or budget is tracked. Receipt reconciliation remains first and continues during a cooldown; the interval stage prevents fresh executable quotes/dispatch until eligible. Status exposes cycle times through the agent, while the chart stays view-only.
 
 ## Operation from one conversation
 
@@ -70,9 +81,11 @@ When the project's channel server is configured, start Claude with `claude --dan
 
 Phone push requires Claude Code 2.1.110 or later, the mobile app using the same account and organization, OS notification permission, and `/config` → `Push when Claude decides` with Remote Control active. Claude decides whether to send a push; queue acknowledgement is not proof of phone delivery. If Claude is closed, notifications wait while the local trading process keeps operating. [Remote Control notification behavior](https://code.claude.com/docs/en/remote-control).
 
+Codex uses native [Remote connections](https://learn.chatgpt.com/docs/remote-connections) to continue this same desktop conversation on ChatGPT mobile. A [scheduled follow-up](https://learn.chatgpt.com/docs/automations#schedule-a-task-inside-a-chat) reads retained events every five minutes and reports only new meaningful outcomes or attention requests. This reporting uses scheduled model runs and is outside the deterministic trading graph. It never starts trading or signs. Pairing, host availability and app notifications determine mobile access/delivery; no arbitrary MCP-to-Codex push ingress is claimed. See [notification setup](NOTIFICATIONS.md).
+
 ## What anchors the graph
 
-The current chain is Robinhood mainnet, ID 4663. The portfolio has five assets: USDG, TSLA, AAPL, NVDA, and AMZN, with canonical contracts taken from the verified manifest. Native ETH is kept outside the allocation as gas. Integer arithmetic conserves allocation basis points and determines trade amounts. Fresh onchain DEX quotes provide USDG-equivalent valuations rather than a USD oracle price. Listing an asset is separate from proving that its route can execute at a particular moment.
+The current chain is Robinhood mainnet, ID 4663. The demo portfolio has five assets: USDG, AAPL, NVDA, MSFT and AMD, with canonical contracts taken from the verified manifest. Native ETH is kept outside the allocation as gas. Integer arithmetic conserves allocation basis points and determines trade amounts. Fresh onchain DEX quotes provide USDG-equivalent valuations rather than a USD oracle price. Listing an asset is separate from proving that its route can execute at a particular moment.
 
 Stock-token pricing has an additional issuer and market boundary. ERC-20 token quantities need not equal underlying shares after dividends or splits. A DEX quote already prices the actual tokens, so applying the share multiplier again would double-count the adjustment. The application halts on a token's corporate-action `oraclePaused()` flag. It uses DEX quotes rather than an invented underlying-market calendar: DEX prices can differ from underlying stock prices, including off-hours. These conditions are separate from primary-market mint/redemption permissions or a particular wallet's ability to transfer tokens. Robinhood's optional Chainlink feeds also incorporate the multiplier already and can hold earlier prices through closed sessions. [Robinhood integration semantics](https://docs.robinhood.com/chain/building-with-stock-tokens/), [Chainlink stock-feed behavior](https://docs.chain.link/data-feeds/tokenized-equity-feeds/robinhood).
 

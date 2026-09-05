@@ -1,0 +1,55 @@
+{
+  "observedAt": "2026-09-05T05:57:15.981Z",
+  "chainId": 4663,
+  "block": {
+    "number": "54888144",
+    "timestamp": "1788587835",
+    "baseFeePerGas": "404924000",
+    "transactionCount": 15
+  },
+  "gasPriceWei": "409650000",
+  "approvalGas": "58789",
+  "ethUsd": {
+    "data": {
+      "amount": "2451.69",
+      "base": "ETH",
+      "currency": "USD"
+    }
+  },
+  "approvalFeeWei": "24082913850000",
+  "approvalFeeEth": "0.00002408291385",
+  "approvalFeeUsd": 0.0590438390569065,
+  "note": "Unsigned10USDGapprovalestimate; same public sender/token/spender/amount as prior comparison. No transaction submitted.",
+  "sources": {
+    "rpc": "https://rpc.mainnet.chain.robinhood.com",
+    "ethUsd": "https://api.coinbase.com/v2/prices/ETH-USD/spot"
+  },
+  "swapSample": {
+    "hash": "0xec6eee207be1b936047f3068442bb04c0d2a6c20e2e0fbf916fd81baa2a9f637",
+    "blockNumber": 54888039,
+    "blockTimestamp": "2026-09-05T05:57:04+00:00",
+    "status": "0x1",
+    "gasUsed": "131449",
+    "effectiveGasPriceWei": "410706000",
+    "feeWei": "53986892994000",
+    "feeEth": "0.000053986892994000",
+    "decoded": {
+      "functionName": "exactInputSingle",
+      "params": {
+        "tokenIn": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+        "tokenOut": "0x7cc440dbD272546f279b5185C73E0feFF32fDEB5",
+        "fee": 10000,
+        "recipient": "0x42fcfdBE5E5d3699c2d10448A185b8685db87542",
+        "amountIn": "1500000000000000",
+        "amountOutMinimum": "0",
+        "sqrtPriceLimitX96": "0"
+      }
+    },
+    "feeUsd": "0.13235912568445986000"
+  },
+  "limitations": [
+    "This is a point-in-time comparison, not an overnight gas-price series.",
+    "Approval was estimated without signing; swap sample is another trader's WETH-to-other-token swap, not our stock/USDG quote.",
+    "No funding balances or private credentials are included. No application transaction was initiated."
+  ]
+}

@@ -118,3 +118,20 @@ test('actual CLI target edits appear immediately in status and graph includes th
   assert.equal(existsSync(join(directory, 'private-key')), false);
   assert.equal(JSON.parse(await readFile(join(directory, 'config.json'), 'utf8')).wallet, config.wallet);
 });
+
+test('CLI configures the cycle interval without replacing targets, resetting cadence or starting a runner', async t => {
+  const { directory, command } = await fixture(t);
+  const cycle = { startedAt: Date.parse('2026-09-05T06:00:00Z'), activeUntil: Date.parse('2026-09-05T06:10:00Z'),
+    nextEligibleAt: Date.parse('2026-09-05T07:00:00Z'), wallet: config.wallet };
+  await atomicWriteJson(join(directory, 'cycle.json'), cycle);
+  const configured = JSON.parse((await command(['configure', '--rebalance-interval-seconds', '7200'])).stdout);
+  assert.equal(configured.rebalanceIntervalSeconds, 7200);
+  assert.deepEqual(configured.targets, targets);
+  assert.equal((await readJson<{ rebalanceIntervalSeconds: number }>(join(directory, 'config.json')))!.rebalanceIntervalSeconds, 7200);
+  assert.deepEqual(await readJson(join(directory, 'cycle.json')), cycle);
+  assert.equal(existsSync(join(directory, 'run.lock')), false);
+  assert.equal(existsSync(join(directory, 'unexpected-network')), false);
+  assert.equal(existsSync(join(directory, 'private-key')), false);
+  await assert.rejects(command(['configure', '--rebalance-interval-seconds', 'NaN']));
+  assert.equal((await readJson<{ rebalanceIntervalSeconds: number }>(join(directory, 'config.json')))!.rebalanceIntervalSeconds, 7200);
+});

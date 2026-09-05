@@ -55,7 +55,7 @@ export type ChainTransaction = {
   data: Hex;
   value: bigint;
   kind: "approval" | "swap" | "wrap";
-  /** Present on swaps; the dispatch boundary rechecks this before signing/sending. */
+  /** Swap or active-cycle deadline; dispatch rechecks it before signing/sending. */
   expiresAt?: bigint;
 };
 

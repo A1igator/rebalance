@@ -21,7 +21,7 @@ const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
   configure --targets USDG=5,AAPL=23.75,NVDA=23.75,MSFT=23.75,AMD=23.75
                                        Set explicit percentages (example only)
     [--wallet 0x...] [--mode private-key|privy|ledger] [--rpc https://...]
-    [--threshold 5] [--slippage 0.5] [--poll 30]
+    [--threshold 5] [--slippage 0.5] [--poll 30] [--rebalance-interval-seconds 3600]
   targets set AAPL 30                   Change one percentage; redistribute the rest
   targets replace <ASSET=percent,...>   Replace all five targets explicitly
   check                                Fresh read/plan/quote; never sign
@@ -41,6 +41,7 @@ const { values, positionals: args } = parseArgs({ allowPositionals: true, option
   background: { type: 'boolean', default: false }, targets: { type: 'string' }, wallet: { type: 'string' },
   mode: { type: 'string' }, rpc: { type: 'string' }, threshold: { type: 'string' },
   slippage: { type: 'string' }, poll: { type: 'string' }, help: { type: 'boolean' },
+  'rebalance-interval-seconds': { type: 'string' },
   'resume-start': { type: 'boolean', default: false },
 } });
 const print = (value: unknown) => process.stdout.write(stringifyJson(value));
@@ -102,9 +103,12 @@ async function main() {
           slippageBps: values.slippage ? percentToBps(values.slippage) : previous?.slippageBps ?? 50,
           deadlineSeconds: previous?.deadlineSeconds ?? 120,
           pollSeconds: values.poll ? Number(values.poll) : previous?.pollSeconds ?? 30,
+          rebalanceIntervalSeconds: values['rebalance-interval-seconds'] !== undefined
+            ? Number(values['rebalance-interval-seconds']) : previous?.rebalanceIntervalSeconds ?? 3600,
         });
         await atomicWriteJson(CONFIG_PATH, config);
-        print({ wallet: config.wallet, mode: config.mode, targets: config.targets, chainId: 4663 });
+        print({ wallet: config.wallet, mode: config.mode, targets: config.targets, chainId: 4663,
+          driftThresholdBps: config.driftThresholdBps, rebalanceIntervalSeconds: config.rebalanceIntervalSeconds });
       }); return;
     case 'targets':
       await inLock('config.lock', async () => {

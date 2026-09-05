@@ -23,15 +23,31 @@ For mobile pushes, install/open the Claude mobile app using the same account and
 
 Claude determines whether/when to push; its docs offer no per-event delivery guarantee. An MCP transport write also does not acknowledge processing. This implementation retains each event until the agent explicitly acknowledges it and replays unacknowledged events in a later channel session. It sends an event once per channel process, rather than repeatedly waking Claude while the event remains unacknowledged.
 
-## Codex and offline operation
+## Codex: native Remote and notifications in this conversation
 
-The CLI queue and project skill also work in Codex. Claude's `notifications/claude/channel` method and `/rc` are Claude-specific; this repository does not claim that Codex has consumed those push events. In Codex, inspect `events` during the existing conversation. A dedicated Codex push adapter is not implemented.
+Codex uses the desktop app's native **Remote** connection to continue this same conversation from ChatGPT mobile. It does not need a second chat, a public app server, a custom relay or Claude's `notifications/claude/channel` method. The installed Codex CLI was observed at **0.148.0**; its experimental remote-control commands are not the documented mobile pairing flow. [Official Remote setup](https://learn.chatgpt.com/docs/remote-connections)
+
+On the desktop host, open **Settings → Connections → Control this Mac or PC → Set up/Add**, approve the app's setup and scan its QR code with your phone. Complete pairing in ChatGPT using the same account and workspace, then open **Remote** and select this existing conversation. Keep the host awake, online and running the desktop app. Availability and required account verification depend on the app/workspace. Pairing and phone delivery have not been verified on the user's device.
+
+For incoming rebalancer events, use a native scheduled follow-up in this conversation. The configured **Rebalance notifications** heartbeat checks the retained local queue every **five minutes**:
+
+1. Read `npm run cli -- events`. Stay quiet if there are no new events.
+2. For pending events, read `npm run cli -- status` for context and report the confirmed completion or Ledger attention request. Distinguish a past completion from current drift. Ledger hardware support remains pending.
+3. After reporting an event, acknowledge its exact ID with `npm run cli -- events ack <id>`. If processing fails, retain it. An acknowledgement records handling in the conversation, not verified phone delivery.
+
+This is a supported **scheduled Codex check**, not an immediate event-triggered push API. Reporting uses a Codex model run and may lag the event by the schedule interval or host availability. Trading, drift checks, cycle timing and receipts remain deterministic local code with no model dependency. The heartbeat never starts/stops trading, changes allocation, signs, submits or reads credentials. It reports only new meaningful events or notification-check failures and stays quiet on unchanged state. An empty queue does not trigger a runner-status inspection; this schedule is not a general monitor-error detector. The native app can notify about completion/attention; mobile delivery still depends on pairing, account/app settings and the host being available. [Scheduled tasks in an existing chat](https://learn.chatgpt.com/docs/automations#schedule-a-task-inside-a-chat)
+
+The installed heartbeat is local to the developer's app and is not installed by cloning this repository. In another Codex desktop conversation, ask the Rebalance skill to enable the same five-minute notification check. The agent should create or update a heartbeat attached to that existing conversation using the app's scheduled-task tool, preserving the workflow above. Do not create one new conversation per run or enable the trading runner as a side effect. Ask the agent to stop notifications to pause/delete that heartbeat; this does not stop the trading runner.
+
+Codex's `notify` configuration runs a program after a Codex turn completes, so it is the opposite direction from ingesting our events. No global `notify` setting or undocumented app-server injection bridge is installed. [Notification direction](https://learn.chatgpt.com/docs/config-file/config-advanced#notifications)
+
+## Offline operation
 
 Closing either coding agent does not stop an already armed local raw-key monitor. Receipts, portfolio updates and notifications remain local until consumed. Privy will share the same completion path once its signer is implemented.
 
 ## Validation and official references
 
-The automated tests launch the actual stdio MCP server with an MCP client, verify initialization, notification delivery, tool discovery, acknowledgement and replay, and reject an attempted signing-tool call. They use isolated local event files. No Claude account, mobile service, phone permission or Ledger device was used, and no real phone push has been verified.
+The automated tests launch the actual Claude stdio MCP server with an MCP client, verify initialization, notification delivery, tool discovery, acknowledgement and replay, and reject an attempted signing-tool call. Shared event retention/deduplication/acknowledgement tests cover the queue consumed by Codex as well. The Codex notification workflow's empty-queue read was exercised in the real conversation before creating its native heartbeat; creation/readback are app evidence, not a simulated mobile push. No actual phone push or Ledger device has been verified.
 
 - [Remote Control and mobile push setup](https://code.claude.com/docs/en/remote-control)
 - [Channels availability and session behavior](https://code.claude.com/docs/en/channels)

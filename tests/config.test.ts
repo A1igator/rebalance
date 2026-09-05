@@ -37,3 +37,14 @@ test('an expanded manifest still selects exactly USDG plus four known own stock 
   assert.throws(() => validateConfig({ ...config, targets: { ...selected, RUN: 2375.5 } }), /integer basis points/);
   assert.throws(() => validateConfig({ ...config, targets: { ...selected, RUN: 2376 } }), /total 100%/);
 });
+
+test('older configurations receive a one-hour rebalance interval without changing the drift threshold', () => {
+  const migrated = validateConfig(config);
+  assert.equal(migrated.rebalanceIntervalSeconds, 3600);
+  assert.equal(migrated.driftThresholdBps, 500);
+  assert.equal(Object.hasOwn(config, 'rebalanceIntervalSeconds'), false);
+  assert.equal(validateConfig({ ...config, rebalanceIntervalSeconds: 7200 }).rebalanceIntervalSeconds, 7200);
+  for (const interval of [0, -1, 0.5, null, 604801]) {
+    assert.throws(() => validateConfig({ ...config, rebalanceIntervalSeconds: interval }), /Invalid rebalanceIntervalSeconds/);
+  }
+});
