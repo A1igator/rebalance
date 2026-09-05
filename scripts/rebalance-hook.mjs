@@ -8,10 +8,13 @@ import { promisify } from 'node:util';
 const executeFile = promisify(execFile);
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-/** Prompt data never becomes a command. Only the exact bare user command routes. */
-export function selectLaunchRequest(input) {
+/** Prompt data never becomes a command. Accept the typed command or this project's picker reference. */
+export function selectLaunchRequest(input, root = repository) {
   if (!input || input.hook_event_name !== 'UserPromptSubmit' ||
-      typeof input.prompt !== 'string' || input.prompt.trim() !== '$rebalance') return null;
+      typeof input.prompt !== 'string') return null;
+  const prompt = input.prompt.trim();
+  const skillReference = `[$rebalance](${resolve(root, 'skills/rebalance/SKILL.md')})`;
+  if (prompt !== '$rebalance' && prompt !== skillReference) return null;
   if (input.permission_mode === 'plan') return { blocked: 'Rebalance launch was not run in Plan mode.' };
   if (typeof input.cwd !== 'string' || !isAbsolute(input.cwd) ||
       typeof input.session_id !== 'string' || !input.session_id ||
@@ -90,7 +93,7 @@ async function runLaunch(root, requestId, expectedStop) {
 }
 
 export async function handlePrompt(input, overrides = {}) {
-  const selected = selectLaunchRequest(input);
+  const selected = selectLaunchRequest(input, overrides.repository ?? repository);
   if (!selected) return null;
   if (selected.blocked) return hookReply({ app: 'Rebalance', outcome: 'blocked', messages: [selected.blocked] });
   let phase = 'workspace';

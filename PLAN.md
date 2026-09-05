@@ -10,6 +10,8 @@ Robinhood **mainnet (4663)** remains the selected network. The [latest decision]
 
 ## 1. What we are building
 
+The [skill-picker correction](docs/prompts/022-skill-picker-launch.md) accepts the project's exact canonical skill link as the same explicit bare launch request as typed `$rebalance`. This supports the native suggestion without requiring a second application command; unrelated links and scoped prompts remain excluded.
+
 The [hook trust diagnosis](docs/prompts/021-hook-trust-handoff.md) confirms that the installed CLI discovers the launch hook but marks it untrusted. Native user review is the remaining activation setup; application code must report handled failures clearly, and actual Desktop dispatch remains a separate validation step.
 
 The [deterministic launch wiring](docs/prompts/020-deterministic-launch-hook.md) moves repeatable startup into a typed launcher. A user-reviewed Codex prompt hook recognizes a bare `$rebalance`, dispatches directly to that code, and supplies public results to the conversation without asking an LLM to choose startup commands. Hook trust and native notification/Remote setup remain user/host responsibilities. Preparing and testing the wiring does not establish live activation, desktop event compatibility or a funded trade.

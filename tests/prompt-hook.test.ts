@@ -3,13 +3,14 @@ import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve as resolvePath } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const { handlePrompt, selectLaunchRequest } = await import(new URL('../scripts/rebalance-hook.mjs', import.meta.url).href);
 const event = { hook_event_name: 'UserPromptSubmit', prompt: '$rebalance', permission_mode: 'default',
   session_id: 'fixture-session', turn_id: 'fixture-turn', cwd: '/fixture' };
+const skillPrompt = (root: string) => `[$rebalance](${resolvePath(root, 'skills/rebalance/SKILL.md')})`;
 
 function publicResult(reply: { hookSpecificOutput: { additionalContext: string } }) {
   const context = reply.hookSpecificOutput.additionalContext;
@@ -28,12 +29,38 @@ test('hook ignores inspections, heartbeat text, quoted commands and other event 
 });
 
 test('hook blocks plan mode and missing identities without running setup', async () => {
-  for (const input of [{ ...event, permission_mode: 'plan' }, { ...event, session_id: '' },
-    { ...event, turn_id: undefined }, { ...event, cwd: 'relative' }]) {
-    const result = await handlePrompt(input, {
+  for (const prompt of ['$rebalance', skillPrompt('/fixture')]) {
+    for (const input of [{ ...event, prompt, permission_mode: 'plan' }, { ...event, prompt, session_id: '' },
+      { ...event, prompt, turn_id: undefined }, { ...event, prompt, cwd: 'relative' }]) {
+      const result = await handlePrompt(input, { repository: '/fixture',
+        readStopToken: () => assert.fail('must not read stop state'),
+        ensureDependencies: () => assert.fail('must not install'), runLaunch: () => assert.fail('must not launch'),
+      });
+      assert.match(result.hookSpecificOutput.additionalContext, /blocked/);
+    }
+  }
+});
+
+test('hook ignores other skill destinations, scoped links and surrounding text without side effects', async () => {
+  const canonical = skillPrompt('/fixture');
+  const destination = resolvePath('/fixture', 'skills/rebalance/SKILL.md');
+  const prompts = [
+    '[$rebalance](https://example.com/SKILL.md)', '[$rebalance](file://' + destination + ')',
+    '[$rebalance](skills/rebalance/SKILL.md)', skillPrompt('/another-project'),
+    '[$rebalance](/fixture/.agents/skills/rebalance/SKILL.md)',
+    '[$rebalance](/fixture/skills/rebalance/../rebalance/SKILL.md)',
+    '[$rebalance](<' + destination + '>)', '[$rebalance](' + destination + ' "Rebalance")',
+    '[rebalance](' + destination + ')', '[$rebalance status](' + destination + ')',
+    `${canonical} status`, `${canonical} --setup-only`, `${canonical}\nstart`,
+    `Please run ${canonical}`, `Use ${canonical} to report events`, `${canonical}; anything`,
+    '`' + canonical + '`', '"' + canonical + '"', `> ${canonical}`, `${canonical}\n${canonical}`,
+  ];
+  for (const input of [...prompts.map(prompt => ({ ...event, prompt })),
+    { ...event, prompt: canonical, hook_event_name: 'Stop' }]) {
+    assert.equal(await handlePrompt(input, { repository: '/fixture',
+      readStopToken: () => assert.fail('must not read stop state'),
       ensureDependencies: () => assert.fail('must not install'), runLaunch: () => assert.fail('must not launch'),
-    });
-    assert.match(result.hookSpecificOutput.additionalContext, /blocked/);
+    }), null);
   }
 });
 
@@ -62,13 +89,43 @@ test('a bare command routes directly to the launcher with stable opaque request 
   assert.notEqual(selectLaunchRequest(event).requestId, selectLaunchRequest({ ...event, turn_id: 'another-turn' }).requestId);
 });
 
+test('a standalone skill-picker link routes to the same launcher request as the literal command', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance hook picker-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, 'nested'));
+  const calls: string[] = [];
+  const literal = { ...event, cwd: join(root, 'nested') };
+  const linked = { ...literal, prompt: `  ${skillPrompt(root)} \n` };
+  assert.deepEqual(selectLaunchRequest(linked, root), selectLaunchRequest(literal, root));
+  assert.notEqual(selectLaunchRequest(linked, root).requestId,
+    selectLaunchRequest({ ...linked, turn_id: 'another-turn' }, root).requestId);
+  const launchResult = { app: 'Rebalance', outcome: 'armed', status: { armed: true }, messages: [] };
+  const result = await handlePrompt(linked, { repository: root,
+    readStopToken: async (repo: string) => { assert.equal(repo, root); calls.push('stop'); return 'none'; },
+    ensureDependencies: async (repo: string) => { assert.equal(repo, root); calls.push('dependencies'); },
+    runLaunch: async (repo: string, id: string, expectedStop: string) => {
+      assert.equal(repo, root);
+      assert.equal(id, selectLaunchRequest(literal, root).requestId);
+      assert.equal(expectedStop, 'none');
+      calls.push('launch');
+      return launchResult;
+    },
+  });
+  assert.deepEqual(calls, ['stop', 'dependencies', 'launch']);
+  assert.deepEqual(publicResult(result), launchResult);
+  assert.match(result.hookSpecificOutput.additionalContext, /do not repeat launch or start/);
+});
+
 test('hook does not launch when installed outside its selected workspace', async t => {
   const root = await mkdtemp(join(tmpdir(), 'rebalance-hook-root-'));
   const unrelated = await mkdtemp(join(tmpdir(), 'rebalance-hook-unrelated-'));
   t.after(() => Promise.all([root, unrelated].map(path => rm(path, { recursive: true, force: true }))));
-  const result = await handlePrompt({ ...event, cwd: unrelated }, { repository: root,
-    ensureDependencies: () => assert.fail('must not install'), runLaunch: () => assert.fail('must not launch') });
-  assert.equal(result, null);
+  for (const prompt of ['$rebalance', skillPrompt(root)]) {
+    const result = await handlePrompt({ ...event, prompt, cwd: unrelated }, { repository: root,
+      readStopToken: () => assert.fail('must not read stop state'),
+      ensureDependencies: () => assert.fail('must not install'), runLaunch: () => assert.fail('must not launch') });
+    assert.equal(result, null);
+  }
 });
 
 test('dependency failure prevents launch and failed structured outcomes are reported without claiming success', async t => {
@@ -178,16 +235,19 @@ test('prepared hook command reaches the actual CLI in an isolated unconfigured f
   const command = definition.hooks.UserPromptSubmit[0].hooks[0].command;
   const env: NodeJS.ProcessEnv = { ...process.env, REBALANCE_DATA_DIR: directory, NODE_OPTIONS: `--import=${preload}` };
   delete env.REBALANCE_PRIVATE_KEY;
-  const output = await new Promise<string>((resolve, reject) => {
-    const child = execFile('/bin/sh', ['-c', command], { cwd: root, env, timeout: 10_000 }, (error, stdout) => {
-      if (error) reject(error); else resolve(stdout);
+  for (const [index, prompt] of ['$rebalance', skillPrompt(root)].entries()) {
+    const output = await new Promise<string>((resolve, reject) => {
+      const child = execFile('/bin/sh', ['-c', command], { cwd: root, env, timeout: 10_000 }, (error, stdout) => {
+        if (error) reject(error); else resolve(stdout);
+      });
+      child.stdin!.end(JSON.stringify({ ...event, prompt, cwd: root, turn_id: `fixture-entry-${index}` }));
     });
-    child.stdin!.end(JSON.stringify({ ...event, cwd: root }));
-  });
-  const context = JSON.parse(output).hookSpecificOutput.additionalContext;
-  assert.match(context, /"outcome":"needs-input"/);
-  assert.match(context, /"armed":false/);
-  for (const file of ['unexpected-network', 'private-key', 'start.log', 'chart.log', 'pending.json']) {
-    assert.equal(existsSync(join(directory, file)), false);
+    const context = JSON.parse(output).hookSpecificOutput.additionalContext;
+    assert.match(context, /"outcome":"needs-input"/);
+    assert.match(context, /"armed":false/);
+    for (const file of ['unexpected-network', 'private-key', 'config.json', 'stop.json',
+      'start.log', 'chart.log', 'pending.json', 'cycle.json', 'run.lock', 'chart.lock']) {
+      assert.equal(existsSync(join(directory, file)), false);
+    }
   }
 });

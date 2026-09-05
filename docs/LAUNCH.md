@@ -1,6 +1,6 @@
 # Deterministic launch
 
-The user-facing command is a bare **`$rebalance`**. Once its project hook is loaded and trusted, Codex routes the submitted command to application code before the model chooses tools:
+The user-facing command is a bare **`$rebalance`**, typed or selected from the project's skill suggestion. Once its project hook is loaded and trusted, Codex routes the submitted command to application code before the model chooses tools:
 
 ```text
 UserPromptSubmit → exact bare-command check → locked dependency setup
@@ -8,7 +8,9 @@ UserPromptSubmit → exact bare-command check → locked dependency setup
                  → structured public result → conversation
 ```
 
-The handler does not call an LLM. It recognizes the literal text `$rebalance` with optional surrounding whitespace. It does not match `$rebalance status`, a quoted command, natural language, a notification prompt, an unrelated hook event or a Plan-mode request. No command is assembled from user text. The selected project must match the hook script's repository, and the event must supply session/turn identity. The launch request is recorded before side effects; replaying that request cannot resume a runner stopped afterward.
+The handler does not call an LLM. It recognizes the literal text `$rebalance` or the standalone Markdown form `[$rebalance](<absolute-repository-path>/skills/rebalance/SKILL.md)`, with optional surrounding whitespace. The placeholder denotes the actual repository path; arbitrary link destinations and alternative spellings are not accepted. This is the canonical linked form observed from the native suggestion in the conversation. The two forms share the same request identity for a given session/turn.
+
+It does not match `$rebalance status`, quoted commands, natural language, notification prompts, unrelated links, multiple selections or unrelated hook events. Plan-mode launches return a blocked result. No command is assembled from user text. The selected project must match the hook script's repository, and the event must supply session/turn identity. The launch request is recorded before side effects; replaying that request cannot resume a runner stopped afterward.
 
 ## Hook review
 
@@ -20,13 +22,15 @@ Codex requires the user to review/trust a new or changed non-managed hook. The d
 
 Open Codex CLI in this repository (`codex -C /path/to/rebalance`). At **Hooks need review**, choose **Review hooks**, then review and trust the **UserPromptSubmit** command from **`<repo>/.codex/hooks.json`**, which runs **`scripts/rebalance-hook.mjs`**. If the startup screen is absent, use **`/hooks`** in the CLI. Review the Rebalance entry individually; other installed hooks are unrelated to this setup.
 
-After that, submit the literal **`$rebalance`** in the existing project conversation. That is the launch request, including automatic real-money trading under the saved configuration; no separate application CLI command or arming message is part of normal operation. Trusting a hook alone does not submit that launch request. Native hook review is the user action the assistant cannot complete on the user's behalf.
+After that, type **`$rebalance`** or select its project skill suggestion in the existing conversation. That is the launch request, including automatic real-money trading under the saved configuration; no separate application CLI command or arming message is part of normal operation. Trusting a hook alone does not submit that launch request. Native hook review is the user action the assistant cannot complete on the user's behalf.
 
 On September 5, the installed CLI **0.148.0** reported hooks enabled and project trust configured. Its documented read-only `hooks/list` method discovered the project hook with **`enabled=true`**, **`trustStatus=untrusted`**, and no load warnings/errors. The native CLI also displayed **Hooks need review**. This establishes individual hook trust as a concrete blocker. [Sanitized evidence](evidence/codex-launch-hook.json)
 
+A later read-only check confirmed **`trustStatus=trusted`**, with the runner still unarmed. The subsequent user message arrived in the conversation as a Markdown skill link, which the original literal-only matcher rejected. The [picker correction](prompts/022-skill-picker-launch.md) adds that exact canonical form while keeping the hook definition and native trust settings unchanged. The earlier instruction to avoid selecting the suggestion is superseded.
+
 Attempting to open native review by resuming this same conversation in a separate CLI process was rejected because the Desktop app already had an active writer. The process exited without a trust change or launch. Use native review in a CLI opened for this one-time setup, then keep portfolio interaction in the existing conversation. No active-session lock, trust record or approval setting should be edited to work around the error.
 
-This is a `UserPromptSubmit` hook, not a dedicated skill-invocation lifecycle event. Codex documents the `prompt` field and ignores configured `matcher` values for this event, so exact filtering is done in code. Tests cover the documented literal prompt payload. Desktop skill-picker payload serialization and actual hook dispatch still need user-side verification; do not infer those from fixture tests or from an ordinary model tool call. [Official event contract](https://learn.chatgpt.com/docs/hooks#userpromptsubmit)
+This is a `UserPromptSubmit` hook, not a dedicated skill-invocation lifecycle event. Codex documents the `prompt` field and ignores configured `matcher` values for this event, so exact filtering is done in code. Tests cover literal and canonical linked `prompt` values through isolated dispatch. The link was observed in model-visible input; no raw native hook payload was captured. Actual Desktop dispatch still needs the user's next invocation to verify it; do not infer it from fixture tests or from an ordinary model tool call. [Official event contract](https://learn.chatgpt.com/docs/hooks#userpromptsubmit)
 
 ## Launcher behavior
 
