@@ -1,0 +1,561 @@
+{
+  "observedAt": "2026-09-05T02:37:12.879964+00:00",
+  "purpose": "Read-only exact tech basket testnet recheck; no wallet, signing, funding or broadcasts",
+  "rpcUrl": "https://rpc.testnet.chain.robinhood.com",
+  "sources": {
+    "testnetNetwork": "https://docs.robinhood.com/chain/connecting/",
+    "testnetDexCandidate": "https://docs.hood.mainnet.games/contracts.html",
+    "testnetUsdG": "https://docs.paxos.com/guides/stablecoin/usdg/testnet",
+    "canonicalStocks": "https://api.robinhood.com/rhj/assets",
+    "officialFaucet": "https://faucet.testnet.chain.robinhood.com",
+    "uniswapOfficialDeploymentManifest": "https://developers.uniswap.org/deployments.json"
+  },
+  "publishedContracts": {
+    "factory": "0x09b6d850382787115969a2699f107f5a974c781b",
+    "quoter": "0x3e3d78f0e8d0b0b227c2261f407b7cda97126b9a",
+    "router": "0xf4edb91d541dd1bde41cebbe72bf2d44492adca4",
+    "WETH9": "0x0dd1df4fdd55808c9d530c9599bea5107f6b9b4e",
+    "USDG": "0x7E955252E15c84f5768B83c41a71F9eba181802F"
+  },
+  "requests": [
+    {
+      "label": "chainId",
+      "observedAt": "2026-09-05T02:37:12.880061+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_chainId",
+        "params": []
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": "0xb626"
+      }
+    },
+    {
+      "label": "block",
+      "observedAt": "2026-09-05T02:37:13.049815+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_getBlockByNumber",
+        "params": [
+          "latest",
+          false
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+          "baseFeePerGas": "0x989680",
+          "difficulty": "0x1",
+          "extraData": "0xb70574393dbc9e66a0226e88882df755128e085e2b4ffb8e4425940920164585",
+          "gasLimit": "0x4000000000000",
+          "gasUsed": "0xe2e3",
+          "hash": "0x83f76bac954f204918c9329939f8c0bf03052b8af5d8695f5eb4ed9c04e6869a",
+          "l1BlockNumber": "0xb1930c",
+          "logsBloom": "0x00000004000000000000000000000000002000000000000000000000000000000000000000000000000000000000004000000000000000000020000000000000000000000000000000000000000000000000012000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000001000000000000000000000000000000000000000000000001000000000000100420002000000000000000000000004000000000000000000000000000000000000000000000000",
+          "miner": "0xa4b000000000000000000073657175656e636572",
+          "mixHash": "0x00000000000462e80000000000b1930c000000000000003d0000000000000000",
+          "nonce": "0x0000000000083a56",
+          "number": "0x6bf3264",
+          "parentHash": "0x99017e5e0e8c886f643048c816143cb44b445abc32465fceae796ca9647b0036",
+          "receiptsRoot": "0x460bb9792170bc126eda93e583c9a9ccaf9ec01601d5869a70c71a47946f4fa5",
+          "sendCount": "0x462e8",
+          "sendRoot": "0xb70574393dbc9e66a0226e88882df755128e085e2b4ffb8e4425940920164585",
+          "sha3Uncles": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+          "size": "0x36e",
+          "stateRoot": "0x6a505999a0a185487ec2e2dc9db104839e4a6347f1aa9aaeeb5c1c93beb8cb71",
+          "timestamp": "0x6a9b8058",
+          "transactions": [
+            "0xad70371bbc80127f34e12c3de71dfb935d740fcd845c72ce6f13f50c92aa81fd",
+            "0xb3f362e0e91d5da5af46f00122936ba39363809900f25d1b7d9a95bad6de6412"
+          ],
+          "transactionsRoot": "0x3a0ba383a8f2bbdb4e1a7fa08136879f16012785d05562fcb970decf5e31361a",
+          "uncles": []
+        }
+      }
+    },
+    {
+      "label": "factory code",
+      "observedAt": "2026-09-05T02:37:13.285360+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_getCode",
+        "params": [
+          "0x09b6d850382787115969a2699f107f5a974c781b",
+          "0x6bf3264"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "resultSummary": {
+          "bytes": 24535,
+          "sha256": "ba76d755c0f70c43279e3864cdc1d39f668556b1f006c8e628159abd188d3cc4",
+          "note": "Bytecode summarized to length and SHA-256; original RPC request and block retained for reproduction. This hash is not an upstream equivalence check."
+        }
+      }
+    },
+    {
+      "label": "quoter code",
+      "observedAt": "2026-09-05T02:37:13.285568+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_getCode",
+        "params": [
+          "0x3e3d78f0e8d0b0b227c2261f407b7cda97126b9a",
+          "0x6bf3264"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "resultSummary": {
+          "bytes": 8273,
+          "sha256": "77ba851b204caf8e1285666d24f6bcdaf35ac6c35bdd8a050e8bceafd3918fd3",
+          "note": "Bytecode summarized to length and SHA-256; original RPC request and block retained for reproduction. This hash is not an upstream equivalence check."
+        }
+      }
+    },
+    {
+      "label": "router code",
+      "observedAt": "2026-09-05T02:37:13.285678+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_getCode",
+        "params": [
+          "0xf4edb91d541dd1bde41cebbe72bf2d44492adca4",
+          "0x6bf3264"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "resultSummary": {
+          "bytes": 24497,
+          "sha256": "7f028e8b61d6fd9c2f7b9c5a0dded56a9e14109d97c41294271135df1c4dd2c3",
+          "note": "Bytecode summarized to length and SHA-256; original RPC request and block retained for reproduction. This hash is not an upstream equivalence check."
+        }
+      }
+    },
+    {
+      "label": "WETH9 code",
+      "observedAt": "2026-09-05T02:37:13.285788+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_getCode",
+        "params": [
+          "0x0dd1df4fdd55808c9d530c9599bea5107f6b9b4e",
+          "0x6bf3264"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "resultSummary": {
+          "bytes": 2077,
+          "sha256": "7712359cb91ecd942a142180ff5755e1eef34b555eba079f0c319a65615818e8",
+          "note": "Bytecode summarized to length and SHA-256; original RPC request and block retained for reproduction. This hash is not an upstream equivalence check."
+        }
+      }
+    },
+    {
+      "label": "USDG code",
+      "observedAt": "2026-09-05T02:37:13.510133+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_getCode",
+        "params": [
+          "0x7E955252E15c84f5768B83c41a71F9eba181802F",
+          "0x6bf3264"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "resultSummary": {
+          "bytes": 170,
+          "sha256": "c85d18dc1e49769e01f9f88981176e213b2bc24d2f14d33a81d54bc06579f6db",
+          "note": "Bytecode summarized to length and SHA-256; original RPC request and block retained for reproduction. This hash is not an upstream equivalence check."
+        }
+      }
+    },
+    {
+      "label": "quoter factory()",
+      "observedAt": "2026-09-05T02:37:13.514664+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x3e3d78f0e8d0b0b227c2261f407b7cda97126b9a",
+            "data": "0xc45a0155"
+          },
+          "0x6bf3264"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": "0x00000000000000000000000009b6d850382787115969a2699f107f5a974c781b"
+      }
+    },
+    {
+      "label": "quoter WETH9()",
+      "observedAt": "2026-09-05T02:37:13.515009+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x3e3d78f0e8d0b0b227c2261f407b7cda97126b9a",
+            "data": "0x4aa4a4fc"
+          },
+          "0x6bf3264"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": "0x0000000000000000000000000dd1df4fdd55808c9d530c9599bea5107f6b9b4e"
+      }
+    },
+    {
+      "label": "router factory()",
+      "observedAt": "2026-09-05T02:37:13.520079+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xf4edb91d541dd1bde41cebbe72bf2d44492adca4",
+            "data": "0xc45a0155"
+          },
+          "0x6bf3264"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": "0x00000000000000000000000009b6d850382787115969a2699f107f5a974c781b"
+      }
+    },
+    {
+      "label": "router WETH9()",
+      "observedAt": "2026-09-05T02:37:13.663362+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0xf4edb91d541dd1bde41cebbe72bf2d44492adca4",
+            "data": "0x4aa4a4fc"
+          },
+          "0x6bf3264"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": "0x0000000000000000000000000dd1df4fdd55808c9d530c9599bea5107f6b9b4e"
+      }
+    },
+    {
+      "label": "USDG symbol()",
+      "observedAt": "2026-09-05T02:37:13.668918+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x7E955252E15c84f5768B83c41a71F9eba181802F",
+            "data": "0x95d89b41"
+          },
+          "0x6bf3264"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": "0x000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000045553444700000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "label": "USDG decimals()",
+      "observedAt": "2026-09-05T02:37:13.669603+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_call",
+        "params": [
+          {
+            "to": "0x7E955252E15c84f5768B83c41a71F9eba181802F",
+            "data": "0x313ce567"
+          },
+          "0x6bf3264"
+        ]
+      },
+      "httpStatus": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000006"
+      }
+    }
+  ],
+  "summary": {
+    "blockNumber": "113193572",
+    "blockTimestamp": "2026-09-05T02:37:12+00:00",
+    "checks": [
+      {
+        "label": "factory code",
+        "codeBytes": 24535
+      },
+      {
+        "label": "quoter code",
+        "codeBytes": 8273
+      },
+      {
+        "label": "router code",
+        "codeBytes": 24497
+      },
+      {
+        "label": "WETH9 code",
+        "codeBytes": 2077
+      },
+      {
+        "label": "USDG code",
+        "codeBytes": 170
+      },
+      {
+        "label": "quoter factory()",
+        "result": "0x00000000000000000000000009b6d850382787115969a2699f107f5a974c781b",
+        "error": null
+      },
+      {
+        "label": "quoter WETH9()",
+        "result": "0x0000000000000000000000000dd1df4fdd55808c9d530c9599bea5107f6b9b4e",
+        "error": null
+      },
+      {
+        "label": "router factory()",
+        "result": "0x00000000000000000000000009b6d850382787115969a2699f107f5a974c781b",
+        "error": null
+      },
+      {
+        "label": "router WETH9()",
+        "result": "0x0000000000000000000000000dd1df4fdd55808c9d530c9599bea5107f6b9b4e",
+        "error": null
+      },
+      {
+        "label": "USDG symbol()",
+        "result": "0x000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000045553444700000000000000000000000000000000000000000000000000000000",
+        "error": null
+      },
+      {
+        "label": "USDG decimals()",
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000006",
+        "error": null
+      }
+    ]
+  },
+  "metadataRecheck": [
+    {
+      "url": "https://api.robinhood.com/rhj/assets",
+      "observedAt": "2026-09-05T02:38:40.619795+00:00",
+      "httpStatus": 200,
+      "selectedAssetRecords": [
+        {
+          "id": "0x00000000000000000000000000000000307bb0113ca54f93adf80f4ff2bf681a",
+          "tokenSymbol": "MSFT",
+          "tokenName": "Microsoft \u2022 Robinhood Token",
+          "deployments": [
+            {
+              "contractAddress": "0xe93237C50D904957Cf27E7B1133b510C669c2e74",
+              "chainId": 4663,
+              "networkName": "Robinhood Chain"
+            }
+          ],
+          "currentMultiplier": "1.000000000000000000",
+          "pendingMultiplier": "",
+          "status": "ASSET_STATUS_ACTIVE",
+          "logoUrl": "https://cdn.robinhood.com/ncw_assets/logos/0xe93237c50d904957cf27e7b1133b510c669c2e74.png",
+          "tradingCapabilities": {
+            "market": {
+              "whole": "TRADING_STATUS_TRADABLE",
+              "fractional": "TRADING_STATUS_TRADABLE"
+            },
+            "extended": {
+              "whole": "TRADING_STATUS_TRADABLE",
+              "fractional": "TRADING_STATUS_TRADABLE"
+            },
+            "overnight": {
+              "whole": "TRADING_STATUS_TRADABLE",
+              "fractional": "TRADING_STATUS_TRADABLE"
+            }
+          },
+          "tokenDecimals": 18,
+          "isin": "US5949181045"
+        },
+        {
+          "id": "0x0000000000000000000000000000000086aeaac3c7d9422c90f6fd41aff0eaf7",
+          "tokenSymbol": "AMD",
+          "tokenName": "AMD \u2022 Robinhood Token",
+          "deployments": [
+            {
+              "contractAddress": "0x86923f96303D656E4aa86D9d42D1e57ad2023fdC",
+              "chainId": 4663,
+              "networkName": "Robinhood Chain"
+            }
+          ],
+          "currentMultiplier": "1.000000000000000000",
+          "pendingMultiplier": "",
+          "status": "ASSET_STATUS_ACTIVE",
+          "logoUrl": "https://cdn.robinhood.com/ncw_assets/logos/0x86923f96303d656e4aa86d9d42d1e57ad2023fdc.png",
+          "tradingCapabilities": {
+            "market": {
+              "whole": "TRADING_STATUS_TRADABLE",
+              "fractional": "TRADING_STATUS_TRADABLE"
+            },
+            "extended": {
+              "whole": "TRADING_STATUS_TRADABLE",
+              "fractional": "TRADING_STATUS_TRADABLE"
+            },
+            "overnight": {
+              "whole": "TRADING_STATUS_TRADABLE",
+              "fractional": "TRADING_STATUS_TRADABLE"
+            }
+          },
+          "tokenDecimals": 18,
+          "isin": "US0079031078"
+        },
+        {
+          "id": "0x00000000000000000000000000000000915f477416294f5099a5e0e09f327ce5",
+          "tokenSymbol": "NVDA",
+          "tokenName": "NVIDIA \u2022 Robinhood Token",
+          "deployments": [
+            {
+              "contractAddress": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+              "chainId": 4663,
+              "networkName": "Robinhood Chain"
+            }
+          ],
+          "currentMultiplier": "1.000000000000000000",
+          "pendingMultiplier": "",
+          "status": "ASSET_STATUS_ACTIVE",
+          "logoUrl": "https://cdn.robinhood.com/ncw_assets/logos/0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec.png",
+          "tradingCapabilities": {
+            "market": {
+              "whole": "TRADING_STATUS_TRADABLE",
+              "fractional": "TRADING_STATUS_TRADABLE"
+            },
+            "extended": {
+              "whole": "TRADING_STATUS_TRADABLE",
+              "fractional": "TRADING_STATUS_TRADABLE"
+            },
+            "overnight": {
+              "whole": "TRADING_STATUS_TRADABLE",
+              "fractional": "TRADING_STATUS_TRADABLE"
+            }
+          },
+          "tokenDecimals": 18,
+          "isin": "US67066G1040"
+        },
+        {
+          "id": "0x00000000000000000000000000000000c2425be3658540dd8e2424cbf3c5c649",
+          "tokenSymbol": "AAPL",
+          "tokenName": "Apple \u2022 Robinhood Token",
+          "deployments": [
+            {
+              "contractAddress": "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9",
+              "chainId": 4663,
+              "networkName": "Robinhood Chain"
+            }
+          ],
+          "currentMultiplier": "1.000566080061092436",
+          "pendingMultiplier": "",
+          "status": "ASSET_STATUS_ACTIVE",
+          "logoUrl": "https://cdn.robinhood.com/ncw_assets/logos/0xaf3d76f1834a1d425780943c99ea8a608f8a93f9.png",
+          "tradingCapabilities": {
+            "market": {
+              "whole": "TRADING_STATUS_TRADABLE",
+              "fractional": "TRADING_STATUS_TRADABLE"
+            },
+            "extended": {
+              "whole": "TRADING_STATUS_TRADABLE",
+              "fractional": "TRADING_STATUS_TRADABLE"
+            },
+            "overnight": {
+              "whole": "TRADING_STATUS_TRADABLE",
+              "fractional": "TRADING_STATUS_TRADABLE"
+            }
+          },
+          "tokenDecimals": 18,
+          "isin": "US0378331005"
+        }
+      ],
+      "recordsExplicitlyOnTestnet": [],
+      "assetCount": 194
+    },
+    {
+      "url": "https://developers.uniswap.org/deployments.json",
+      "observedAt": "2026-09-05T02:38:06.803541+00:00",
+      "httpStatus": 200,
+      "generatedAt": "2026-07-15T22:25:40.000Z",
+      "recordsExplicitlyOnTestnet": [],
+      "topLevelKeys": [
+        "version",
+        "generatedAt",
+        "source",
+        "records"
+      ]
+    }
+  ],
+  "faucetObservation": {
+    "url": "https://faucet.testnet.chain.robinhood.com",
+    "observation": "Web open returned403 Forbidden during this recheck; earlier direct GET returned429 Vercel Security Checkpoint. No bypass or faucet request attempted.",
+    "observedAt": "2026-09-05T02:36:00Z",
+    "timePrecision": "approximate minute; source tool did not expose exact response timestamp"
+  },
+  "conclusions": {
+    "status": "EXACT_BASKET_NOT_YET_VERIFIED",
+    "confirmed": [
+      "RPC chain46630 responds",
+      "Published candidate factory/quoter/router/WETH contracts contain code",
+      "Quoter and router factory()/WETH9() match published addresses",
+      "Paxos-documented testUSDG contains code and reports USDG/6 decimals"
+    ],
+    "unresolved": [
+      "Issuer-canonical testnet AAPL/NVDA/MSFT/AMD addresses not identified from available official metadata",
+      "No stock-to-USDG or USDG-to-stock route was tested because no canonical stock addresses were established",
+      "Candidate v3 implementation bytecode equivalence and official Uniswap deployment provenance not established",
+      "Faucet asset menu and claimability not inspected successfully"
+    ],
+    "interpretation": "Absence from current official registries is not proof that testnet stock tokens or community pools do not exist. Matching tickers and guessed/reused mainnet addresses were not accepted. These observations do not establish a working testnet rebalancer."
+  }
+}

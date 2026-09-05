@@ -2,11 +2,11 @@
 
 Created: **2026-09-04**. Track: **ETHOnline 2026, Start from Scratch**. Status: the local application, raw-key graph, five-asset adapter, chart and optional Claude notification channel are implemented. Live read-only checks pass; funded swap receipts, Privy and Ledger execution remain pending.
 
-The [implementation clarifications](docs/prompts/012-agent-graph-rwas-notifications.md) specify one existing agent conversation, a project startup/control skill, an explicit graph, **USDG + four RWAs**, and optional `/rc` notifications. The current demo assets are USDG, AAPL, NVDA, MSFT and AMD; native ETH is gas-only. See [README](README.md) for runnable commands and [RWA evidence](docs/RWA_CHECK.md). The user-requested local wallet exists. The [current demo allocation](docs/DEMO_PORTFOLIO.md), following the [technology and name-recognition decisions](docs/prompts/014-positive-impact-demo.md), is **USDG 5%, with AAPL, NVDA, MSFT and AMD 23.75% each**. The technology focus supersedes the initial solar/healthcare theme for the demo; this is not an audited ethical or anti-monopoly certification. Funding remains pending and trading is unarmed.
+The [implementation clarifications](docs/prompts/012-agent-graph-rwas-notifications.md) specify one existing agent conversation, a project startup/control skill, an explicit graph, **USDG + four RWAs**, and optional `/rc` notifications. The current demo assets are USDG, AAPL, NVDA, MSFT and AMD; native ETH is gas-only. See [README](README.md) for runnable commands and [RWA evidence](docs/RWA_CHECK.md). The user-requested local wallet exists. The [current demo allocation](docs/DEMO_PORTFOLIO.md), following the [technology and name-recognition decisions](docs/prompts/014-positive-impact-demo.md), is **USDG 5%, with AAPL, NVDA, MSFT and AMD 23.75% each**. The technology focus supersedes the initial solar/healthcare theme for the demo; this is not an audited ethical or anti-monopoly certification. Mainnet funding is confirmed; trading remains unarmed while the fee/network decision below is resolved.
 
 The [latest decision](docs/prompts/008-direct-signing-and-ledger-connect.md) returns to direct signing and removes the session-key feasibility work. Raw-key/Privy swaps are automatic; Ledger tracks drift and prompts to rebalance when connected. The [simplification decision](docs/prompts/006-minimal-mvp.md) still excludes spending caps and budget accounting while retaining sponsor-specific features. Earlier discussions remain in Git as history. Cloud LLM input and Privy's TEE signing are accepted. Physical Ledger testing waits for the device to arrive.
 
-All live integration, deployments and demo transactions use **Robinhood mainnet (4663) only**, per the [network clarification](docs/prompts/010-robinhood-only.md). There is no alternative chain or testnet milestone. Local tests remain development checks.
+Robinhood remains the sole chain family. The [latest fee instruction](docs/prompts/016-fees-and-testnet.md) authorizes switching to **Robinhood testnet (46630)** before the full demo if mainnet fees exceed roughly one US cent. The [measured fees](docs/FEE_CHECK.md) exceed that target. Current code and assets still target mainnet (4663); testnet migration is pending because the exact stock assets and routes are unverified. Keep execution stopped while resolving that gap. The earlier mainnet-only preference is superseded to this extent; no alternative chain or undisclosed mock-stock substitution is selected.
 
 ## 1. What we are building
 
@@ -20,7 +20,7 @@ A local portfolio rebalancer with one Claude Code/Codex conversation as its only
 
 Automatic modes need no per-trade human input and no LLM calls. They work with the coding agent closed. **There are no per-trade, daily or cumulative spending caps or budget counters.** Trade size comes from the target allocation and available balance. Keep sponsor-specific authorization features, such as supported Privy contract/method restrictions, without monetary limits or a new human-approval requirement.
 
-The user configures the wallet, signer, assets, target weights, drift threshold and polling interval through the agent. The network is fixed to Robinhood mainnet, chain ID 4663. Use ordinary swap settings for slippage and transaction expiry. Changing targets applies on the next evaluation; report the resulting complete allocation without adding another approval workflow.
+The user configures the wallet, signer, assets, target weights, drift threshold and polling interval through the agent. Current implementation fixes the network to Robinhood mainnet, chain ID 4663; changing an RPC URL alone cannot implement the pending testnet migration. Use ordinary swap settings for slippage and transaction expiry. Changing targets applies on the next evaluation; report the resulting complete allocation without adding another approval workflow.
 
 ## 2. Smallest useful implementation
 
@@ -38,7 +38,7 @@ Keep ordinary config and a small pending-transaction record on disk. A database,
 
 The [execution graph](docs/AGENT_GRAPH.md) links agent target-setting to deterministic observation, planning, execution and independent receipt reconciliation through local state. A small optional MCP channel delivers retained meaningful events into the same Claude session. `/rc` can expose it on a phone; Claude chooses mobile push delivery. The notification channel has no signing or permission-relay tools, and trading runs without it. See [notification setup and limits](docs/NOTIFICATIONS.md).
 
-Use one active wallet/profile on Robinhood mainnet, one Uniswap integration and a small fixed asset set for the demo. No session keys, delegation modules, custom custody vault, generalized routing, multi-wallet orchestration or plugin framework. Maximize compatibility with current Ledger Agent Stack components for the demo.
+Use one active wallet/profile on the selected Robinhood network, one Uniswap integration and a small fixed asset set for the demo. No session keys, delegation modules, custom custody vault, generalized routing, multi-wallet orchestration or plugin framework. Maximize compatibility with current Ledger Agent Stack components for the demo.
 
 ## 3. Deterministic loop
 
@@ -79,13 +79,13 @@ Keep this inside the Privy integration rather than a generic cross-signer permis
 
 ## 6. Network and assets
 
-Use **Robinhood mainnet (4663) exclusively**. Verify a usable existing Uniswap route and Ledger integration there. If a required route is unavailable, evaluate another supported live pair on Robinhood or leave that integration unresolved; do not switch chains. Keep the detailed evidence in [NETWORK.md](docs/NETWORK.md).
+The implemented integration uses **Robinhood mainnet (4663)**. The fee-triggered move to **Robinhood testnet (46630)** is authorized but not implemented: canonical test USDG and a candidate DEX deployment were observed, while the four stock addresses and usable routes remain unverified. Resolve the asset/liquidity gap before changing runtime manifests. Demo-issued stock tokens and new pools would change the previous no-mock scope and have been offered as an explicit choice, not silently adopted. Keep detailed evidence in [NETWORK.md](docs/NETWORK.md) and [FEE_CHECK.md](docs/FEE_CHECK.md).
 
-The first live milestone is an **actual automatic raw-key Uniswap rebalance on Robinhood mainnet, receipts and chart update**. The current five assets are **USDG, AAPL, NVDA, MSFT and AMD**. All four stock/USDG routes passed live bidirectional sample quote checks, with canonical metadata and corporate-action reads preserved in [the original RWA check](docs/RWA_CHECK.md) and [current demo evidence](docs/DEMO_PORTFOLIO.md). The small verified manifest also retains TSLA, AMZN, RUN and MRNA for existing configurations; each portfolio selects USDG plus four stocks. WETH is excluded from the portfolio. Local fixtures/forks are development tests; no mock-stock or test-pool demo substitutes for a live receipt.
+The first live milestone is an **actual automatic raw-key Uniswap rebalance on the resolved Robinhood network, receipts and chart update**. The current five assets are **USDG, AAPL, NVDA, MSFT and AMD**. All four stock/USDG routes passed mainnet bidirectional sample quote checks, with canonical metadata and corporate-action reads preserved in [the original RWA check](docs/RWA_CHECK.md) and [current demo evidence](docs/DEMO_PORTFOLIO.md). The small verified manifest also retains TSLA, AMZN, RUN and MRNA for existing configurations; each portfolio selects USDG plus four stocks. WETH is excluded from the portfolio. Local fixtures/forks are development tests; no mock-stock or test-pool demo substitutes for a live receipt.
 
 Actual stock swaps require usable Uniswap liquidity and correct Robinhood token/price behavior. Runtime values actual ERC20 units with fresh DEX quotes in USDG and blocks activity for advisory corporate-action oraclePaused flags. It does not apply share multipliers again or claim independent share-price/market-hours verification. Feed research remains a later option. Technical ERC20 compatibility does not establish user eligibility under the issuer's rules. Use Robinhood's own semantics without a generalized asset-validation framework.
 
-Use a clearly labelled Robinhood RPC mode initially. A compatible existing local node/client can follow the working swap; reviewed Helios documentation does not establish Robinhood/Nitro support, and no custom light-client development is in the MVP. The local app and accepted cloud LLM/Privy services have distinct trust boundaries. Public chain activity and issuer/chain assumptions remain. A local wallet has been created; no mainnet transaction has been sent.
+Use a clearly labelled Robinhood RPC mode initially. A compatible existing local node/client can follow the working swap; reviewed Helios documentation does not establish Robinhood/Nitro support, and no custom light-client development is in the MVP. The local app and accepted cloud LLM/Privy services have distinct trust boundaries. Public chain activity and issuer/chain assumptions remain. A local wallet has been created and funded; the app has not submitted an approval or swap.
 
 ## 7. Delivery sequence and evidence
 
@@ -95,7 +95,7 @@ Dates are 2026, America/Toronto. The [hackathon checklist](docs/HACKATHON.md) re
 | --- | --- |
 | Sep 4 | Commit the simplified plan, prompts and research; preserve owner-bypass main protection |
 | Sep 5 | Pin reusable components, verify Robinhood mainnet assets/router/route and implement config/planner |
-| Sep 6 | Automatic raw-key Robinhood mainnet swap with receipt; agent CLI and view-only chart |
+| Sep 6 | Resolve the fee/testnet asset decision, then obtain a raw-key Robinhood swap receipt and chart update |
 | Sep 7 | Working drift loop and basic pending-transaction recovery; first check-in before 23:59 |
 | After device arrival, Sep 8 target | Ledger connect-triggered rebalance prompt, signing/display/rejection and focused Key Ring broker demo; delivery date is not assumed |
 | Sep 9 | Real automatic Privy swap and supported scoped-authorization demo through the same loop |
@@ -103,6 +103,6 @@ Dates are 2026, America/Toronto. The [hackathon checklist](docs/HACKATHON.md) re
 | Sep 11–12 | Actual sponsor feedback, setup/code/receipt links and human-narrated demo |
 | Sep 13 before noon | Owner submits the completed entry |
 
-Acceptance covers correct integer allocation/trade calculation; actual automatic raw-key and Privy mainnet swaps without model calls; Ledger drift tracking while disconnected, a fresh prompt on connection and actual mainnet signing/confirmation or rejection; correct route/amount/slippage settings; no duplicate send after restart; and a chart that only displays information. Add focused evidence for Ledger Ring credential handling and Privy's supported authorization restrictions. Use local tests for correctness and actual mainnet receipts for live integration evidence, without building a generic security-testing platform.
+Acceptance covers correct integer allocation/trade calculation; actual automatic raw-key and Privy swaps on the resolved Robinhood network without model calls; Ledger drift tracking while disconnected, a fresh prompt on connection and actual signing/confirmation or rejection on that same network; correct route/amount/slippage settings; no duplicate send after restart; and a chart that only displays information. Add focused evidence for Ledger Ring credential handling and Privy's supported authorization restrictions. Use local tests for correctness and actual receipts labeled with their network and asset provenance for integration evidence, without building a generic security-testing platform.
 
 Planned partners remain **Uniswap, Ledger and Privy**. Show substantive integrations, preserve dependency attribution, complete required feedback and record only evidence actually obtained. See [Privy](docs/PRIVY.md), [Ledger feedback](docs/LEDGER_FEEDBACK.md), [Uniswap feedback](FEEDBACK.md) and [AI provenance](docs/AI_USAGE.md).

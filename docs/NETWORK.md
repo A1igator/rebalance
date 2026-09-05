@@ -1,12 +1,12 @@
-# Robinhood mainnet and integration gates
+# Robinhood networks and integration evidence
 
-Initial documentation review: **2026-09-04**. Subsequent public mainnet RPC checks and local wallet setup are recorded below and in the linked evidence. No funded network transaction has been performed.
+Initial documentation review: **2026-09-04**. Subsequent public mainnet RPC checks and local wallet setup are recorded below and in the linked evidence. Mainnet funding has been observed; the app has not signed or submitted an approval or swap.
 
 ## Decision
 
-**Robinhood Chain mainnet, chain ID 4663, is the sole target** for all live integration, deployments and demo transactions. The [user's clarification](prompts/010-robinhood-only.md) supersedes earlier alternative-chain planning. Ledger's shared EVM configuration includes Robinhood; its CLI quote guard is not a blanket L2 restriction. [Ledger assessment](LEDGER_AGENT_STACK.md)
+**Robinhood is the sole chain family**. The [original mainnet decision](prompts/010-robinhood-only.md) remains the implemented configuration, chain ID 4663. The [latest instruction](prompts/016-fees-and-testnet.md) authorizes testnet 46630 before the full demo when fees exceed roughly one cent; the [fee check](FEE_CHECK.md) met that condition. Testnet migration is pending verification of stock assets and routes, and trading remains unarmed. Ledger's shared EVM configuration includes Robinhood; its CLI quote guard is not a blanket L2 restriction. [Ledger assessment](LEDGER_AGENT_STACK.md)
 
-Verify Robinhood's existing integration path, canonical assets and live Uniswap route. If a required route is unavailable, evaluate another supported live pair on Robinhood or record the unresolved integration. Do not switch chains or testnets. Pin the Robinhood manifest before implementation depends on it.
+Verify Robinhood's existing integration path, canonical assets and live Uniswap route. If a required route is unavailable, evaluate another supported live pair on Robinhood or record the unresolved integration. Do not switch to another chain family or reuse mainnet token/router addresses on testnet. Pin the network-specific manifest before implementation depends on it.
 
 ## Stocks and Uniswap
 
@@ -25,7 +25,7 @@ Robinhood's documented [Nitro full node](https://docs.robinhood.com/chain/run-a-
 ## Close before implementation claims
 
 - Pin the Ledger package/source and verify network registry, quote/build coverage, final chain ID and later hardware display/signing.
-- Verify chain ID 4663, Robinhood assets/decimals/semantics, Uniswap router/pool identities and actual route depth.
+- Preserve the chain 4663 asset/router evidence; separately verify chain 46630 assets/decimals/semantics, router/pool identities and actual route depth before any testnet migration.
 - Select and validate price sources, market-calendar behavior, pauses, sequencer status and independent slippage/price bounds.
-- Complete an actual Robinhood mainnet transaction and receipt, clearly distinguished from a local test/simulation.
+- Resolve the fee/testnet asset decision and obtain a receipt on the selected Robinhood network, clearly identifying network and token provenance.
 - The manifest and live read-only evidence are recorded in `RWA_CHECK.md`; verification remains RPC mode. The application and local wallet now exist. No funded swap or receipt has occurred.

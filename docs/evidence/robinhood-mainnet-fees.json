@@ -1,0 +1,180 @@
+{
+  "observedAt": "2026-09-05T02:27:12.754Z",
+  "chainId": 4663,
+  "gasPriceWei": "407092000",
+  "blocks": [
+    {
+      "number": "54763110",
+      "timestamp": "1788575230",
+      "baseFeePerGas": "409556000",
+      "gasUsed": "3714499",
+      "transactionCount": 17
+    },
+    {
+      "number": "54763109",
+      "timestamp": "1788575230",
+      "baseFeePerGas": "408080000",
+      "gasUsed": "2298942",
+      "transactionCount": 8
+    },
+    {
+      "number": "54763108",
+      "timestamp": "1788575230",
+      "baseFeePerGas": "405420000",
+      "gasUsed": "4259557",
+      "transactionCount": 10
+    },
+    {
+      "number": "54763107",
+      "timestamp": "1788575230",
+      "baseFeePerGas": "404798000",
+      "gasUsed": "7714859",
+      "transactionCount": 13
+    },
+    {
+      "number": "54763106",
+      "timestamp": "1788575230",
+      "baseFeePerGas": "403940000",
+      "gasUsed": "1816485",
+      "transactionCount": 6
+    },
+    {
+      "number": "54763105",
+      "timestamp": "1788575230",
+      "baseFeePerGas": "416694000",
+      "gasUsed": "2552726",
+      "transactionCount": 10
+    },
+    {
+      "number": "54763104",
+      "timestamp": "1788575229",
+      "baseFeePerGas": "414976000",
+      "gasUsed": "3877167",
+      "transactionCount": 12
+    },
+    {
+      "number": "54763103",
+      "timestamp": "1788575229",
+      "baseFeePerGas": "412934000",
+      "gasUsed": "4808344",
+      "transactionCount": 10
+    },
+    {
+      "number": "54763102",
+      "timestamp": "1788575229",
+      "baseFeePerGas": "411780000",
+      "gasUsed": "5847275",
+      "transactionCount": 10
+    },
+    {
+      "number": "54763101",
+      "timestamp": "1788575229",
+      "baseFeePerGas": "409366000",
+      "gasUsed": "3385087",
+      "transactionCount": 9
+    },
+    {
+      "number": "54763100",
+      "timestamp": "1788575229",
+      "baseFeePerGas": "408376000",
+      "gasUsed": "6857068",
+      "transactionCount": 23
+    },
+    {
+      "number": "54763099",
+      "timestamp": "1788575229",
+      "baseFeePerGas": "407130000",
+      "gasUsed": "2914207",
+      "transactionCount": 11
+    },
+    {
+      "number": "54763098",
+      "timestamp": "1788575229",
+      "baseFeePerGas": "405916000",
+      "gasUsed": "3592285",
+      "transactionCount": 9
+    },
+    {
+      "number": "54763097",
+      "timestamp": "1788575229",
+      "baseFeePerGas": "404774000",
+      "gasUsed": "3513089",
+      "transactionCount": 10
+    },
+    {
+      "number": "54763096",
+      "timestamp": "1788575229",
+      "baseFeePerGas": "403940000",
+      "gasUsed": "3309035",
+      "transactionCount": 8
+    },
+    {
+      "number": "54763095",
+      "timestamp": "1788575229",
+      "baseFeePerGas": "411876000",
+      "gasUsed": "2497008",
+      "transactionCount": 18
+    }
+  ],
+  "router": "0xCaf681a66D020601342297493863E78C959E5cb2",
+  "routerTransactions": [
+    {
+      "hash": "0xdabb985445d7443c220e186a1b439f7438c81da981863ad321c727fae0777119",
+      "block": "54763101",
+      "timestamp": "1788575229",
+      "status": "success",
+      "gasUsed": "131451",
+      "effectiveGasPrice": "409366000",
+      "feeWei": "53811570066000",
+      "feeEth": "0.000053811570066",
+      "decoded": {
+        "function": "exactInputSingle",
+        "args": [
+          {
+            "tokenIn": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+            "tokenOut": "0x7B796a6190099b98b1C40df741FFA803f1173fCf",
+            "fee": 10000,
+            "recipient": "0xb1D6a42C54D72B59A7EE40F045Aa3709Db00D5fe",
+            "amountIn": "26860000000000000",
+            "amountOutMinimum": "0",
+            "sqrtPriceLimitX96": "0"
+          }
+        ]
+      },
+      "feeUsd": "0.13202345846272704"
+    }
+  ],
+  "rpcUrl": "https://rpc.mainnet.chain.robinhood.com",
+  "ethUsd": {
+    "observedAt": "2026-09-05T02:27:53.093301+00:00",
+    "source": "https://api.coinbase.com/v2/prices/ETH-USD/spot",
+    "data": {
+      "amount": "2453.44",
+      "base": "ETH",
+      "currency": "USD"
+    }
+  },
+  "approvalEstimate": {
+    "observedAt": "2026-09-05T02:26:14.813Z",
+    "method": "eth_estimateGas",
+    "headBlock": "54762549",
+    "token": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+    "function": "approve(address,uint256)",
+    "spender": "0xCaf681a66D020601342297493863E78C959E5cb2",
+    "amountRaw": "10000000",
+    "gasEstimate": "58789",
+    "gasPriceWei": "405042000",
+    "feeWei": "23812014138000",
+    "feeEth": "0.000023812014138",
+    "feeUsd": "0.05842134796673472",
+    "note": "Read-only estimate for a 10 USDG approval, not a submitted transaction. Public evidence omits the demo sender address and balances."
+  },
+  "limitations": [
+    "Approval is estimated, while the sampled third-party router transaction has an actual successful receipt.",
+    "Sampled swap is WETH to a different token, not one of our stock/USDG pairs or our wallet transaction.",
+    "Do not infer exact four-stock rebalance cost from this single swap.",
+    "Nitro fee estimation includes parent-chain data fees; do not add them again.",
+    "ETH/USD conversion is a spot reference; gas prices and estimates change. LP fees, price impact and bridging costs are outside this network-fee comparison.",
+    "Observed gas price alone does not establish congestion."
+  ]
+}
