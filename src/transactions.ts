@@ -100,7 +100,7 @@ export async function reconcile(config: Config, chain: Chain): Promise<{ blocked
   if (receipt.from.toLowerCase() !== config.wallet.toLowerCase()) throw new Error('Receipt sender differs from the selected wallet');
   if (receipt.status !== 'success') {
     return { blocked: true, operation: { status: 'reverted', hash: pending.hash, kind: pending.kind,
-      message: 'Transaction reverted. Inspect the receipt and use acknowledge-revert before another attempt.' } };
+      message: 'Transaction reverted. The automatic raw-key runner verifies recovery before another attempt; the pending record remains preserved.' } };
   }
   const block = await chain.publicClient.getBlock({ blockNumber: receipt.blockNumber });
   const head = await chain.publicClient.getBlockNumber({ cacheTime: 0 });

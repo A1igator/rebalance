@@ -10,6 +10,13 @@
   function positive(value) {
     try { return BigInt(value) > 0n; } catch { return false; }
   }
+  function gasAmount(value) {
+    if (typeof value !== "string" || !/^\d+$/.test(value)) return null;
+    const wei = BigInt(value);
+    const unit = 10n ** 18n;
+    const fraction = (wei % unit).toString().padStart(18, "0").replace(/0+$/, "");
+    return `${wei / unit}${fraction ? `.${fraction}` : ""} ETH`;
+  }
   function rows(values) {
     return values.filter(({ weight }) => Number.isInteger(weight) && weight > 0 && weight <= 10000);
   }
@@ -48,8 +55,10 @@
     if (failed) note = "Update unavailable";
     byId("state").textContent = state;
     byId("note").textContent = note;
+    const gas = gasAmount(snapshot?.nativeBalance);
+    byId("gas").textContent = gas === null ? "ETH gas · unavailable" : `Gas · ${gas}`;
     byId("chart-title").textContent = state;
-    byId("chart-description").textContent = `${note}. ${entries.map((r) => `${r.id} ${percent.format(r.weight / 100)}%`).join(", ")}`;
+    byId("chart-description").textContent = `${note}. ${entries.map((r) => `${r.id} ${percent.format(r.weight / 100)}%`).join(", ")}. Gas balance ${gas === null ? "unavailable" : `last observed: ${gas}`}; excluded from allocation.`;
     const segments = byId("segments");
     const labels = byId("labels");
     segments.replaceChildren(); labels.replaceChildren();

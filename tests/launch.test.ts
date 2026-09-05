@@ -139,15 +139,93 @@ test('malformed successful check cannot reuse stale status as fresh evidence for
   assert.equal(count(f.calls, 'start'), 0);
 });
 
-test('an unresolved transaction blocks launch without removing its identity or cycle', async t => {
-  const f = await fixture(t); const hash = `0x${'1'.repeat(64)}`;
-  f.current.operation = { status: 'unresolved', hash };
-  await atomicWriteJson(join(f.dataDir, 'pending.json'), { hash });
+test('full raw-key launch arms automatic recovery without rewriting transaction or cycle records', async t => {
+  for (const operation of ['unresolved', 'reverted'] as const) {
+    const f = await fixture(t); const hash = `0x${'1'.repeat(64)}`;
+    f.current.operation = { status: operation, hash };
+    const records = { 'pending.json': { hash, nonce: 16 },
+      'recovery.json': { originalHash: hash, cancellationHash: `0x${'2'.repeat(64)}`, status: 'unknown' },
+      'cycle.json': { startedAt: 'fixture', nextEligibleAt: 'preserved', swapConfirmed: true } };
+    for (const [file, value] of Object.entries(records)) await atomicWriteJson(join(f.dataDir, file), value);
+    const before = await Promise.all(Object.keys(records).map(file => readFile(join(f.dataDir, file), 'utf8')));
+    const launched = await launch({}, f.deps);
+    assert.equal(launched.outcome, 'armed', operation);
+    assert.equal(launched.status?.operation?.hash, hash);
+    assert.equal(launched.status?.operation?.status, operation, 'arming does not claim a resolved receipt');
+    assert.match(launched.messages.join(' '), /automatic recovery/i);
+    assert.deepEqual(await Promise.all(Object.keys(records).map(file => readFile(join(f.dataDir, file), 'utf8'))), before);
+    assert.equal(count(f.calls, 'start'), 1);
+    assert.equal(count(f.calls, 'recover'), 0, 'recovery belongs to the graph, not the manual wrapper');
+    assert.equal(count(f.calls, 'stop'), 0);
+  }
+});
+
+test('setup-only and deferred signers never arm through a recovery barrier', async t => {
+  for (const operation of ['unresolved', 'reverted'] as const) {
+    for (const mode of ['private-key', 'ledger', 'privy'] as const) {
+      for (const setupOnly of [true, false]) {
+        if (!setupOnly && mode === 'private-key') continue;
+        const f = await fixture(t); f.current.mode = mode;
+        f.current.operation = { status: operation, hash: `0x${'1'.repeat(64)}` };
+        const launched = await launch({ setupOnly }, f.deps);
+        assert.equal(launched.outcome, 'blocked');
+        assert.equal(launched.status?.armed, false);
+        assert.equal(launched.status?.mode, mode);
+        assert.equal(count(f.calls, 'start'), 0);
+        assert.equal(count(f.calls, 'recover'), 0);
+        assert.equal(count(f.calls, 'configure'), 0);
+      }
+    }
+  }
+});
+
+test('recovery eligibility never overrides failed, malformed or errored preflight', async t => {
+  for (const failure of ['failed', 'malformed', 'error'] as const) {
+    const f = await fixture(t); const command = f.deps.command;
+    f.current.operation = { status: 'unresolved', hash: `0x${'1'.repeat(64)}` };
+    f.deps.command = async args => {
+      if (args[0] !== 'check') return command(args);
+      f.calls.push(args);
+      if (failure === 'error') f.current.error = 'Pending account does not match configuration';
+      return { ok: failure !== 'failed', value: failure === 'malformed' ? {} : structuredClone(f.current) };
+    };
+    assert.equal((await launch({}, f.deps)).outcome, 'blocked', failure);
+    assert.equal(count(f.calls, 'start'), 0);
+  }
+});
+
+test('a newer stop during unresolved preflight wins over automatic-recovery launch', async t => {
+  const f = await fixture(t); const command = f.deps.command;
+  f.current.operation = { status: 'unresolved', hash: `0x${'1'.repeat(64)}` };
+  const stopped = { requestedAt: 'newer-stop', requestId: 'user-stop' };
+  f.deps.command = async args => {
+    if (args[0] === 'check') await atomicWriteJson(join(f.dataDir, 'stop.json'), stopped);
+    return command(args);
+  };
   const launched = await launch({}, f.deps);
   assert.equal(launched.outcome, 'blocked');
-  assert.equal(launched.status?.operation?.hash, hash);
-  assert.deepEqual(await readJson(join(f.dataDir, 'pending.json')), { hash });
   assert.equal(count(f.calls, 'start'), 0);
+  assert.deepEqual(await readJson(join(f.dataDir, 'stop.json')), stopped);
+});
+
+test('new explicit launch after a stop arms recovery once while replay preserves a later stop', async t => {
+  const f = await fixture(t);
+  f.current.operation = { status: 'unresolved', hash: `0x${'1'.repeat(64)}` };
+  await atomicWriteJson(join(f.dataDir, 'stop.json'), { requestId: 'earlier-stop' });
+  const launched = await launch({ requestId: 'explicit-new-launch' }, f.deps);
+  assert.equal(launched.outcome, 'armed');
+  assert.equal(await readJson(join(f.dataDir, 'stop.json')), null);
+  // The still-unresolved active runner is reused, not cancelled or restarted.
+  assert.equal((await launch({ requestId: 'reuse' }, f.deps)).outcome, 'armed');
+  assert.equal(count(f.calls, 'check'), 1);
+  f.current.armed = false; f.alive.delete(202);
+  await rm(join(f.dataDir, 'run.lock'));
+  const stopped = { requestId: 'later-stop' };
+  await atomicWriteJson(join(f.dataDir, 'stop.json'), stopped);
+  assert.equal((await launch({ requestId: 'explicit-new-launch' }, f.deps)).outcome, 'already-handled');
+  assert.deepEqual(await readJson(join(f.dataDir, 'stop.json')), stopped);
+  assert.equal(count(f.calls, 'start'), 1);
+  assert.equal(count(f.calls, 'recover'), 0);
 });
 
 test('a live runner lock with unarmed status is starting/stopping and is never cleared', async t => {

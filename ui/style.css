@@ -8,3 +8,4 @@ text { text-anchor: middle; fill: #eef3ef; }
 .note { font-size: 12px; fill: #8f9e94; }
 .ticker { font-size: 15px; font-weight: 600; letter-spacing: .5px; }
 .weight { font-size: 13px; fill: #a3afa6; }
+.gas { text-anchor: end; font-size: 11px; font-variant-numeric: tabular-nums; fill: #8f9e94; }

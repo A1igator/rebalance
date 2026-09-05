@@ -208,8 +208,15 @@ export async function launch(options: LaunchOptions = {}, overrides: Partial<Lau
         result.messages.push('The read-only check failed; no trading runner was started.');
       }
       if (['unresolved', 'reverted'].includes(result.status!.operation?.status ?? '')) {
-        preparationBlocked = true;
-        result.messages.push('The earlier transaction needs recovery; its records were preserved.');
+        // Pending state is a barrier to another trade, not to the full raw-key
+        // runner that owns automatic recovery. Preflight errors still block;
+        // the runner validates/reconciles both identities before any dispatch.
+        if (!options.setupOnly && result.status!.mode === 'private-key' && !preparationBlocked) {
+          result.messages.push('The earlier transaction remains unresolved; automatic recovery is included in this launch. Its records and cycle timing are preserved.');
+        } else {
+          preparationBlocked = true;
+          result.messages.push('The earlier transaction needs recovery; this preparation or deferred signer does not perform it. Its records were preserved.');
+        }
       }
     }
     await ensureChart();
