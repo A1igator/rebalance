@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { existsSync, writeFileSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, beforeEach, test } from 'node:test';
-import { keccak256, parseTransaction, recoverTransactionAddress, TransactionReceiptNotFoundError, type Hex, type TransactionSerialized } from 'viem';
+import { ExecutionRevertedError, FeeCapTooLowError, InsufficientFundsError, IntrinsicGasTooLowError,
+  keccak256, NonceTooLowError, parseTransaction, recoverTransactionAddress, RpcRequestError,
+  TransactionReceiptNotFoundError, type Hex, type TransactionSerialized } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { atomicWriteJson, readJson, type PendingTransaction } from '../src/storage.js';
 import type { ChainTransaction } from '../src/chain.js';
@@ -19,7 +21,7 @@ process.env.REBALANCE_DATA_DIR = data;
 process.env.REBALANCE_PRIVATE_KEY = key;
 // These modules capture DATA at import time, after the isolated environment exists.
 const { CONFIG_PATH, KEY_PATH, PENDING_PATH, LAST_TRANSACTION_PATH, validateConfig } = await import('../src/config.js');
-const { dispatch, reconcile } = await import('../src/transactions.js');
+const { classifyDispatchFailure, dispatch, reconcile, validatePending } = await import('../src/transactions.js');
 type Chain = Parameters<typeof dispatch>[1];
 const blockHash = `0x${'ab'.repeat(32)}` as Hex;
 const fixtureHash = `0x${'cd'.repeat(32)}` as Hex;
@@ -91,6 +93,8 @@ test('dispatch persists the prepared hash before sending and signs the intended 
     assert.equal(decoded.data, transaction.data);
     assert.equal(decoded.gas, 25_200n);
     assert.equal(decoded.gasPrice, 2n);
+    assert.equal(record.gas, decoded.gas.toString());
+    assert.equal(record.gasPrice, decoded.gasPrice.toString());
     assert.equal((await recoverTransactionAddress({ serializedTransaction: serializedTransaction as TransactionSerialized })).toLowerCase(), wallet.toLowerCase());
     h.sent.push(serializedTransaction);
     return keccak256(serializedTransaction);
@@ -100,6 +104,21 @@ test('dispatch persists the prepared hash before sending and signs the intended 
   assert.equal(result.hash, keccak256(h.sent[0]!));
   assert.equal(result.status, 'pending');
   assert.equal((await readJson<PendingTransaction>(PENDING_PATH))!.status, 'broadcast');
+});
+
+test('optional fee provenance validates without invalidating legacy pending records', async () => {
+  const legacy = await pending();
+  validatePending(legacy, configuration());
+  validatePending({ ...legacy, gas: '25200', gasPrice: '2' }, configuration());
+  validatePending({ ...legacy, gasPrice: '2', sendFailure: 'underpriced' }, configuration());
+  for (const field of ['gas', 'gasPrice'] as const) {
+    for (const value of ['0', '-1', '01', '1.5', '0x20', '', 'fixture-secret', (2n ** 256n).toString(), 123]) {
+      assert.throws(() => validatePending({ ...legacy, [field]: value } as PendingTransaction, configuration()),
+        /Pending transaction.*invalid/);
+    }
+  }
+  assert.throws(() => validatePending({ ...legacy, sendFailure: 'fixture-secret' } as never, configuration()), /invalid/);
+  assert.deepEqual(await readJson(PENDING_PATH), legacy, 'validation must not rewrite the pending record');
 });
 
 test('unknown or mismatched send outcomes preserve the original hash and block another send', async () => {
@@ -116,9 +135,72 @@ test('unknown or mismatched send outcomes preserve the original hash and block a
     assert.equal(result.status, 'unresolved');
     assert.equal(record!.status, 'unknown');
     assert.equal(record!.hash, keccak256(h.sent[0]!));
+    assert.equal(record!.gas, '25200');
+    assert.equal(record!.gasPrice, '2');
+    assert.equal(record!.sendFailure, 'unknown');
     await assert.rejects(dispatch(configuration(), h.chain, transaction), /pending transaction/);
     assert.equal(h.sent.length, 1);
   }
+});
+
+test('recognized rejection diagnostics remain unknown sends, retain fee/hash identity and exclude provider payloads', async () => {
+  const secret = 'fixture-secret-provider-body';
+  const rejection = (code: number, message: string, serialized: Hex) => new RpcRequestError({
+    body: { method: 'eth_sendRawTransaction', params: [serialized], credential: secret },
+    error: { code, message: `${message} ${secret}`, data: { privateKey: key } },
+    url: `https://fixture.invalid/${secret}`,
+  });
+  const cases: { failure: string; error: (serialized: Hex) => unknown }[] = [
+    { failure: 'underpriced', error: () => new FeeCapTooLowError() },
+    { failure: 'gas', error: () => new IntrinsicGasTooLowError() },
+    { failure: 'nonce', error: () => new NonceTooLowError() },
+    { failure: 'balance', error: () => new Error(secret, { cause: new InsufficientFundsError() }) },
+    { failure: 'reverted', error: () => new ExecutionRevertedError({ message: secret }) },
+    { failure: 'underpriced', error: serialized => rejection(-32000, 'replacement transaction underpriced', serialized) },
+    { failure: 'gas', error: serialized => rejection(-32003, 'intrinsic gas too low', serialized) },
+    { failure: 'nonce', error: serialized => rejection(-32000, 'already known', serialized) },
+    { failure: 'balance', error: serialized => rejection(-32003, 'insufficient funds', serialized) },
+    { failure: 'reverted', error: serialized => rejection(3, 'provider custom text', serialized) },
+    { failure: 'unknown', error: serialized => rejection(-32000, 'provider custom text', serialized) },
+    { failure: 'unknown', error: () => new Error(secret) },
+  ];
+  for (const example of cases) {
+    await rm(PENDING_PATH, { force: true });
+    const h = mockedChain();
+    h.rpc.sendRawTransaction = async ({ serializedTransaction }) => {
+      h.sent.push(serializedTransaction);
+      throw example.error(serializedTransaction);
+    };
+    const result = await dispatch(configuration(), h.chain, transaction);
+    const record = await readJson<PendingTransaction>(PENDING_PATH);
+    assert.equal(result.status, 'unresolved');
+    assert.equal(result.sendFailure, example.failure);
+    assert.equal(record!.status, 'unknown');
+    assert.equal(record!.sendFailure, example.failure);
+    assert.equal(record!.hash, keccak256(h.sent[0]!));
+    assert.equal(record!.gas, '25200');
+    assert.equal(record!.gasPrice, '2');
+    h.rpc.getTransactionReceipt = async () => { throw new TransactionReceiptNotFoundError({ hash: record!.hash as Hex }); };
+    const reconciled = await reconcile(configuration(), h.chain);
+    assert.equal(reconciled.blocked, true);
+    assert.equal(reconciled.operation?.sendFailure, example.failure);
+    assert.equal(reconciled.operation?.status, 'unresolved');
+    assert.match(reconciled.operation!.message!, /outcome remains unverified/);
+    const publicText = JSON.stringify([result, reconciled]) + await readFile(PENDING_PATH, 'utf8');
+    for (const value of [secret, key, h.sent[0]!]) assert.equal(publicText.includes(value), false);
+    await assert.rejects(dispatch(configuration(), h.chain, transaction), /pending transaction/);
+    assert.equal(h.sent.length, 1, 'a diagnostic classification must never trigger retry');
+  }
+});
+
+test('cyclic or malformed provider error objects safely fall back without inspecting request bodies', () => {
+  const cycle: { cause?: unknown } = {};
+  cycle.cause = cycle;
+  assert.equal(classifyDispatchFailure(cycle), 'unknown');
+  assert.equal(classifyDispatchFailure({ get name() { throw new Error('fixture-secret-getter'); } }), 'unknown');
+  assert.equal(classifyDispatchFailure({ name: 'Error', message: 'insufficient funds',
+    get body() { return assert.fail('request bodies must never be read'); } }), 'unknown');
+  assert.equal(classifyDispatchFailure({ code: -32003, message: 'provider custom text' }), 'unknown');
 });
 
 test('successful receipts clear pending only after two observed confirmations and durable result storage', async () => {

@@ -2,7 +2,8 @@ import type { Portfolio, TradePlan } from './core.js';
 import type { Operation } from './transactions.js';
 
 export const GRAPH = {
-  intent: ['config'], config: ['reconcile', 'wait'], reconcile: ['observe', 'wait'],
+  intent: ['config'], config: ['reconcile', 'wait'], reconcile: ['recover', 'observe', 'wait'],
+  recover: ['observe', 'wait'],
   observe: ['plan'], plan: ['interval', 'wait'], interval: ['quote', 'wait'], quote: ['execute', 'wait'],
   execute: ['receipt'], receipt: ['reconcile'], wait: ['config'], error: ['config'],
 } as const;
@@ -11,6 +12,7 @@ export type GraphState = { node: Node; trace: Node[] };
 export type GraphDependencies = {
   configured(): Promise<boolean>;
   reconcile(): Promise<{ blocked: boolean; operation: Operation | null }>;
+  recover?(): Promise<{ blocked: boolean; operation: Operation | null } | null>;
   observe(): Promise<Portfolio>;
   plan(portfolio: Portfolio): TradePlan | null | Promise<TradePlan | null>;
   interval(): Promise<Operation | null>;
@@ -34,8 +36,13 @@ export async function runGraph(deps: GraphDependencies): Promise<GraphState> {
     await enter('config');
     if (!await deps.configured()) return await enter('wait');
     await enter('reconcile');
-    const result = await deps.reconcile();
+    let result = await deps.reconcile();
     operation = result.operation;
+    if (deps.canExecute && deps.recover) {
+      await enter('recover');
+      const recovered = await deps.recover();
+      if (recovered) { result = recovered; operation = recovered.operation; }
+    }
     if (result.blocked) return await enter('wait');
     await enter('observe');
     const portfolio = await deps.observe();

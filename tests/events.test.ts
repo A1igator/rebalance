@@ -11,7 +11,7 @@ import type { RebalanceEvent } from '../src/events.js';
 const directory = await mkdtemp(join(tmpdir(), 'rebalance-events-test-'));
 const previousDirectory = process.env.REBALANCE_DATA_DIR;
 process.env.REBALANCE_DATA_DIR = directory;
-const { events, publishEvent, acknowledgeEvent, ledgerCondition, rebalanceCompleted, attentionCondition } = await import('../src/events.js');
+const { events, publishEvent, acknowledgeEvent, ledgerCondition, rebalanceCompleted, attentionCondition, transactionRecovered } = await import('../src/events.js');
 const queuePath = join(directory, 'events.json');
 const conditionPath = join(directory, 'notification-state.json');
 
@@ -31,6 +31,19 @@ function sample(id: string): RebalanceEvent {
 async function savedQueue(): Promise<RebalanceEvent[]> {
   return JSON.parse(await readFile(queuePath, 'utf8')) as RebalanceEvent[];
 }
+
+test('verified recovery events remain distinct from full completion and survive replay after acknowledgement', async () => {
+  const hash = `0x${'ab'.repeat(32)}`;
+  await transactionRecovered(hash, 'cancelled');
+  const [event] = await events();
+  assert.equal(event.type, 'rebalance-recovered');
+  assert.match(event.message, /not a completed rebalance/);
+  await acknowledgeEvent(event.id);
+  await transactionRecovered(hash.toUpperCase().replace('0X', '0x'), 'cancelled');
+  assert.deepEqual(await events(), []);
+  await assert.rejects(transactionRecovered('invalid', 'cancelled'), /Invalid recovery receipt/);
+  await assert.rejects(transactionRecovered(hash, 'made-up' as 'cancelled'), /Invalid recovery outcome/);
+});
 
 test('offline events are durable and duplicate publication cannot overwrite the original', async () => {
   assert.deepEqual(await events(), []);

@@ -1,13 +1,14 @@
 # Same-session notifications and Remote Control
 
-The local monitor queues three kinds of events:
+The local monitor queues four kinds of events:
 
 - `ledger-rebalance-needed`: drift needs attention. The current event hook is implemented; hardware readiness, connection/rejection handling and actual Ledger signing remain deferred. Its message explicitly says hardware setup is pending.
 - `rebalance-completed`: the most recent swap has a successful observed receipt with two confirmations, and a subsequent fresh portfolio is within the configured drift threshold. An approval, a submitted swap, stale holdings or untradeable dust cannot produce a completion claim.
 
+- `rebalance-recovered`: a cancelled or reverted nonce has a verified recovery receipt. This is distinct from a completed rebalance and does not request another recovery command.
 - `rebalance-attention`: an unresolved/reverted transaction or runtime failure needs attention. Messages use fixed public classifications, never raw provider errors. The event does not authorize a retry or cancellation.
 
-The queue is stored in ignored `.local/events.json`. Ledger alerts are deduplicated per continuing wallet/target condition; completed events are deduplicated by transaction hash. Attention alerts journal each continuing wallet/failure/hash condition before publication, survive acknowledgement and restart without repeating, and allow a new event after recovery or a changed failure. They are emitted even when receipt reconciliation blocks observation/planning. Events survive the absence of an agent. `npm run cli -- events` reads pending events, and `events ack <id>` records handling in the conversation. It does not prove a phone notification was delivered.
+The queue is stored in ignored `.local/events.json`. Ledger alerts are deduplicated per continuing wallet/target condition; completed and recovery events are deduplicated by their receipt hash in separate event namespaces. Attention alerts journal each continuing wallet/failure/hash condition before publication, survive acknowledgement and restart without repeating, and allow a new event after recovery or a changed failure. They are emitted even when receipt reconciliation blocks observation/planning. Events survive the absence of an agent. `npm run cli -- events` reads pending events, and `events ack <id>` records handling in the conversation. It does not prove a phone notification was delivered.
 
 ## Claude Code
 
@@ -36,7 +37,7 @@ On the desktop host, open **Settings → Connections → Control this Mac or PC 
 For incoming rebalancer events, use a native scheduled follow-up in this conversation. The configured **Rebalance notifications** heartbeat checks the retained local queue every **five minutes**:
 
 1. Read `npm run cli -- events`. Stay quiet if there are no new events.
-2. For pending events, read `npm run cli -- status` for context and report the confirmed completion, Ledger request or runtime-attention failure. Distinguish a past completion from current drift. Ledger hardware support remains pending.
+2. For pending events, read `npm run cli -- status` for context and report the confirmed completion, transaction recovery, Ledger request or runtime-attention failure. Distinguish a past completion from current drift. Ledger hardware support remains pending.
 3. After reporting an event, acknowledge its exact ID with `npm run cli -- events ack <id>`. If processing fails, retain it. An acknowledgement records handling in the conversation, not verified phone delivery.
 
 This is a supported **scheduled Codex check**, not an immediate event-triggered push API. Reporting uses a Codex model run and may lag the event by the schedule interval or host availability. Trading, drift checks, cycle timing and receipts remain deterministic local code with no model dependency. The heartbeat never starts/stops trading, changes allocation, invokes cancellation recovery, signs, submits or reads credentials. It reports only new meaningful events or notification-check failures and stays quiet on unchanged state. An empty queue does not trigger a runner-status inspection; this schedule is not a general monitor-error detector. The native app can notify about completion/attention; mobile delivery still depends on pairing, account/app settings and the host being available. [Scheduled tasks in an existing chat](https://learn.chatgpt.com/docs/automations#schedule-a-task-inside-a-chat)

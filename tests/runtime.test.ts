@@ -18,6 +18,7 @@ const { CONFIG_PATH, STATE_PATH, PENDING_PATH, LAST_TRANSACTION_PATH, validateCo
 const { initialStatus, monitor, status, tick, STOP_PATH, CYCLE_PATH,
   rebalanceInterval, beginRebalanceCycle, finishRebalanceCycle, ACTIVE_CYCLE_SECONDS } = await import('../src/runtime.js');
 const { events, acknowledgeEvent } = await import('../src/events.js');
+const { noteSuccessfulSwap } = await import('../src/cadence.js');
 const wallet = '0x0000000000000000000000000000000000000001';
 const hash = `0x${'ab'.repeat(32)}`;
 const targets = { USDG: 2000, TSLA: 2000, AAPL: 2000, NVDA: 2000, AMZN: 2000 };
@@ -63,6 +64,13 @@ function mockRpc(t: TestContext, chainId = 4663) {
     });
   });
   return requests;
+}
+
+async function markFixtureSwapConfirmed() {
+  const cycle = await readJson<{ startedAt: number }>(CYCLE_PATH);
+  assert.ok(cycle);
+  await noteSuccessfulSwap({ chainId: 4663, wallet, hash, nonce: 1, kind: 'swap',
+    status: 'broadcast', createdAt: new Date(cycle.startedAt).toISOString() });
 }
 
 test('pending recovery retains holdings and their timestamp without planning or completion events', async t => {
@@ -269,9 +277,14 @@ test('one cycle can complete four buys and their approvals, then persistent cool
   let dispatched = 0;
   let reconciled = 0;
   let quoted = 0;
+  let previousKind: string | undefined;
   const deps: GraphDependencies = {
     configured: async () => true,
-    reconcile: async () => { reconciled += 1; return { blocked: false, operation: dispatched ? { status: 'confirmed' } : null }; },
+    reconcile: async () => {
+      reconciled += 1;
+      if (previousKind === 'swap') await markFixtureSwapConfirmed();
+      return { blocked: false, operation: dispatched ? { status: 'confirmed' } : null };
+    },
     observe: async () => portfolio,
     plan: async () => {
       if (!legs.length) { await finishRebalanceCycle(); return null; }
@@ -283,16 +296,18 @@ test('one cycle can complete four buys and their approvals, then persistent cool
       await beginRebalanceCycle(config);
       assert.ok(await readJson(CYCLE_PATH), 'the interval must be durable before the first dispatch');
       dispatched += 1;
-      return { status: 'pending', kind: legs.shift()!.kind };
+      previousKind = legs.shift()!.kind;
+      return { status: 'pending', kind: previousKind };
     },
     publish: async () => {}, canExecute: true,
   };
   await runGraph(deps);
-  const first = await readJson(CYCLE_PATH);
+  const first = await readJson<Record<string, unknown>>(CYCLE_PATH);
   for (let leg = 1; leg < 8; leg += 1) {
     now += 30_000;
     assert.equal((await runGraph(deps)).node, 'receipt');
-    assert.deepEqual(await readJson(CYCLE_PATH), first, 'later legs must not reset either timer');
+    const current = await readJson<Record<string, unknown>>(CYCLE_PATH);
+    assert.deepEqual({ ...current, swapConfirmed: first!.swapConfirmed }, first, 'later legs must not reset either timer');
   }
   assert.equal(dispatched, 8);
   assert.equal(quoted, 8);
@@ -312,7 +327,9 @@ test('one cycle can complete four buys and their approvals, then persistent cool
 test('cycle expiry bounds ongoing drift and target/wallet edits cannot shorten persisted eligibility', async t => {
   let now = 2_000_000_000_000;
   t.mock.method(Date, 'now', () => now);
-  const first = await beginRebalanceCycle(config);
+  await beginRebalanceCycle(config);
+  await markFixtureSwapConfirmed();
+  const first = (await rebalanceInterval(config)).cycle!;
   assert.equal(Date.parse(first.activeUntil) - now, ACTIVE_CYCLE_SECONDS * 1000);
   const otherWallet = { ...config, wallet: '0x0000000000000000000000000000000000000002' as const };
   assert.equal((await rebalanceInterval(otherWallet)).operation?.status, 'cooling-down');
@@ -327,13 +344,14 @@ test('cycle expiry bounds ongoing drift and target/wallet edits cannot shorten p
   assert.equal((await rebalanceInterval(config)).operation, null);
   const next = await beginRebalanceCycle(config);
   assert.equal(Date.parse(next.startedAt), now);
-  assert.equal(Date.parse(next.nextEligibleAt), now + 3_600_000);
+  assert.equal(Date.parse(next.nextEligibleAt), now + ACTIVE_CYCLE_SECONDS * 1000);
 });
 
 test('a fresh process observes the retained cooldown without RPC, arming or signing', async t => {
   const now = Date.now();
   t.mock.method(Date, 'now', () => now);
   await beginRebalanceCycle(config);
+  await markFixtureSwapConfirmed();
   await finishRebalanceCycle();
   const before = await readJson(CYCLE_PATH);
   const script = `
@@ -428,4 +446,171 @@ test('production tick bounds an approval by the active cycle and rejects expiry 
       ...['config', 'chain', 'runtime', 'core', 'storage'].map(name => new URL(`../src/${name}.ts`, import.meta.url).href)],
     { env: { ...process.env, REBALANCE_DATA_DIR: directory }, timeout: 10_000 });
   assert.deepEqual(JSON.parse(result.stdout), { status: 'expired-before-send', sends: 0 });
+});
+
+test('recovery preserves the remaining attempt window and does not impose an hourly cooldown without a successful swap', async () => {
+  const script = `
+    import assert from 'node:assert/strict';
+    import { mock } from 'node:test';
+    import { keccak256, parseTransaction, TransactionNotFoundError, TransactionReceiptNotFoundError } from 'viem';
+    import { privateKeyToAccount } from 'viem/accounts';
+    const key = '0x' + '9'.padStart(64, '0');
+    process.env.REBALANCE_PRIVATE_KEY = key;
+    globalThis.fetch = () => { throw new Error('This fixture cannot access a network'); };
+    const wallet = privateKeyToAccount(key).address;
+    const originalHash = '0x' + '12'.repeat(32);
+    const blockHash = '0x' + '34'.repeat(32);
+    const scenario = process.argv[6];
+    const targets = { USDG: 2000, TSLA: 2000, AAPL: 2000, NVDA: 2000, AMZN: 2000 };
+    const { evaluatePortfolio } = await import(process.argv[4]);
+    const portfolio = evaluatePortfolio(Object.keys(targets).map(id => ({
+      id, symbol: id, decimals: 6, balance: 20000000n,
+      priceUsdE8: 100000000n, targetBps: targets[id],
+    })));
+    let now = 2000000000000;
+    mock.method(Date, 'now', () => now);
+    let cancellationHash;
+    let ready = false;
+    let sends = 0;
+    let observations = 0;
+    const receipts = new Map();
+    const transactions = new Map();
+    let storage;
+    let configModule;
+    const rpc = {
+      getChainId: async () => 4663,
+      getTransactionReceipt: async ({ hash }) => {
+        if (!receipts.has(hash)) throw new TransactionReceiptNotFoundError({ hash });
+        return receipts.get(hash);
+      },
+      getTransaction: async ({ hash }) => {
+        if (!transactions.has(hash)) throw new TransactionNotFoundError({ hash });
+        return transactions.get(hash);
+      },
+      getTransactionCount: async () => ready ? 4 : 3,
+      getCode: async () => '0x', getGasPrice: async () => 2n, getBalance: async () => 1000000000000000000n,
+      getBlock: async () => ({ hash: blockHash }), getBlockNumber: async () => 101n,
+      estimateGas: async tx => {
+        assert.equal(tx.account, wallet); assert.equal(tx.to, wallet);
+        assert.equal(tx.value, 0n); assert.equal(tx.data, '0x');
+        return 21000n;
+      },
+      sendRawTransaction: async ({ serializedTransaction }) => {
+        assert.equal(scenario, 'cancelled', 'a mined original revert must never need a cancellation');
+        assert.ok(await storage.readJson(configModule.DATA + '/run.lock'));
+        assert.ok(await storage.readJson(configModule.DATA + '/config.lock'));
+        const parsed = parseTransaction(serializedTransaction);
+        assert.equal(parsed.nonce, 3); assert.equal(parsed.chainId, 4663);
+        assert.equal(parsed.to.toLowerCase(), wallet.toLowerCase());
+        assert.equal(parsed.value ?? 0n, 0n); assert.equal(parsed.data ?? '0x', '0x');
+        assert.equal(parsed.gas, 25200n); assert.equal(parsed.gasPrice, 10n);
+        cancellationHash = keccak256(serializedTransaction);
+        const recorded = await storage.readJson(configModule.DATA + '/recovery.json');
+        assert.equal(recorded.cancellation.hash, cancellationHash);
+        assert.equal(recorded.cancellation.status, 'prepared');
+        assert.equal((await storage.readJson(configModule.PENDING_PATH)).hash, originalHash);
+        sends++;
+        return cancellationHash;
+      },
+    };
+    mock.module(process.argv[1], { namedExports: { createChain: () => ({ publicClient: rpc,
+      snapshot: async () => {
+        if (observations === 0) {
+          const beforeObservation = await storage.readJson(runtime.CYCLE_PATH);
+          assert.equal(beforeObservation.activeUntil, cycle.activeUntil, 'recovery must not close the remaining attempt window');
+          assert.equal((await runtime.rebalanceInterval(config)).operation, null, 'further legs could continue in the original window');
+        }
+        observations++; return { portfolio, nativeBalance: 1000000000000000000n,
+          blockNumber: 101n, valuationNote: 'Isolated balanced fixture' };
+      },
+      quote: async () => { throw new Error('Balanced fixture must not quote'); },
+      transaction: async () => { throw new Error('Recovery must never prepare a new trade'); },
+    }) } });
+    configModule = await import(process.argv[2]);
+    const runtime = await import(process.argv[3]);
+    storage = await import(process.argv[5]);
+    const notifications = await import(process.argv[7]);
+    const config = configModule.validateConfig({ version: 1, chainId: 4663, wallet, mode: 'private-key',
+      rpcUrl: 'http://blocked-fixture.invalid', targets, driftThresholdBps: 500, slippageBps: 50,
+      deadlineSeconds: 120, pollSeconds: 30, rebalanceIntervalSeconds: 3600 });
+    await storage.atomicWriteJson(configModule.CONFIG_PATH, config);
+    await runtime.beginRebalanceCycle(config);
+    const cycle = await storage.readJson(runtime.CYCLE_PATH);
+    const original = { chainId: 4663, wallet, hash: originalHash, nonce: 3, kind: 'swap',
+      createdAt: new Date(now).toISOString(), status: 'unknown', gas: '25200', gasPrice: '5' };
+    await storage.atomicWriteJson(configModule.PENDING_PATH, original);
+    now += 360000;
+    const release = await storage.acquireLock(configModule.DATA);
+    try {
+      const inspected = await runtime.tick(false);
+      assert.equal(inspected.operation.status, 'unresolved');
+      assert.equal(inspected.graph.trace.includes('recover'), false);
+      assert.equal(sends, 0); assert.equal(observations, 0);
+      assert.equal(await storage.readJson(configModule.DATA + '/recovery.json'), null);
+      assert.deepEqual(await storage.readJson(configModule.PENDING_PATH), original);
+      assert.deepEqual(await storage.readJson(runtime.CYCLE_PATH), cycle);
+      for (const event of await notifications.events()) await notifications.acknowledgeEvent(event.id);
+      if (scenario === 'cancelled') {
+        const awaiting = await runtime.tick(true);
+        assert.equal(awaiting.error, null); assert.equal(awaiting.operation.status, 'unresolved');
+        assert.equal(sends, 1); assert.equal(observations, 0);
+        assert.deepEqual(await storage.readJson(configModule.PENDING_PATH), original);
+        assert.deepEqual(await storage.readJson(runtime.CYCLE_PATH), cycle);
+      }
+      ready = true;
+      const hash = scenario === 'cancelled' ? cancellationHash : originalHash;
+      const to = scenario === 'cancelled' ? wallet : '0x0000000000000000000000000000000000000001';
+      transactions.set(hash, { hash, from: wallet, to, nonce: 3, value: 0n, input: '0x', chainId: 4663,
+        gasPrice: 10n, blockNumber: 100n, blockHash });
+      receipts.set(hash, { transactionHash: hash, from: wallet, to,
+        status: scenario === 'cancelled' ? 'success' : 'reverted', blockNumber: 100n, blockHash });
+      const recovered = await runtime.tick(true);
+      assert.equal(recovered.error, null); assert.equal(recovered.operation.status, scenario);
+      assert.ok(recovered.graph.trace.includes('recover')); assert.ok(recovered.graph.trace.includes('observe'));
+      assert.equal(recovered.graph.trace.includes('execute'), false);
+      assert.equal(recovered.proposal, null, 'the fresh balanced fixture closes the window through ordinary planning');
+      assert.equal(await storage.readJson(configModule.PENDING_PATH), null);
+      const closed = await storage.readJson(runtime.CYCLE_PATH);
+      assert.equal(closed.startedAt, cycle.startedAt); assert.equal(closed.activeUntil, now);
+      assert.equal(closed.nextEligibleAt, cycle.nextEligibleAt);
+      assert.equal(closed.swapConfirmed, false);
+      assert.equal(Date.parse(recovered.cycle.nextEligibleAt), cycle.startedAt + 600000);
+      const queued = await notifications.events();
+      assert.equal(queued.filter(event => event.type === 'rebalance-completed').length, 0);
+      const recoveryEvent = queued.filter(event => event.type === 'rebalance-recovered');
+      assert.equal(recoveryEvent.length, 1); assert.equal(recoveryEvent[0].hash, hash);
+      assert.match(recoveryEvent[0].message, /not a completed rebalance/);
+      for (const event of queued) await notifications.acknowledgeEvent(event.id);
+      await runtime.tick(true);
+      assert.deepEqual(await notifications.events(), []);
+      assert.deepEqual(await storage.readJson(runtime.CYCLE_PATH), closed);
+      assert.equal(sends, scenario === 'cancelled' ? 1 : 0);
+      assert.equal(await storage.readJson(runtime.STOP_PATH), null);
+      assert.deepEqual(await storage.readJson(configModule.CONFIG_PATH), config);
+      process.stdout.write(JSON.stringify({ scenario, sends, outcome: 'no-hourly-cooldown' }));
+    } finally { await release(); }
+  `;
+  for (const scenario of ['cancelled', 'recovered-revert']) {
+    const result = await promisify(execFile)(process.execPath,
+      ['--experimental-test-module-mocks', '--import', 'tsx', '--input-type=module', '-e', script, '--',
+        ...['chain', 'config', 'runtime', 'core', 'storage'].map(name => new URL(`../src/${name}.ts`, import.meta.url).href),
+        scenario, new URL('../src/events.ts', import.meta.url).href],
+      { env: { ...process.env, REBALANCE_DATA_DIR: join(directory, scenario) }, timeout: 15_000 });
+    assert.deepEqual(JSON.parse(result.stdout), { scenario, sends: scenario === 'cancelled' ? 1 : 0, outcome: 'no-hourly-cooldown' });
+  }
+});
+
+test('deferred signers never enter automatic recovery for aged unresolved transactions', async t => {
+  const pending: PendingTransaction = { chainId: 4663, wallet, hash, nonce: 1,
+    kind: 'swap', createdAt: observedAt, status: 'unknown' };
+  await atomicWriteJson(PENDING_PATH, pending);
+  mockRpc(t);
+  for (const mode of ['ledger', 'privy']) {
+    await atomicWriteJson(CONFIG_PATH, { ...config, mode });
+    const state = await tick(true);
+    assert.equal(state.operation?.status, 'unresolved');
+    assert.equal(state.graph.trace.includes('recover'), false);
+    assert.equal(await readJson(join(directory, 'recovery.json')), null);
+    assert.deepEqual(await readJson(PENDING_PATH), pending);
+  }
 });

@@ -32,7 +32,7 @@
     const targets = rows(Object.entries(snapshot?.config?.targets || {}).map(([id, weight]) => ({ id, weight })));
     const funded = positive(portfolio?.totalUsdE8) && holdings.length > 0;
     const failed = disconnected || Boolean(snapshot?.error);
-    const receiptWait = { pending: "Waiting for receipt", unresolved: "Transaction unresolved", confirming: "Confirming transaction" }[snapshot?.operation?.status];
+    const receiptWait = { pending: "Waiting for receipt", unresolved: "Transaction unresolved", confirming: "Confirming transaction", "recovery-wait": "Automatic recovery waiting", "recovery-busy": "Recovery in progress" }[snapshot?.operation?.status];
     const entries = funded ? holdings : targets;
     const total = entries.reduce((sum, row) => sum + row.weight, 0);
     const state = funded ? failed || receiptWait ? "Last known holdings" : "Current holdings" : targets.length ? "Targets" : "No allocation";

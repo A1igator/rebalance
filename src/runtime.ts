@@ -3,16 +3,16 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createChain, type RouteQuote } from './chain.js';
 import { DATA, STATE_PATH, loadConfig, type Config } from './config.js';
 import { planTrade, type Portfolio, type TradePlan } from './core.js';
-import { attentionCondition, ledgerCondition, rebalanceCompleted, type FailurePhase, type RebalanceAttention } from './events.js';
+import { attentionCondition, ledgerCondition, rebalanceCompleted, transactionRecovered, type FailurePhase, type RebalanceAttention } from './events.js';
+import { automaticRecovery } from './recovery.js';
+import { CYCLE_PATH, ACTIVE_CYCLE_SECONDS, readCycle, publicCycle, rebalanceInterval, beginRebalanceCycle, finishRebalanceCycle, type RebalanceCycle } from './cadence.js';
+export { CYCLE_PATH, ACTIVE_CYCLE_SECONDS, rebalanceInterval, beginRebalanceCycle, finishRebalanceCycle };
+export type { RebalanceCycle };
 import { runGraph, type GraphState } from './graph.js';
 import { atomicWriteJson, readJson } from './storage.js';
 import { dispatch, reconcile, type Operation } from './transactions.js';
 
 export const STOP_PATH = resolve(DATA, 'stop.json');
-export const CYCLE_PATH = resolve(DATA, 'cycle.json');
-export const ACTIVE_CYCLE_SECONDS = 600;
-type CycleRecord = { wallet: string; startedAt: number; activeUntil: number; nextEligibleAt: number };
-export type RebalanceCycle = { startedAt: string; activeUntil: string; nextEligibleAt: string };
 export type Status = {
   app: 'Rebalance'; chain: { id: 4663; name: 'Robinhood' };
   mode: Config['mode'] | null; wallet: string | null;
@@ -35,57 +35,6 @@ export async function initialStatus(): Promise<Status> {
   return { app: 'Rebalance', chain: { id: 4663, name: 'Robinhood' }, mode: null,
     wallet: wallet?.address ?? null, config: null, cycle: null, portfolio: null, operation: null,
     updatedAt: null, error: null, graph: { node: 'config', trace: [] }, armed: false };
-}
-
-async function readCycle(): Promise<CycleRecord | null> {
-  const cycle = await readJson<CycleRecord>(CYCLE_PATH);
-  if (!cycle) return null;
-  if (typeof cycle.wallet !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(cycle.wallet) ||
-      ![cycle.startedAt, cycle.activeUntil, cycle.nextEligibleAt].every(time => Number.isSafeInteger(time) && time >= 0) ||
-      cycle.activeUntil < cycle.startedAt || cycle.activeUntil > cycle.startedAt + ACTIVE_CYCLE_SECONDS * 1000 ||
-      cycle.nextEligibleAt <= cycle.startedAt) throw new Error('Invalid rebalance cycle record; preserve it for recovery');
-  return cycle;
-}
-
-function publicCycle(cycle: CycleRecord | null): RebalanceCycle | null {
-  return cycle && { startedAt: new Date(cycle.startedAt).toISOString(),
-    activeUntil: new Date(cycle.activeUntil).toISOString(), nextEligibleAt: new Date(cycle.nextEligibleAt).toISOString() };
-}
-
-function cycleWaiting(cycle: CycleRecord | null, config: Config, now: number): Operation | null {
-  if (!cycle) return null;
-  const continuing = cycle.wallet.toLowerCase() === config.wallet.toLowerCase() &&
-    now >= cycle.startedAt && now < cycle.activeUntil;
-  if (continuing || now >= cycle.nextEligibleAt) return null;
-  return { status: 'cooling-down', message: `Rebalance interval: no new trades before ${new Date(cycle.nextEligibleAt).toISOString()}. Pending receipts still reconcile.` };
-}
-
-/** Caller holds run.lock; target changes and process restarts never reset this record. */
-export async function rebalanceInterval(config: Config): Promise<{ cycle: RebalanceCycle | null; operation: Operation | null }> {
-  const cycle = await readCycle();
-  return { cycle: publicCycle(cycle), operation: cycleWaiting(cycle, config, Date.now()) };
-}
-
-/** Persist the cycle before its first dispatch; later approval/swap legs reuse it. */
-export async function beginRebalanceCycle(config: Config): Promise<RebalanceCycle> {
-  let cycle = await readCycle();
-  const now = Date.now();
-  const waiting = cycleWaiting(cycle, config, now);
-  if (waiting) throw new Error(waiting.message);
-  if (!cycle || now >= cycle.activeUntil || cycle.wallet.toLowerCase() !== config.wallet.toLowerCase()) {
-    cycle = { wallet: config.wallet, startedAt: now, activeUntil: now + ACTIVE_CYCLE_SECONDS * 1000,
-      nextEligibleAt: now + config.rebalanceIntervalSeconds * 1000 };
-    await atomicWriteJson(CYCLE_PATH, cycle);
-  }
-  return publicCycle(cycle)!;
-}
-
-/** A fresh no-trade result closes the active window but preserves the next eligible time. */
-export async function finishRebalanceCycle(): Promise<void> {
-  const cycle = await readCycle();
-  if (cycle && Date.now() < cycle.activeUntil) {
-    await atomicWriteJson(CYCLE_PATH, { ...cycle, activeUntil: Math.max(cycle.startedAt, Date.now()) });
-  }
 }
 
 function withCurrentTargets(portfolio: Portfolio | null, config: Config): Portfolio | null {
@@ -144,7 +93,7 @@ function publicError(error: unknown): string {
 function runtimeAttention(state: Status): RebalanceAttention | null {
   if (state.error) {
     const node = state.graph.trace.filter(node => node !== 'error').at(-1);
-    const phase: FailurePhase = node && ['config', 'reconcile', 'observe', 'plan', 'interval', 'quote', 'execute'].includes(node)
+    const phase: FailurePhase = node && ['config', 'reconcile', 'recover', 'observe', 'plan', 'interval', 'quote', 'execute'].includes(node)
       ? node as FailurePhase : 'unknown';
     return { kind: 'runtime-failure', phase };
   }
@@ -180,6 +129,7 @@ export async function tick(execute: boolean): Promise<Status> {
   }
   let config: Config;
   let chain: ReturnType<typeof createChain>;
+  const recoveryObservation: { operation: Operation | null } = { operation: null };
   await runGraph({
     canExecute: execute,
     configured: async () => {
@@ -199,8 +149,18 @@ export async function tick(execute: boolean): Promise<Status> {
     reconcile: async () => {
       const result = await reconcile(config, chain);
       state.operation = result.operation;
+      recoveryObservation.operation = result.operation;
       return result;
     },
+    recover: execute && configured?.mode === 'private-key' ? async () => {
+      const recovered = await automaticRecovery(config, chain);
+      if (recovered) {
+        state.operation = recovered.operation;
+        recoveryObservation.operation = recovered.operation;
+        state.cycle = publicCycle(await readCycle());
+      }
+      return recovered;
+    } : undefined,
     observe: async () => {
       const snapshot = await chain.snapshot();
       state.portfolio = snapshot.portfolio;
@@ -251,6 +211,10 @@ export async function tick(execute: boolean): Promise<Status> {
     // Receipt barriers happen before observe/plan. They still need a durable
     // alert; retained holdings or an old receipt never establish completion.
     await attentionCondition(state.wallet, runtimeAttention(state));
+    const recovered = recoveryObservation.operation;
+    if (recovered?.hash && (recovered.status === 'cancelled' || recovered.status === 'recovered-revert')) {
+      await transactionRecovered(recovered.hash, recovered.status);
+    }
     if (!state.error && configured && state.portfolio && state.proposal !== undefined) {
       if (configured.mode === 'ledger') await ledgerCondition(configured.wallet, configured.targets, state.proposal !== null);
       const total = state.portfolio.totalUsdE8;

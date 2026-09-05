@@ -7,7 +7,7 @@ import { test, type TestContext } from 'node:test';
 import { keccak256, parseTransaction, TransactionNotFoundError, TransactionReceiptNotFoundError, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { validateConfig } from '../src/config.js';
-import { recover, type RecoveryDependencies, type RecoveryRecord } from '../src/recovery.js';
+import { automaticRecovery, AUTO_RECOVERY_GRACE_MS, recover, type AutomaticRecoveryDependencies, type RecoveryDependencies, type RecoveryRecord } from '../src/recovery.js';
 import { acquireLock, atomicWriteJson, readJson, type PendingTransaction } from '../src/storage.js';
 import type { LaunchResult } from '../src/launch.js';
 import type { Status } from '../src/runtime.js';
@@ -31,7 +31,7 @@ async function fixture(t: TestContext, active = false) {
   const pending: PendingTransaction = { chainId: 4663, wallet: account.address, hash: originalHash,
     nonce: 3, kind: 'swap', createdAt: '2026-09-05T20:00:00Z', status: 'unknown' };
   await atomicWriteJson(path('pending.json'), pending);
-  const cycle = { wallet: account.address, startedAt: 100, activeUntil: 200, nextEligibleAt: 300 };
+  const cycle = { wallet: account.address, startedAt: 100, activeUntil: 200, nextEligibleAt: 300, swapConfirmed: false };
   await atomicWriteJson(path('cycle.json'), cycle);
   const txs = new Map<Hex, FixtureTx>();
   const receipts = new Map<Hex, FixtureReceipt>();
@@ -44,6 +44,8 @@ async function fixture(t: TestContext, active = false) {
   let head = 101n;
   let latestNonce = 3;
   let queuedNonce = 3;
+  let expectedFee = 20n;
+  let successfulNotes = 0;
   const publicStatus = (isArmed: boolean): Status => ({ app: 'Rebalance', chain: { id: 4663, name: 'Robinhood' },
     mode: 'private-key', wallet: account.address, config: { targets: config.targets, rebalanceIntervalSeconds: 3600 },
     cycle: null, portfolio: null, operation: null, updatedAt: null, error: null,
@@ -85,7 +87,7 @@ async function fixture(t: TestContext, active = false) {
       assert.equal(parsed.nonce, 3); assert.equal(parsed.chainId, 4663);
       assert.equal(parsed.to?.toLowerCase(), account.address.toLowerCase());
       assert.equal(parsed.value ?? 0n, 0n); assert.equal(parsed.data ?? '0x', '0x');
-      assert.equal(parsed.gas, 25_200n); assert.equal(parsed.gasPrice, 20n);
+      assert.equal(parsed.gas, 25_200n); assert.equal(parsed.gasPrice, expectedFee);
       sent.push(serializedTransaction);
       txs.set(hash, { hash, from: account.address, to: account.address, nonce: 3, value: 0n, input: '0x',
         chainId: 4663, gasPrice: 20n, blockNumber: mineOnSend ? 100n : null, blockHash: mineOnSend ? blockHash : null });
@@ -98,10 +100,17 @@ async function fixture(t: TestContext, active = false) {
   const deps: RecoveryDependencies = { dataDir, config: async () => config, armed: async () => armed,
     rpc: () => rpc as unknown as ReturnType<RecoveryDependencies['rpc']>,
     account: async () => { keyReads++; return account; },
+    noteSuccessfulSwap: async original => {
+      assert.equal(original.hash, originalHash); assert.equal(original.kind, 'swap');
+      successfulNotes++;
+      await atomicWriteJson(path('cycle.json'), { ...cycle, swapConfirmed: true });
+    },
     refresh: async () => {
       assert.ok(await readJson(path('run.lock')));
       assert.equal(await readJson(path('pending.json')), null);
-      assert.deepEqual(await readJson(path('cycle.json')), cycle);
+      const current = (await readJson<typeof cycle>(path('cycle.json')))!;
+      assert.equal(current.startedAt, cycle.startedAt); assert.equal(current.activeUntil, cycle.activeUntil);
+      assert.equal(current.nextEligibleAt, cycle.nextEligibleAt);
       return publicStatus(false);
     },
     resume: async expectedStop => {
@@ -117,9 +126,21 @@ async function fixture(t: TestContext, active = false) {
     }, pause: async () => {}, attempts: 2 };
   return { path, pending, cycle, rpc, deps, sent, receipts, txs, mineOriginal,
     get keyReads() { return keyReads; }, get resumeCalls() { return resumeCalls; },
+    get successfulNotes() { return successfulNotes; },
     set armed(value: boolean) { armed = value; }, set mineOnSend(value: boolean) { mineOnSend = value; },
     set throwOnSend(value: boolean) { throwOnSend = value; }, set head(value: bigint) { head = value; },
+    set expectedFee(value: bigint) { expectedFee = value; },
     set latestNonce(value: number) { latestNonce = value; }, set queuedNonce(value: number) { queuedNonce = value; } };
+}
+
+async function auto(f: Awaited<ReturnType<typeof fixture>>, overrides: Partial<AutomaticRecoveryDependencies> = {}) {
+  const release = await acquireLock(f.deps.dataDir, 'run.lock');
+  try {
+    return await automaticRecovery(config, { publicClient: f.rpc as unknown as ReturnType<RecoveryDependencies['rpc']> }, {
+      dataDir: f.deps.dataDir, config: f.deps.config, account: f.deps.account,
+      now: () => Date.parse(f.pending.createdAt) + AUTO_RECOVERY_GRACE_MS,
+      noteSuccessfulSwap: f.deps.noteSuccessfulSwap, ...overrides });
+  } finally { await release(); }
 }
 
 test('read-only recovery assessment never stops, signs, reconciles files or resumes', async t => {
@@ -318,4 +339,198 @@ test('a newer retained stop permits receipt-only cleanup but never resumes the e
   assert.equal(f.sent.length, 1); assert.equal(f.keyReads, 1); assert.equal(f.resumeCalls, 0);
   assert.deepEqual(await readJson(f.path('stop.json')), stop);
   assert.equal(await readJson(f.path('pending.json')), null);
+});
+
+test('automatic recovery waits a fixed five-minute grace without signing or changing cycle/stop', async t => {
+  const f = await fixture(t);
+  const result = await auto(f, { now: () => Date.parse(f.pending.createdAt) + AUTO_RECOVERY_GRACE_MS - 1 });
+  assert.equal(result?.blocked, true); assert.equal(result?.operation?.status, 'recovery-wait');
+  assert.match(result?.operation?.message ?? '', /five-minute/);
+  assert.equal(f.keyReads, 0); assert.equal(f.sent.length, 0); assert.equal(f.resumeCalls, 0);
+  assert.equal(await readJson(f.path('stop.json')), null);
+  assert.equal(await readJson(f.path('recovery.json')), null);
+  assert.deepEqual(await readJson(f.path('cycle.json')), f.cycle);
+});
+
+test('automatic stale prepared/unknown/broadcast cancellation preserves the active window and success state', async t => {
+  for (const status of ['prepared', 'unknown', 'broadcast'] as const) {
+    const f = await fixture(t);
+    f.pending.status = status;
+    await atomicWriteJson(f.path('pending.json'), f.pending);
+    const result = await auto(f);
+    assert.equal(result?.blocked, false); assert.equal(result?.operation?.status, 'cancelled');
+    assert.equal(f.sent.length, 1); assert.equal(f.keyReads, 1); assert.equal(f.resumeCalls, 0);
+    assert.equal(await readJson(f.path('stop.json')), null);
+    assert.equal(await readJson(f.path('pending.json')), null);
+    const cycle = (await readJson<typeof f.cycle>(f.path('cycle.json')))!;
+    assert.deepEqual(cycle, f.cycle); assert.equal(f.successfulNotes, 0);
+    const record = (await readJson<RecoveryRecord>(f.path('recovery.json')))!;
+    assert.equal(record.automatic, true); assert.equal(record.stop, undefined); assert.equal(record.swapNotedAt, undefined);
+    assert.equal(await auto(f), null, 'a completed journal must not change a later cycle or send again');
+  }
+});
+
+test('automatic pending cancellation is receipt-only across restarts and prepared crash records', async t => {
+  const f = await fixture(t);
+  f.mineOnSend = false; f.throwOnSend = true;
+  assert.equal((await auto(f))?.blocked, true);
+  const record = (await readJson<RecoveryRecord>(f.path('recovery.json')))!;
+  assert.equal(record.cancellation?.status, 'unknown');
+  record.cancellation!.status = 'prepared';
+  await atomicWriteJson(f.path('recovery.json'), record);
+  assert.equal((await auto(f))?.blocked, true);
+  assert.equal(f.sent.length, 1); assert.equal(f.keyReads, 1);
+  const hash = record.cancellation!.hash;
+  Object.assign(f.txs.get(hash)!, { blockNumber: 100n, blockHash });
+  f.receipts.set(hash, { transactionHash: hash, from: account.address, to: account.address, status: 'success', blockNumber: 100n, blockHash });
+  assert.equal((await auto(f))?.operation?.status, 'cancelled');
+  assert.equal(f.sent.length, 1); assert.equal(f.keyReads, 1);
+});
+
+test('automatic recovery yields immediately to manual recovery without changing its stop', async t => {
+  const f = await fixture(t);
+  const release = await acquireLock(f.deps.dataDir, 'recovery.lock');
+  const stop = { requestedAt: 'manual-stop', requestId: 'manual-recovery' };
+  await atomicWriteJson(f.path('stop.json'), stop);
+  const result = await auto(f);
+  assert.equal(result?.operation?.status, 'recovery-busy');
+  assert.deepEqual(await readJson(f.path('stop.json')), stop);
+  assert.equal(f.sent.length, 0); assert.equal(f.keyReads, 0);
+  await release();
+});
+
+test('automatic original revert preserves the current window without recording successful trading', async t => {
+  const f = await fixture(t);
+  f.mineOriginal('reverted');
+  const result = await auto(f, { now: () => Date.parse(f.pending.createdAt) + 1 });
+  assert.equal(result?.blocked, false); assert.equal(result?.operation?.status, 'recovered-revert');
+  assert.equal(f.sent.length, 0); assert.equal(f.keyReads, 0);
+  assert.equal((await readJson<{status: string}>(f.path('last-transaction.json')))?.status, 'recovered-revert');
+  assert.deepEqual(await readJson(f.path('cycle.json')), f.cycle);
+  assert.equal(f.successfulNotes, 0); assert.doesNotMatch(result?.operation?.message ?? '', /cycle is closed/);
+});
+
+test('automatic recovery resolves an outstanding journal after ordinary reconcile cleared the winning original', async t => {
+  const f = await fixture(t);
+  f.mineOnSend = false;
+  await auto(f);
+  f.mineOriginal();
+  await rm(f.path('pending.json'));
+  const result = await auto(f);
+  assert.equal(result?.operation?.status, 'confirmed'); assert.equal(result?.blocked, false);
+  assert.equal((await readJson<RecoveryRecord>(f.path('recovery.json')))?.resolution, 'original-confirmed');
+  assert.equal(f.successfulNotes, 1);
+  assert.deepEqual(await readJson(f.path('cycle.json')), { ...f.cycle, swapConfirmed: true });
+  assert.equal(f.sent.length, 1);
+});
+
+test('automatic stop/config/timestamp/signer checks never call the signing key', async t => {
+  for (const condition of ['stop', 'changed-config', 'future', 'invalid-time', 'ledger'] as const) {
+    const f = await fixture(t);
+    if (condition === 'stop') await atomicWriteJson(f.path('stop.json'), { stopped: true });
+    if (condition === 'changed-config') f.deps.config = async () => ({ ...config, pollSeconds: 10 });
+    if (condition === 'future') f.pending.createdAt = '2099-01-01T00:00:00Z';
+    if (condition === 'invalid-time') f.pending.createdAt = 'invalid';
+    await atomicWriteJson(f.path('pending.json'), f.pending);
+    let result;
+    if (condition === 'ledger') {
+      const release = await acquireLock(f.deps.dataDir, 'run.lock');
+      const selected = { ...config, mode: 'ledger' as const };
+      try { result = await automaticRecovery(selected,
+        { publicClient: f.rpc as unknown as ReturnType<RecoveryDependencies['rpc']> },
+        { dataDir: f.deps.dataDir, account: f.deps.account, config: async () => selected }); }
+      finally { await release(); }
+      assert.match(result?.operation?.message ?? '', /ledger.*no signer fallback/);
+    } else result = await auto(f, { now: () => Date.parse('2026-09-05T20:10:00Z') });
+    assert.equal(result?.blocked, true, condition); assert.equal(f.keyReads, 0); assert.equal(f.sent.length, 0);
+    assert.deepEqual(await readJson(f.path('pending.json')), f.pending);
+  }
+});
+
+test('successful-swap marker failure retains pending and retries only receipt resolution', async t => {
+  const f = await fixture(t);
+  f.mineOriginal();
+  const first = await auto(f, { noteSuccessfulSwap: async () => { throw new Error('fixture cycle write failure'); } });
+  assert.equal(first?.blocked, true);
+  assert.deepEqual(await readJson(f.path('pending.json')), f.pending);
+  assert.equal(f.sent.length, 0);
+  assert.equal((await auto(f))?.operation?.status, 'confirmed');
+  assert.equal(f.sent.length, 0); assert.equal(f.successfulNotes, 1);
+  assert.equal(await readJson(f.path('pending.json')), null);
+});
+
+test('automatic effects require the current process execution lock', async t => {
+  for (const lock of [null, { pid: process.pid + 100, token: 'another-runner' }, { pid: process.pid }] as const) {
+    const f = await fixture(t);
+    if (lock) await atomicWriteJson(f.path('run.lock'), lock);
+    const result = await automaticRecovery(config, { publicClient: f.rpc as unknown as ReturnType<RecoveryDependencies['rpc']> }, {
+      dataDir: f.deps.dataDir, config: f.deps.config, account: f.deps.account });
+    assert.equal(result?.blocked, true); assert.match(result?.operation?.message ?? '', /execution lock/);
+    assert.equal(f.keyReads, 0); assert.equal(f.sent.length, 0);
+    assert.equal(await readJson(f.path('recovery.json')), null);
+  }
+});
+
+test('manual completion of an interrupted automatic resolution marks successful trading before clearing', async t => {
+  const f = await fixture(t);
+  f.mineOriginal();
+  await auto(f, { noteSuccessfulSwap: async () => { throw new Error('interrupted success marker'); } });
+  const record = (await readJson<RecoveryRecord>(f.path('recovery.json')))!;
+  assert.equal(record.automatic, true); assert.equal(record.resolution, 'original-confirmed');
+  assert.equal(record.swapNotedAt, undefined);
+  assert.deepEqual(await readJson(f.path('pending.json')), f.pending);
+  const note = f.deps.noteSuccessfulSwap;
+  f.deps.noteSuccessfulSwap = async original => { assert.ok(await readJson(f.path('pending.json'))); await note(original); };
+  assert.equal((await recover({ cancel: true }, f.deps)).outcome, 'original-confirmed');
+  assert.ok((await readJson<RecoveryRecord>(f.path('recovery.json')))?.swapNotedAt);
+  assert.deepEqual(await readJson(f.path('cycle.json')), { ...f.cycle, swapConfirmed: true });
+  assert.equal(await readJson(f.path('pending.json')), null); assert.equal(f.sent.length, 0);
+  assert.equal(f.successfulNotes, 1);
+});
+
+test('changed configuration cannot resolve a receipt or mutate its cycle', async t => {
+  const f = await fixture(t);
+  f.mineOriginal('reverted');
+  const result = await auto(f, { config: async () => ({ ...config, pollSeconds: 10 }) });
+  assert.equal(result?.blocked, true);
+  assert.equal(await readJson(f.path('recovery.json')), null);
+  assert.deepEqual(await readJson(f.path('pending.json')), f.pending);
+  assert.deepEqual(await readJson(f.path('cycle.json')), f.cycle);
+});
+
+test('automatic recovery retains safe send diagnostics and bumps above the saved original fee', async t => {
+  const f = await fixture(t);
+  f.pending.gasPrice = '30'; f.pending.sendFailure = 'underpriced'; f.expectedFee = 60n;
+  await atomicWriteJson(f.path('pending.json'), f.pending);
+  const waiting = await auto(f, { now: () => Date.parse(f.pending.createdAt) + 1000 });
+  assert.equal(waiting?.operation?.sendFailure, 'underpriced');
+  assert.equal((await auto(f))?.operation?.status, 'cancelled');
+  assert.equal(parseTransaction(f.sent[0]!).gasPrice, 60n);
+});
+
+test('confirmed approval recovery never marks a cycle as having a successful swap', async t => {
+  for (const automatic of [false, true]) {
+    const f = await fixture(t);
+    f.pending.kind = 'approval'; await atomicWriteJson(f.path('pending.json'), f.pending);
+    f.mineOriginal();
+    if (automatic) assert.equal((await auto(f))?.operation?.status, 'confirmed');
+    else assert.equal((await recover({ cancel: true }, f.deps)).outcome, 'original-confirmed');
+    assert.equal(f.successfulNotes, 0); assert.deepEqual(await readJson(f.path('cycle.json')), f.cycle);
+    assert.equal((await readJson<RecoveryRecord>(f.path('recovery.json')))?.swapNotedAt, undefined);
+  }
+});
+
+test('legacy closure markers do not suppress a successful swap marker or mutate cycle timing', async t => {
+  const f = await fixture(t);
+  f.mineOnSend = false;
+  await auto(f);
+  const record = (await readJson<RecoveryRecord>(f.path('recovery.json')))!;
+  record.cycleClosedAt = '2026-09-05T20:01:00Z';
+  await atomicWriteJson(f.path('recovery.json'), record);
+  f.mineOriginal();
+  assert.equal((await auto(f))?.operation?.status, 'confirmed');
+  assert.equal(f.successfulNotes, 1);
+  assert.deepEqual(await readJson(f.path('cycle.json')), { ...f.cycle, swapConfirmed: true });
+  assert.equal(await auto(f), null);
+  assert.equal(f.successfulNotes, 1, 'completed journal replay cannot mark a later cycle');
 });

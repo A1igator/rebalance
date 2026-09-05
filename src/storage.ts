@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { chmod, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
+export type DispatchFailure = "underpriced" | "gas" | "nonce" | "balance" | "reverted" | "unknown";
+
 export type PendingTransaction = {
   chainId: 4663;
   wallet: string;
@@ -10,6 +12,9 @@ export type PendingTransaction = {
   kind: "approval" | "swap" | "wrap";
   createdAt: string;
   status: "prepared" | "broadcast" | "unknown";
+  gas?: string;
+  gasPrice?: string;
+  sendFailure?: DispatchFailure;
   message?: string;
 };
 

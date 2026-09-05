@@ -14,7 +14,7 @@ flowchart TD
   quote[Quote: refresh the proposed swap]
   execute[Execute: prepare and submit transaction]
   receipt[Receipt: reconcile the recorded transaction]
-  recovery[Recovery: preserve unresolved transaction identity]
+  recovery[Recovery: grace, one same-nonce cancellation, receipts]
   state[(Local shared state)]
   chart[Read-only local chart and CLI status]
   events[(Persisted public notification events)]
@@ -36,7 +36,8 @@ flowchart TD
   receipt -->|Observed success or failure| state
   receipt -->|Refresh actual holdings| observe
   receipt -->|Unresolved result| recovery
-  recovery -->|Check the same transaction| receipt
+  recovery -->|Reconcile original and cancellation| receipt
+  recovery -->|Confirmed cancellation or revert: preserve active window| interval
   recovery --> state
   observe --> state
   plan --> state
@@ -59,13 +60,13 @@ flowchart TD
 | Plan | Observed portfolio and configured targets | A deterministic trade proposal or no-trade result |
 | Interval | Persisted cycle timing and configured minimum interval | Eligibility or cooling-down status before new execution |
 | Execute | An authorized running configuration and current plan | Submission result and a durable transaction identity |
-| Receipt/recovery | Pending identity and RPC transaction/receipt observations | A resolved result or an unresolved state that blocks blind replacement |
+| Receipt/recovery | Pending identity and RPC transaction/receipt observations | A resolved result, an automatic same-nonce recovery step or a retained barrier |
 
 Local configuration, status, and transaction records connect the stages. The signing key is separate from public status and is consumed by the local signer, never supplied to the coding agent or browser. CLI status exposes the current graph node and recent trace. The UI displays only a pie chart with ticker/percentage labels: current holdings when funded, explicitly labeled saved targets when empty, and an unavailable/stale indication when a refresh fails. It has no dashboard sections.
 
 Changing a target does not fabricate a new holding. A submitted transaction does not immediately count as a successful rebalance. Receipt feedback resolves its recorded identity, and a subsequent observation measures the actual portfolio again. The next plan uses those observations rather than an LLM's description of the previous outcome.
 
-The default drift trigger is five percentage points. By default, cycle starts are at least one hour apart, with up to ten minutes for each cycle's sequential approval/swap legs. A fresh no-trade result closes the active window early. The local `cycle.json` record survives restart and target changes. No monetary cap or budget is tracked. Receipt reconciliation remains first and continues during a cooldown; the interval stage prevents fresh executable quotes/dispatch until eligible. Status exposes cycle times through the agent, while the chart stays view-only.
+The default drift trigger is five percentage points. By default, cycles with a successful swap keep starts at least one hour apart; new cycles without one may retry after the original ten-minute window, with up to ten minutes for each cycle's sequential approval/swap legs. A fresh no-trade result closes the active window early. The local `cycle.json` record survives restart and target changes. No monetary cap or budget is tracked. Receipt reconciliation remains first and continues during a cooldown; the interval stage prevents fresh executable quotes/dispatch until eligible. Status exposes cycle times through the agent, while the chart stays view-only.
 
 ## Operation from one conversation
 
@@ -91,6 +92,6 @@ Stock-token pricing has an additional issuer and market boundary. ERC-20 token q
 
 RPC observations of balances and receipts connect the local state to chain activity. They remain RPC claims, not locally verified consensus proofs. A successful RPC response, transaction hash, or internally consistent graph trace is not by itself proof that the intended swap finalized. The MVP must be described as RPC mode, with this trust boundary visible.
 
-Recovery keeps uncertain transactions attached to their original records. It rechecks the same transaction instead of clearing pending state and sending again. An unresolved receipt requires investigation or later observations; absence of a receipt alone does not establish failure. Stop ends future scheduling but cannot reverse a broadcast transaction.
+Recovery keeps uncertain transactions attached to their original records. It rechecks the same transaction instead of clearing pending state and sending again. The armed raw-key graph automatically attempts one same-nonce self-cancellation after a five-minute stale-send grace, without stopping or restarting itself. It reconciles both identities and allows the current window to continue after cancellation/revert. A canonical successful swap is recorded before its pending barrier is removed. Cycles with successful swaps keep hourly timing; new cycles without one can retry after the original ten-minute window. Ambiguous cancellation outcomes remain blocked for later observations; absence of a receipt alone does not establish failure. Stop ends future scheduling but cannot reverse a broadcast transaction.
 
 The current executable signer is a local private key. Privy and Ledger are deferred integrations. This graph does not imply that Ledger can sign unattended or that a hosted signer preserves entirely local operation.

@@ -2,17 +2,72 @@ import { rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { keccak256, TransactionReceiptNotFoundError, type Hex } from 'viem';
 import { createChain, type ChainTransaction } from './chain.js';
+import { noteSuccessfulSwap } from './cadence.js';
 import { DATA, LAST_TRANSACTION_PATH, PENDING_PATH, loadConfig, localAccount, type Config } from './config.js';
-import { acquireLock, atomicWriteJson, readJson, type PendingTransaction } from './storage.js';
+import { acquireLock, atomicWriteJson, readJson, type DispatchFailure, type PendingTransaction } from './storage.js';
 
-export type Operation = { status: string; hash?: string; message?: string; kind?: string; blockNumber?: string; wallet?: string; chainId?: 4663 };
+export type Operation = { status: string; hash?: string; message?: string; kind?: string; blockNumber?: string; wallet?: string; chainId?: 4663; sendFailure?: DispatchFailure };
 export type Chain = ReturnType<typeof createChain>;
+
+const SEND_FAILURE_MESSAGES: Record<DispatchFailure, string> = {
+  underpriced: 'RPC reported a fee that was too low.',
+  gas: 'RPC reported an invalid gas limit.',
+  nonce: 'RPC reported a nonce rejection.',
+  balance: 'RPC reported insufficient balance.',
+  reverted: 'RPC reported execution reverted; no mined receipt is established by this response.',
+  unknown: 'The send response did not establish the transaction outcome.',
+};
+
+function dispatchFailureMessage(failure: DispatchFailure): string {
+  return `${SEND_FAILURE_MESSAGES[failure]} The send outcome remains unverified; preserve the saved hash for reconciliation without resubmitting the swap.`;
+}
+
+/** Fixed diagnostics only: RPC rejection data is never evidence that a send is safe to retry. */
+export function classifyDispatchFailure(error: unknown): DispatchFailure {
+  const names: Record<string, DispatchFailure> = {
+    FeeCapTooLowError: 'underpriced', MaxFeePerGasTooLowError: 'underpriced',
+    IntrinsicGasTooHighError: 'gas', IntrinsicGasTooLowError: 'gas',
+    NonceTooHighError: 'nonce', NonceTooLowError: 'nonce', NonceMaxValueError: 'nonce',
+    InsufficientFundsError: 'balance', ExecutionRevertedError: 'reverted',
+  };
+  const visited = new Set<object>();
+  let current: unknown = error;
+  try {
+    for (let depth = 0; depth < 8 && current && typeof current === 'object'; depth++) {
+      if (visited.has(current)) break;
+      visited.add(current);
+      const value = current as { name?: unknown; code?: unknown; details?: unknown; message?: unknown; cause?: unknown };
+      if (typeof value.name === 'string' && Object.hasOwn(names, value.name)) return names[value.name]!;
+      if (value.code === 3) return 'reverted';
+      // viem's raw send path can retain a generic RPC error rather than a
+      // specialized node-error class. Inspect only bounded rejection text,
+      // never request bodies/URLs, and emit only the fixed category above.
+      if (value.code === -32000 || value.code === -32003) {
+        const detail = typeof value.details === 'string' ? value.details : typeof value.message === 'string' ? value.message : '';
+        const text = detail.slice(0, 4096).toLowerCase();
+        if (/transaction underpriced|replacement transaction underpriced|max fee per gas less than block base fee|fee cap less than block base fee/.test(text)) return 'underpriced';
+        if (/intrinsic gas too low|intrinsic gas too high|gas limit reached/.test(text)) return 'gas';
+        if (/nonce too low|nonce too high|nonce has max value|transaction already imported|already known/.test(text)) return 'nonce';
+        if (/insufficient funds|exceeds transaction sender account balance/.test(text)) return 'balance';
+        if (/execution reverted/.test(text)) return 'reverted';
+      }
+      current = value.cause;
+    }
+  } catch { /* Malformed error objects must not prevent the durable unknown marker. */ }
+  return 'unknown';
+}
+
+function validQuantity(value: unknown): boolean {
+  return typeof value === 'string' && /^[1-9][0-9]{0,77}$/.test(value) && BigInt(value) < 2n ** 256n;
+}
 
 export function validatePending(p: PendingTransaction, config: Config): void {
   if (!p || typeof p !== 'object' || p.chainId !== 4663 || typeof p.wallet !== 'string' ||
       p.wallet.toLowerCase() !== config.wallet.toLowerCase() || typeof p.hash !== 'string' ||
       !/^0x[0-9a-fA-F]{64}$/.test(p.hash) || !Number.isSafeInteger(p.nonce) || p.nonce < 0 ||
-      !['prepared', 'broadcast', 'unknown'].includes(p.status) || !['approval', 'swap', 'wrap'].includes(p.kind)) {
+      !['prepared', 'broadcast', 'unknown'].includes(p.status) || !['approval', 'swap', 'wrap'].includes(p.kind) ||
+      (p.gas !== undefined && !validQuantity(p.gas)) || (p.gasPrice !== undefined && !validQuantity(p.gasPrice)) ||
+      (p.sendFailure !== undefined && (typeof p.sendFailure !== 'string' || !Object.hasOwn(SEND_FAILURE_MESSAGES, p.sendFailure)))) {
     throw new Error('Pending transaction does not match the configured wallet/network or is invalid');
   }
 }
@@ -36,7 +91,9 @@ export async function reconcile(config: Config, chain: Chain): Promise<{ blocked
     if (!(error instanceof TransactionReceiptNotFoundError)) throw new Error('Could not reconcile the pending transaction; execution remains paused');
     return { blocked: true, operation: {
       status: pending.status === 'broadcast' ? 'pending' : 'unresolved', hash: pending.hash, kind: pending.kind,
-      message: 'No receipt yet. No new transaction will be sent and this transaction will not be blindly retried.',
+      ...(pending.sendFailure ? { sendFailure: pending.sendFailure } : {}),
+      message: pending.sendFailure ? dispatchFailureMessage(pending.sendFailure)
+        : 'No receipt yet. No new transaction will be sent and this transaction will not be blindly retried.',
     } };
   }
   if (receipt.transactionHash.toLowerCase() !== pending.hash.toLowerCase()) throw new Error('Receipt hash differs from the pending transaction');
@@ -55,6 +112,7 @@ export async function reconcile(config: Config, chain: Chain): Promise<{ blocked
     blockNumber: receipt.blockNumber.toString(), message: `${pending.kind} confirmed on Robinhood mainnet` };
   // Persist the receipt result before removing the barrier to subsequent work.
   await atomicWriteJson(LAST_TRANSACTION_PATH, operation);
+  await noteSuccessfulSwap(pending);
   await rm(PENDING_PATH);
   return { blocked: false, operation };
 }
@@ -96,7 +154,7 @@ export async function dispatch(config: Config, chain: Chain, tx: ChainTransactio
     await requireDispatchReady(tx);
     const hash = keccak256(serialized);
     const pending: PendingTransaction = { chainId: 4663, wallet: config.wallet, hash, nonce,
-      kind: tx.kind, createdAt: new Date().toISOString(), status: 'prepared' };
+      kind: tx.kind, createdAt: new Date().toISOString(), status: 'prepared', gas: gas.toString(), gasPrice: gasPrice.toString() };
     // A crash anywhere after this durable write leaves the known hash to reconcile.
     await atomicWriteJson(PENDING_PATH, pending);
     try {
@@ -111,9 +169,11 @@ export async function dispatch(config: Config, chain: Chain, tx: ChainTransactio
       if (receivedHash.toLowerCase() !== hash.toLowerCase()) throw new Error('RPC returned an unexpected transaction hash');
       await atomicWriteJson(PENDING_PATH, { ...pending, status: 'broadcast' });
       return { status: 'pending', hash, kind: tx.kind, message: `${tx.kind} submitted; waiting for its receipt` };
-    } catch {
-      await atomicWriteJson(PENDING_PATH, { ...pending, status: 'unknown', message: 'Dispatch outcome uncertain; reconcile this hash before any further action' });
-      return { status: 'unresolved', hash, kind: tx.kind, message: 'Dispatch outcome uncertain. The saved hash will be reconciled without resubmitting.' };
+    } catch (error) {
+      const sendFailure = classifyDispatchFailure(error);
+      const message = dispatchFailureMessage(sendFailure);
+      await atomicWriteJson(PENDING_PATH, { ...pending, status: 'unknown', sendFailure, message });
+      return { status: 'unresolved', hash, kind: tx.kind, sendFailure, message };
     }
   } finally { await release(); }
 }

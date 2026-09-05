@@ -7,16 +7,17 @@ const EVENTS_PATH = resolve(DATA, 'events.json');
 const CONDITIONS_PATH = resolve(DATA, 'notification-state.json');
 const ATTENTION_PATH = resolve(DATA, 'attention-state.json');
 export type RebalanceEvent = {
-  id: string; type: 'ledger-rebalance-needed' | 'rebalance-completed' | 'rebalance-attention';
+  id: string; type: 'ledger-rebalance-needed' | 'rebalance-completed' | 'rebalance-attention' | 'rebalance-recovered';
   createdAt: string; message: string; hash?: string; acknowledgedAt?: string;
 };
-export type FailurePhase = 'config' | 'reconcile' | 'observe' | 'plan' | 'interval' | 'quote' | 'execute' | 'publish' | 'unknown';
+export type FailurePhase = 'config' | 'reconcile' | 'recover' | 'observe' | 'plan' | 'interval' | 'quote' | 'execute' | 'publish' | 'unknown';
 export type RebalanceAttention = { kind: 'unresolved' | 'reverted'; hash?: string }
   | { kind: 'runtime-failure'; phase: FailurePhase };
 
 const FAILURE_MESSAGES: Record<FailurePhase, string> = {
   config: 'The local configuration could not be loaded.',
   reconcile: 'The previous transaction could not be reconciled.',
+  recover: 'Automatic transaction recovery could not proceed.',
   observe: 'Fresh portfolio holdings or prices could not be read.',
   plan: 'The rebalance plan could not be calculated.',
   interval: 'The saved rebalance timing could not be read.',
@@ -109,4 +110,13 @@ export async function rebalanceCompleted(hash: string): Promise<void> {
   if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) throw new Error('Invalid receipt hash for notification');
   await publishEvent({ id: `rebalance-${hash.toLowerCase()}`, type: 'rebalance-completed', hash,
     createdAt: new Date().toISOString(), message: 'Rebalance completed: the last swap is confirmed on Robinhood mainnet and a fresh portfolio check is within the configured drift threshold.' });
+}
+
+export async function transactionRecovered(hash: string, outcome: 'cancelled' | 'recovered-revert'): Promise<void> {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) throw new Error('Invalid recovery receipt hash for notification');
+  if (!['cancelled', 'recovered-revert'].includes(outcome)) throw new Error('Invalid recovery outcome for notification');
+  await publishEvent({ id: `recovery-${hash.toLowerCase()}`, type: 'rebalance-recovered', hash,
+    createdAt: new Date().toISOString(), message: outcome === 'cancelled'
+      ? 'Transaction recovery confirmed: a zero-value self-cancellation resolved the original nonce. Further portfolio work follows the saved cycle timing. This is not a completed rebalance.'
+      : 'Transaction recovery confirmed: the original transaction reverted and its nonce is reconciled. Portfolio work can continue under the saved cycle timing. This is not a completed rebalance.' });
 }

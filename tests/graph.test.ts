@@ -76,3 +76,32 @@ test('an unresolved receipt stops before interval logic, and a balanced plan can
   assert.equal(finished, true);
   assert.deepEqual(balanced.calls, ['read']);
 });
+
+test('automatic recovery holds the barrier until receipt resolution, then observes before the cadence gate', async () => {
+  const waiting = setup({
+    reconcile: async () => ({ blocked: true, operation: { status: 'unresolved' } }),
+    recover: async () => ({ blocked: true, operation: { status: 'recovery-wait' } }),
+  });
+  assert.deepEqual((await runGraph(waiting.deps)).trace, ['config', 'reconcile', 'recover', 'wait']);
+  assert.deepEqual(waiting.calls, []);
+  const resolved = setup({
+    reconcile: async () => ({ blocked: true, operation: { status: 'unresolved' } }),
+    recover: async () => ({ blocked: false, operation: { status: 'cancelled' } }),
+    interval: async () => ({ status: 'cooling-down' }),
+  });
+  assert.deepEqual((await runGraph(resolved.deps)).trace, ['config', 'reconcile', 'recover', 'observe', 'plan', 'interval', 'wait']);
+  assert.deepEqual(resolved.calls, ['read']);
+});
+
+test('inspection never enters automatic recovery, and no-op recovery preserves ordinary receipt results', async () => {
+  const inspecting = setup({ canExecute: false,
+    recover: async () => assert.fail('Inspection cannot invoke financial recovery'),
+  });
+  await runGraph(inspecting.deps);
+  assert.deepEqual(inspecting.calls, ['read', 'quote']);
+  const blocked = setup({ reconcile: async () => ({ blocked: true, operation: { status: 'unresolved' } }),
+    recover: async () => null,
+  });
+  await runGraph(blocked.deps);
+  assert.deepEqual(blocked.calls, []);
+});
