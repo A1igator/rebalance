@@ -2,6 +2,8 @@
 
 Research: **2026-09-04**. No package installation, runtime probe, account discovery, hardware test or transaction has occurred. These are documentation/source findings, not a working integration. Read the [minimal-scope decisions](prompts/006-minimal-mvp.md) and [latest direct-signing decision](prompts/008-direct-signing-and-ledger-connect.md) alongside the current plan.
 
+The project's sole network is **Robinhood mainnet (4663)**. Other chain configurations cited below are source-comparison evidence from the earlier CLI investigation, not additional project targets or fallbacks. See [the network decision](prompts/010-robinhood-only.md).
+
 ## Reuse strategy
 
 The [Agent Stack](https://shop.ledger.com/pages/ledger-agent-stack) combines runtime wallet tools, coding skills and hardware security. Use its native device lifecycle, Ethereum signing and suitable swap primitives before building equivalents. Running deterministic code around an SDK/CLI does not require an LLM in the transaction loop. The hardware backend waits for physical approval; raw-key and Privy use separate automatic signer adapters.

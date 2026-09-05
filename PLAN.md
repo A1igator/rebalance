@@ -4,7 +4,7 @@ Created: **2026-09-04**. Track: **ETHOnline 2026, Start from Scratch**. Status: 
 
 The [latest decision](docs/prompts/008-direct-signing-and-ledger-connect.md) returns to direct signing and removes the session-key feasibility work. Raw-key/Privy swaps are automatic; Ledger tracks drift and prompts to rebalance when connected. The [simplification decision](docs/prompts/006-minimal-mvp.md) still excludes spending caps and budget accounting while retaining sponsor-specific features. Earlier discussions remain in Git as history. Cloud LLM input and Privy's TEE signing are accepted. Physical Ledger testing waits for the device to arrive.
 
-The [mainnet decision](docs/prompts/009-mainnet-only.md) makes all live integration, deployments and demo transactions mainnet-only. Robinhood mainnet (4663) is the first target; Base mainnet (8453) is the alternative. Local tests remain development checks, with no testnet milestone.
+All live integration, deployments and demo transactions use **Robinhood mainnet (4663) only**, per the [network clarification](docs/prompts/010-robinhood-only.md). There is no alternative chain or testnet milestone. Local tests remain development checks.
 
 ## 1. What we are building
 
@@ -18,7 +18,7 @@ A local portfolio rebalancer with Claude Code/Codex as its only application comm
 
 Automatic modes need no per-trade human input and no LLM calls. They work with the coding agent closed. **There are no per-trade, daily or cumulative spending caps or budget counters.** Trade size comes from the target allocation and available balance. Keep sponsor-specific authorization features, such as supported Privy contract/method restrictions, without monetary limits or a new human-approval requirement.
 
-The user configures the wallet, signer, network, assets, target weights, drift threshold and polling interval through the agent. Use ordinary swap settings for slippage and transaction expiry. Changing targets applies on the next evaluation; report the resulting complete allocation without adding another approval workflow.
+The user configures the wallet, signer, assets, target weights, drift threshold and polling interval through the agent. The network is fixed to Robinhood mainnet, chain ID 4663. Use ordinary swap settings for slippage and transaction expiry. Changing targets applies on the next evaluation; report the resulting complete allocation without adding another approval workflow.
 
 ## 2. Smallest useful implementation
 
@@ -34,14 +34,14 @@ Use one TypeScript project with a few modules, not a package monorepo:
 
 Keep ordinary config and a small pending-transaction record on disk. A database, generic policy engine and bespoke control/authentication protocol are unnecessary for the shared app. Ledger Key Ring and Privy authorization remain focused integration modules for their prize demos. The agent invokes the local CLI; serve only chart/read data on loopback. Keep signing and mutation out of the chart.
 
-Use one active wallet/profile, one selected chain, one Uniswap integration and a small fixed asset set for the demo. No session keys, delegation modules, custom custody vault, generalized routing, multi-wallet orchestration or plugin framework. Maximize compatibility with current Ledger Agent Stack components for the demo.
+Use one active wallet/profile on Robinhood mainnet, one Uniswap integration and a small fixed asset set for the demo. No session keys, delegation modules, custom custody vault, generalized routing, multi-wallet orchestration or plugin framework. Maximize compatibility with current Ledger Agent Stack components for the demo.
 
 ## 3. Deterministic loop
 
 1. Load the latest config and check any pending transaction before starting another operation.
 2. Read balances and usable prices for the configured assets. Use correct decimals and integer base units; weights total 10,000 basis points. Missing/stale prices or an unavailable route produce no trade.
 3. Calculate allocation drift. If it exceeds the configured threshold, compute one corrective swap through the quote asset. Ledger mode can do this from its saved public address while disconnected; retain a needs-rebalance status until the device connects. For partial target edits, proportionally redistribute the other weights with deterministic rounding.
-4. Build the transaction using the selected chain, token addresses, wallet recipient and Uniswap router. Check available balance and enough native currency for estimated gas. Keep the route's slippage/minimum-output and expiry settings. Skip zero-sized trades.
+4. Build the transaction for Robinhood chain ID 4663 using its token addresses, wallet recipient and Uniswap router. Check available balance and enough native currency for estimated gas. Keep the route's slippage/minimum-output and expiry settings. Skip zero-sized trades.
 5. Before each dispatch, save a minimal pending marker with the selected chain/account and nonce or available provider request identifier. Execute automatically with local-key/Privy, or wait for Ledger device confirmation. Make required token approvals for the swap amount through the same signer; do not build an allowance-management product.
 6. Update the pending record with the returned transaction/provider identifier and wait for its receipt. Refresh balances before calculating another trade, including a buy dependent on earlier sale proceeds.
 
@@ -59,7 +59,7 @@ These are the mechanics needed to produce the intended swap, not a separate secu
 
 Prioritize existing Ledger tools over custom equivalents. Adopt the official DMK skills and reuse native transport, Ethereum signing, device lifecycle and applicable Uniswap swap components. Pin versions/source/licenses when actually adopting them. Read the [source assessment](docs/LEDGER_AGENT_STACK.md).
 
-Shared Ledger EVM configuration includes Robinhood mainnet/testnet and Base. The inspected CLI quote command has a narrower currency guard than its execution path, so validate the packaged flow rather than rejecting Robinhood. Its execute command requotes; verify the actual amount, recipient and normal swap settings used by our integration.
+Shared Ledger EVM configuration includes Robinhood mainnet. The inspected CLI quote command has a narrower currency guard than its execution path, so validate the packaged Robinhood flow. Its execute command requotes; verify the actual amount, recipient and normal swap settings used by our integration.
 
 Ledger signing still requires a real device confirmation. Software and Privy signing do not count as Ledger evidence. Test disconnected monitoring, connection/readiness detection, a single fresh rebalance prompt, signing/rejection and meaningful display after the device arrives. Reuse does not require an LLM in the monitor loop. Use the current device-confirmed flow; no roadmap session/delegation capability is required.
 
@@ -75,13 +75,13 @@ Keep this inside the Privy integration rather than a generic cross-signer permis
 
 ## 6. Network and assets
 
-Use Robinhood mainnet (4663) first, with Base mainnet (8453) as the alternative under the user's any-L2 preference. Verify a usable existing Uniswap route and Ledger integration on the selected mainnet. All broadcasts and project deployments target mainnet; do not switch to a testnet when an integration is unavailable. Keep the detailed evidence in [NETWORK.md](docs/NETWORK.md).
+Use **Robinhood mainnet (4663) exclusively**. Verify a usable existing Uniswap route and Ledger integration there. If a required route is unavailable, evaluate another supported live pair on Robinhood or leave that integration unresolved; do not switch chains. Keep the detailed evidence in [NETWORK.md](docs/NETWORK.md).
 
-The first milestone is an **actual automatic raw-key mainnet Uniswap swap, receipt and chart update**. Local fixtures/forks are development tests. Start with two or three supported live assets and a quote asset, using canonical token identities and an executable route. ETH/USDC is a candidate to verify. Do not deploy mock-stock tokens or test pools as a substitute for the live demo.
+The first milestone is an **actual automatic raw-key Uniswap swap on Robinhood mainnet, receipt and chart update**. Local fixtures/forks are development tests. Start with two or three supported live assets and a quote asset, using canonical token identities and an executable route. ETH/USDC is a candidate to verify on Robinhood. Do not deploy mock-stock tokens or test pools as a substitute for the live demo.
 
-Actual stock swaps require usable Uniswap liquidity and correct token/price behavior. Base's B20 stocks use native precompiles; validate canonical identities and documented semantics rather than requiring ordinary token bytecode. Handle stock feed pauses/trading hours and corporate-action multipliers correctly. These facts are documented in the network research; do not add a generalized asset-validation framework.
+Actual stock swaps require usable Uniswap liquidity and correct Robinhood token/price behavior. Validate canonical stock-token identities, transfer behavior and price feeds. Handle documented stock feed pauses/trading hours and corporate-action multipliers correctly. Use Robinhood's own metadata and semantics; do not import another chain's token assumptions. These facts are documented in the network research; do not add a generalized asset-validation framework.
 
-Use a clearly labelled RPC mode initially. A compatible existing local node/light client can follow the working swap; no custom light-client development is in the MVP. The local app and accepted cloud LLM/Privy services have distinct trust boundaries. Public chain activity and issuer/oracle/chain assumptions remain. The repository is still planning-only; no mainnet transaction or wallet setup has occurred yet.
+Use a clearly labelled Robinhood RPC mode initially. A compatible existing local node/client can follow the working swap; reviewed Helios documentation does not establish Robinhood/Nitro support, and no custom light-client development is in the MVP. The local app and accepted cloud LLM/Privy services have distinct trust boundaries. Public chain activity and issuer/oracle/chain assumptions remain. The repository is still planning-only; no mainnet transaction or wallet setup has occurred yet.
 
 ## 7. Delivery sequence and evidence
 
@@ -90,8 +90,8 @@ Dates are 2026, America/Toronto. The [hackathon checklist](docs/HACKATHON.md) re
 | When | Deliverable |
 | --- | --- |
 | Sep 4 | Commit the simplified plan, prompts and research; preserve owner-bypass main protection |
-| Sep 5 | Pin reusable components, verify the selected mainnet/assets/route and implement config/planner |
-| Sep 6 | Automatic raw-key mainnet swap with receipt; agent CLI and view-only chart |
+| Sep 5 | Pin reusable components, verify Robinhood mainnet assets/router/route and implement config/planner |
+| Sep 6 | Automatic raw-key Robinhood mainnet swap with receipt; agent CLI and view-only chart |
 | Sep 7 | Working drift loop and basic pending-transaction recovery; first check-in before 23:59 |
 | After device arrival, Sep 8 target | Ledger connect-triggered rebalance prompt, signing/display/rejection and focused Key Ring broker demo; delivery date is not assumed |
 | Sep 9 | Real automatic Privy swap and supported scoped-authorization demo through the same loop |

@@ -80,6 +80,14 @@ Codex updated `PLAN.md`, `README.md`, `AGENTS.md`, `CLAUDE.md`, `docs/NETWORK.md
 
 Validation: documentation consistency, local Markdown links and Git whitespace checks. Historical records remain intact. No gas-price measurement, runtime RPC probe, wallet, secret, application code, dependency, deployment or transaction was created. Mainnet is the planned execution environment, not an already completed integration.
 
+## Robinhood mainnet as sole target — 2026-09-04
+
+Human decision: Robinhood Chain is the sole target. The assistant initially misread an ambiguous message as selecting Base; the user corrected it before any edits. Exact messages and the review task are recorded in [the network clarification](prompts/010-robinhood-only.md).
+
+Codex updated `PLAN.md`, `README.md`, `AGENTS.md`, `CLAUDE.md`, `docs/NETWORK.md`, `docs/RESEARCH.md`, `docs/PRIVY.md`, `docs/LEDGER_AGENT_STACK.md` and this disclosure; created the new prompt record. A parallel reviewer checked alternative-chain and Base-specific assumptions. The active plan now fixes chain ID 4663, removes the Base fallback and B20/Helios implementation assumptions, and scopes route/provider verification to Robinhood. Earlier prompts, disclosures and factual source-comparison evidence remain historical context.
+
+Validation: active-document consistency, local Markdown links and Git whitespace checks. The interrupted turn only read files; no incorrect Base-only commit was made. No application code, dependencies, runtime RPC probe, wallet, key, deployment or transaction was created.
+
 ## Development log template
 
 For each material implementation session, append:

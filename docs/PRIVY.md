@@ -28,7 +28,7 @@ Keep supported Privy-native contract/method or signer restrictions for a focused
 
 The view-only chart is compatible. Agent-only user controls are also plausible with SDK/REST, but verify actual provisioning/authentication flows instead of claiming that the existing CLI has no browser step. Developer account setup and wallet ownership/authorization configuration remain unresolved.
 
-The project now targets Robinhood or Base **mainnet**. Verify the selected chain's actual wallet signing/submission and authorization behavior. The earlier Robinhood Testnet gas-sponsorship listing does not establish mainnet support or sponsorship. Gas sponsorship is not required for this MVP; use ordinary fee payment when appropriate. [Gas network support](https://docs.privy.io/wallets/gas-and-asset-management/gas/overview)
+The project targets **Robinhood mainnet only (4663)**. Verify its actual Privy wallet signing/submission and authorization behavior. The earlier Robinhood Testnet gas-sponsorship listing does not establish mainnet support or sponsorship. Gas sponsorship is not required for this MVP; use ordinary fee payment when appropriate. Do not switch chains to obtain a provider feature. [Gas network support](https://docs.privy.io/wallets/gas-and-asset-management/gas/overview)
 
 Privy supports private-key import/export, but importing a key places signing in its API-managed model; it does not implement this project's local raw-key backend. Exporting and doing everything locally may weaken the claim that Privy is core. Keep these concepts separate. [Private-key import](https://docs.privy.io/wallets/wallets/import-a-wallet/private-key), [export](https://docs.privy.io/wallets/wallets/export)
 
