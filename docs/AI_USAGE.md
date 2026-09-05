@@ -139,3 +139,5 @@ The initial planning session had no dependencies. Adopted dependencies are now r
 | Initial state: none | — | — | — | Documentation-only starting point, superseded by implementation register above |
 
 The MIT license covers original project files; it does not override licenses on Uniswap, Ledger, fonts, libraries, boilerplate or other third-party materials.
+
+Final implementation verification on 2026-09-04: `npm run typecheck`, **82/82 tests**, and `git diff --check` passed. Final lifecycle tests cover immediate background stop, current-target display, wallet-scoped receipt history and truthful runner liveness. The first core checkpoint is `381e73b`; verified RWA integration/evidence is `b4afa39`. The following app checkpoint preserves the remaining code, skill, UI, notification bridge and updated specifications. No actual trade or phone push is claimed.

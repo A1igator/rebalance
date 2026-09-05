@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#0c100f">
+    <meta name="description" content="Your local, read-only Rebalance portfolio dashboard.">
+    <title>Rebalance · Portfolio</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="site-header">
+        <div class="brand">
+          <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+            <path d="M16 3v13h13A13 13 0 0 0 16 3Z" fill="currentColor"/>
+            <path d="M11 5.1A12 12 0 1 0 26.9 21H11Z" fill="none" stroke="currentColor" stroke-width="2.2"/>
+          </svg>
+          <span>rebalance<span class="brand-period">.</span></span>
+        </div>
+        <div class="header-meta">
+          <span class="read-only">Read only</span>
+          <span class="network"><span class="network-mark" aria-hidden="true"></span><span id="network-name">Robinhood</span></span>
+        </div>
+      </header>
+
+      <main>
+        <section class="page-heading" aria-labelledby="page-title">
+          <div>
+            <p class="eyebrow">LOCAL PORTFOLIO</p>
+            <h1 id="page-title">Your portfolio, in view.</h1>
+            <p class="page-description">Your holdings, your targets. One clear view.</p>
+          </div>
+          <div class="connection" id="connection" data-state="loading">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span id="connection-text" role="status">Connecting to local app</span>
+          </div>
+        </section>
+
+        <div class="notice" id="notice" role="status" hidden>
+          <span class="notice-symbol" aria-hidden="true">!</span>
+          <p id="notice-text"></p>
+        </div>
+
+        <section class="overview" aria-label="Portfolio overview">
+          <article class="card portfolio-card">
+            <div class="card-heading">
+              <h2>Portfolio value</h2>
+              <span class="unit-tag">USDG equivalent</span>
+            </div>
+            <p class="total" id="portfolio-total">—<span class="total-decimal"></span></p>
+            <p class="value-caption" id="value-caption">Waiting for your local portfolio</p>
+            <div class="chart-wrap">
+              <svg id="allocation-chart" viewBox="0 0 260 260" role="img" aria-label="No portfolio data yet">
+                <circle class="chart-track" cx="130" cy="130" r="100" fill="none" stroke-width="24"/>
+                <g id="chart-segments" transform="rotate(-90 130 130)"></g>
+              </svg>
+              <div class="chart-center" aria-hidden="true">
+                <span class="chart-center-label" id="chart-center-label">A fresh start</span>
+                <strong id="chart-center-value">Your portfolio</strong>
+                <span class="chart-center-note" id="chart-center-note">will appear here</span>
+              </div>
+            </div>
+            <div class="chart-footer"><span class="small-dot" aria-hidden="true"></span>Current allocation<span id="asset-count">No assets yet</span></div>
+          </article>
+
+          <article class="card targets-card">
+            <div class="card-heading">
+              <h2>Allocation</h2>
+              <span class="comparison-key"><span class="key-current" aria-hidden="true"></span>Current<span class="key-target" aria-hidden="true"></span>Target</span>
+            </div>
+            <div class="allocation-head" aria-hidden="true"><span>ASSET</span><span>CURRENT / TARGET</span></div>
+            <div id="allocations" class="allocations"></div>
+            <div class="empty-state" id="allocation-empty">
+              <svg class="empty-graphic" viewBox="0 0 96 66" aria-hidden="true">
+                <path d="M10 51h76M10 33h76M10 15h76" stroke="currentColor" stroke-width="5" stroke-linecap="round" opacity=".13"/>
+                <path d="M10 15h46M10 33h29M10 51h60" stroke="currentColor" stroke-width="5" stroke-linecap="round" opacity=".6"/>
+                <path d="M67 7v16M48 25v16M78 43v16" stroke="currentColor" stroke-width="2"/>
+              </svg>
+              <h3>Your allocation starts with you.</h3>
+              <p>Configure your wallet and target weights through Claude Code or Codex. Your live portfolio will appear here automatically.</p>
+            </div>
+            <div class="allocation-summary" id="allocation-summary"><span>Set your direction through your agent.</span><span class="summary-arrow" aria-hidden="true">↗</span></div>
+          </article>
+        </section>
+
+        <section class="card holdings-card" aria-labelledby="holdings-title">
+          <div class="card-heading holdings-heading"><h2 id="holdings-title">Your assets</h2><span class="muted-caption">Live holdings & allocation drift</span></div>
+          <div class="table-scroll">
+            <table>
+              <caption class="sr-only">Current holdings, price and value in USDG equivalent, current allocation, target allocation and difference in percentage points.</caption>
+              <thead><tr><th scope="col">Asset</th><th scope="col">Token balance</th><th scope="col">Price <span class="th-unit">(USDG)</span></th><th scope="col">Value <span class="th-unit">(USDG)</span></th><th scope="col">Current</th><th scope="col">Target</th><th scope="col">Drift <span class="th-unit">(pp)</span></th></tr></thead>
+              <tbody id="holdings-body"></tbody>
+            </table>
+          </div>
+          <div class="holdings-empty" id="holdings-empty"><span class="empty-ring" aria-hidden="true"></span><p>No holdings to display yet.<span>Configured assets appear after the first portfolio refresh.</span></p></div>
+          <p class="valuation-note">USDG and tokenized-stock allocations. Native ETH is reserved for gas and excluded. Values are USDG equivalents from DEX route quotes and may differ from underlying stock prices. RPC mode.</p>
+        </section>
+
+        <section class="card graph-card" id="graph-card" aria-labelledby="graph-title" hidden>
+          <div class="card-heading"><h2 id="graph-title">Rebalance graph</h2><span class="muted-caption">Deterministic execution</span></div>
+          <ol class="graph-stages" id="graph-stages" aria-label="Execution stages"></ol>
+          <p class="graph-current" id="graph-current"></p>
+          <p class="graph-trace" id="graph-trace" hidden></p>
+          <p class="graph-note">Your agent sets the targets. The local process observes, plans, executes, and checks receipts without LLM input.</p>
+        </section>
+
+        <section class="details-grid" aria-label="Wallet and execution details">
+          <article class="card wallet-card">
+            <div class="card-heading"><h2>Connected profile</h2><span class="corner-symbol" aria-hidden="true">◈</span></div>
+            <dl class="profile-details">
+              <div><dt>Wallet</dt><dd id="wallet-address" class="wallet-address">Not configured</dd></div>
+              <div><dt>Network</dt><dd id="network-detail">Robinhood · 4663</dd></div>
+              <div><dt>Signing</dt><dd id="signing-mode">Not configured</dd></div>
+              <div><dt>Monitor</dt><dd id="monitor-state">Stopped</dd></div>
+            </dl>
+            <p class="profile-note" id="profile-note">Configure your profile through your coding agent.</p>
+          </article>
+          <article class="card operation-card">
+            <div class="card-heading"><h2>Latest operation</h2><span class="operation-badge" id="operation-badge">Waiting</span></div>
+            <p class="operation-title" id="operation-title">Nothing to report yet.</p>
+            <p class="operation-message" id="operation-message">Rebalance activity appears here as it happens.</p>
+            <p class="transaction-hash" id="transaction-hash" hidden></p>
+            <div class="operation-footer"><span>Last portfolio update</span><time id="updated-at">—</time></div>
+          </article>
+        </section>
+      </main>
+
+      <footer class="site-footer"><p><span class="footer-mark" aria-hidden="true">◌</span>Computed locally. Displayed locally.</p><p>Manage Rebalance through Claude Code or Codex.</p></footer>
+    </div>
+  </body>
+</html>

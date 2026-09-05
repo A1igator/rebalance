@@ -1,6 +1,8 @@
 # Rebalance — MVP plan
 
-Created: **2026-09-04**. Track: **ETHOnline 2026, Start from Scratch**. Status: planning only; no application code or project deployment exists yet.
+Created: **2026-09-04**. Track: **ETHOnline 2026, Start from Scratch**. Status: the local application, raw-key graph, five-asset adapter, chart and optional Claude notification channel are implemented. Live read-only checks pass; funded swap receipts, Privy and Ledger execution remain pending.
+
+The [implementation clarifications](docs/prompts/012-agent-graph-rwas-notifications.md) specify one existing agent conversation, a project startup/control skill, an explicit graph, **USDG + four RWAs**, and optional `/rc` notifications. The fixed assets are USDG, TSLA, AAPL, NVDA and AMZN; native ETH is gas-only. See [README](README.md) for runnable commands and [RWA evidence](docs/RWA_CHECK.md). The user-requested local wallet exists; allocation weights and funding remain unset, so trading is unarmed.
 
 The [latest decision](docs/prompts/008-direct-signing-and-ledger-connect.md) returns to direct signing and removes the session-key feasibility work. Raw-key/Privy swaps are automatic; Ledger tracks drift and prompts to rebalance when connected. The [simplification decision](docs/prompts/006-minimal-mvp.md) still excludes spending caps and budget accounting while retaining sponsor-specific features. Earlier discussions remain in Git as history. Cloud LLM input and Privy's TEE signing are accepted. Physical Ledger testing waits for the device to arrive.
 
@@ -8,7 +10,7 @@ All live integration, deployments and demo transactions use **Robinhood mainnet 
 
 ## 1. What we are building
 
-A local portfolio rebalancer with Claude Code/Codex as its only application command interface and a **view-only pie chart**. Ask the agent to change ETH from 20% to 30%; deterministic code updates the complete allocation and handles subsequent rebalancing.
+A local portfolio rebalancer with one Claude Code/Codex conversation as its only application command interface and a **view-only pie chart**. Ask the agent to change TSLA from 20% to 30%; deterministic code updates the complete allocation and handles subsequent rebalancing. A repository skill starts and controls the local monitor; no embedded chat is needed.
 
 | Signer | Rebalancing behavior |
 | --- | --- |
@@ -33,6 +35,8 @@ Use one TypeScript project with a few modules, not a package monorepo:
 | Chart | Bundled local pie chart and current execution status; no editing or signing controls |
 
 Keep ordinary config and a small pending-transaction record on disk. A database, generic policy engine and bespoke control/authentication protocol are unnecessary for the shared app. Ledger Key Ring and Privy authorization remain focused integration modules for their prize demos. The agent invokes the local CLI; serve only chart/read data on loopback. Keep signing and mutation out of the chart.
+
+The [execution graph](docs/AGENT_GRAPH.md) links agent target-setting to deterministic observation, planning, execution and independent receipt reconciliation through local state. A small optional MCP channel delivers retained meaningful events into the same Claude session. `/rc` can expose it on a phone; Claude chooses mobile push delivery. The notification channel has no signing or permission-relay tools, and trading runs without it. See [notification setup and limits](docs/NOTIFICATIONS.md).
 
 Use one active wallet/profile on Robinhood mainnet, one Uniswap integration and a small fixed asset set for the demo. No session keys, delegation modules, custom custody vault, generalized routing, multi-wallet orchestration or plugin framework. Maximize compatibility with current Ledger Agent Stack components for the demo.
 
@@ -77,11 +81,11 @@ Keep this inside the Privy integration rather than a generic cross-signer permis
 
 Use **Robinhood mainnet (4663) exclusively**. Verify a usable existing Uniswap route and Ledger integration there. If a required route is unavailable, evaluate another supported live pair on Robinhood or leave that integration unresolved; do not switch chains. Keep the detailed evidence in [NETWORK.md](docs/NETWORK.md).
 
-The first milestone is an **actual automatic raw-key Uniswap swap on Robinhood mainnet, receipt and chart update**. Local fixtures/forks are development tests. Start with two or three supported live assets and a quote asset, using canonical token identities and an executable route. ETH/USDC is a candidate to verify on Robinhood. Do not deploy mock-stock tokens or test pools as a substitute for the live demo.
+The first live milestone is an **actual automatic raw-key Uniswap rebalance on Robinhood mainnet, receipts and chart update**. The five assets are **USDG, TSLA, AAPL, NVDA and AMZN**. All four stock/USDG routes passed live bidirectional quote checks, with canonical metadata and corporate-action reads preserved in [the RWA check](docs/RWA_CHECK.md). WETH is excluded from the portfolio. Local fixtures/forks are development tests; no mock-stock or test-pool demo substitutes for a live receipt.
 
-Actual stock swaps require usable Uniswap liquidity and correct Robinhood token/price behavior. Validate canonical stock-token identities, transfer behavior and price feeds. Handle documented stock feed pauses/trading hours and corporate-action multipliers correctly. Use Robinhood's own metadata and semantics; do not import another chain's token assumptions. These facts are documented in the network research; do not add a generalized asset-validation framework.
+Actual stock swaps require usable Uniswap liquidity and correct Robinhood token/price behavior. Runtime values actual ERC20 units with fresh DEX quotes in USDG and blocks activity for advisory corporate-action oraclePaused flags. It does not apply share multipliers again or claim independent share-price/market-hours verification. Feed research remains a later option. Technical ERC20 compatibility does not establish user eligibility under the issuer's rules. Use Robinhood's own semantics without a generalized asset-validation framework.
 
-Use a clearly labelled Robinhood RPC mode initially. A compatible existing local node/client can follow the working swap; reviewed Helios documentation does not establish Robinhood/Nitro support, and no custom light-client development is in the MVP. The local app and accepted cloud LLM/Privy services have distinct trust boundaries. Public chain activity and issuer/oracle/chain assumptions remain. The repository is still planning-only; no mainnet transaction or wallet setup has occurred yet.
+Use a clearly labelled Robinhood RPC mode initially. A compatible existing local node/client can follow the working swap; reviewed Helios documentation does not establish Robinhood/Nitro support, and no custom light-client development is in the MVP. The local app and accepted cloud LLM/Privy services have distinct trust boundaries. Public chain activity and issuer/chain assumptions remain. A local wallet has been created; no mainnet transaction has been sent.
 
 ## 7. Delivery sequence and evidence
 
