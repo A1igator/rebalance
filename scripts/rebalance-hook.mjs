@@ -33,6 +33,20 @@ export function hookReply(result) {
   };
 }
 
+function hookFailure(phase) {
+  const messages = {
+    input: 'The Rebalance hook could not read its event input; no startup was attempted.',
+    workspace: 'The Rebalance hook could not verify its project directory; no startup was attempted. Review the project hook setup.',
+    'stop-state': 'The Rebalance hook could not read its saved stop state; no startup was attempted. Preserve local records for recovery.',
+    dependencies: 'The Rebalance hook could not prepare its locked dependencies; no startup was attempted. Check the local runtime and dependencies; Node.js 24 or later is required.',
+    launch: 'The Rebalance launcher may have started the runner, but its result could not be verified. Current trading state is unknown. Inspect public status; do not repeat launch or start.',
+  };
+  // These fixed messages are deliberately independent of caught errors, paths,
+  // stdin and subprocess output. A dispatched launcher can outlive its result.
+  return hookReply({ app: 'Rebalance', outcome: phase === 'launch' ? 'starting' : 'blocked',
+    status: null, phase, messages: [messages[phase]] });
+}
+
 async function ensureDependencies(root) {
   if (Number(process.versions.node.split('.')[0]) < 24) {
     throw new Error('Rebalance requires Node.js 24 or later.');
@@ -79,31 +93,45 @@ export async function handlePrompt(input, overrides = {}) {
   const selected = selectLaunchRequest(input);
   if (!selected) return null;
   if (selected.blocked) return hookReply({ app: 'Rebalance', outcome: 'blocked', messages: [selected.blocked] });
-  const root = await realpath(overrides.repository ?? repository);
-  const cwd = await realpath(selected.cwd);
-  const child = relative(root, cwd);
-  if (child === '..' || child.startsWith('../') || child.startsWith('..\\') || isAbsolute(child)) return null;
-  // Capture before a potentially slow npm ci; a stop issued during bootstrap
-  // must still win when the launcher reaches its conditional start.
-  const expectedStop = await (overrides.readStopToken ?? readStopToken)(root);
-  await (overrides.ensureDependencies ?? ensureDependencies)(root);
-  return hookReply(await (overrides.runLaunch ?? runLaunch)(root, selected.requestId, expectedStop));
+  let phase = 'workspace';
+  try {
+    const root = await realpath(overrides.repository ?? repository);
+    const cwd = await realpath(selected.cwd);
+    const child = relative(root, cwd);
+    if (child === '..' || child.startsWith('../') || child.startsWith('..\\') || isAbsolute(child)) return null;
+    // Capture before a potentially slow npm ci; a stop issued during bootstrap
+    // must still win when the launcher reaches its conditional start.
+    phase = 'stop-state';
+    const expectedStop = await (overrides.readStopToken ?? readStopToken)(root);
+    phase = 'dependencies';
+    await (overrides.ensureDependencies ?? ensureDependencies)(root);
+    phase = 'launch';
+    return hookReply(await (overrides.runLaunch ?? runLaunch)(root, selected.requestId, expectedStop));
+  } catch {
+    return hookFailure(phase);
+  }
 }
 
 async function main() {
   let raw = '';
-  for await (const chunk of process.stdin) {
-    raw += chunk;
-    if (raw.length > 1_048_576) throw new Error('Hook input too large');
+  let input;
+  try {
+    for await (const chunk of process.stdin) {
+      raw += chunk;
+      if (raw.length > 1_048_576) throw new Error('Hook input too large');
+    }
+    input = JSON.parse(raw);
+  } catch {
+    process.stdout.write(JSON.stringify(hookFailure('input')) + '\n');
+    return;
   }
-  const response = await handlePrompt(JSON.parse(raw));
+  const response = await handlePrompt(input);
   if (response) process.stdout.write(JSON.stringify(response) + '\n');
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main().catch(() => {
-    process.stdout.write(JSON.stringify(hookReply({ app: 'Rebalance', outcome: 'blocked',
-      messages: ['The Rebalance hook could not verify completion. Inspect public status; do not blindly repeat a launch.'] })) + '\n');
-    process.exitCode = 1;
-  });
+  // Codex consumes structured additionalContext from successful hook exits.
+  // Handled failures therefore return public JSON at exit 0; application
+  // failure/unknown state is carried by outcome and status, not the exit code.
+  await main();
 }

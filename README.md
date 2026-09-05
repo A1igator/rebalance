@@ -16,6 +16,8 @@ Open this repository in Codex or Claude Code and invoke the project **Rebalance 
 
 For Codex, a project **UserPromptSubmit hook** routes a literal bare `$rebalance` directly to the launcher without an LLM tool decision. It installs missing locked dependencies and records the invocation identity so duplicate delivery cannot rearm after a stop. **The user must review and trust the hook first**; no trust or approval settings are changed by this implementation. The documented review interface is `/hooks` in Codex CLI. Actual desktop skill-picker dispatch remains unverified. [Hook setup, matching and limits](docs/LAUNCH.md)
 
+One-time setup: open Codex CLI in the repository, choose **Review hooks**, and trust the **UserPromptSubmit** entry from **`.codex/hooks.json`** that runs **`scripts/rebalance-hook.mjs`**. Use `/hooks` if the startup review screen is absent. The recorded native discovery check found this hook correctly loaded but untrusted; project trust alone is insufficient. Then use literal `$rebalance` for normal launch in the existing conversation.
+
 The current assistant prepares/tests the wiring but cannot activate real-money trading or trust the live hook on the user's behalf. The funded runner remains unarmed in recorded checks. Native notification schedules and Remote pairing remain host setup outside the launcher, and existing requested notifications are reused. An armed status is not proof of a completed trade.
 
 For contributors and reproducible verification, the underlying commands are:

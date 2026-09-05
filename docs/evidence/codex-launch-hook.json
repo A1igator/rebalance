@@ -1,0 +1,28 @@
+{
+  "recordedAt": "2026-09-05T15:17:01Z",
+  "source": "Installed Codex CLI, documented hooks/list over a separate short-lived stdio app-server process",
+  "cliVersion": "0.148.0",
+  "featureHooks": true,
+  "projectTrust": "trusted",
+  "hook": {
+    "sourcePath": "<repo>/.codex/hooks.json",
+    "eventName": "userPromptSubmit",
+    "handlerType": "command",
+    "command": "node \"$(git rev-parse --show-toplevel)/scripts/rebalance-hook.mjs\"",
+    "enabled": true,
+    "isManaged": false,
+    "currentHash": "sha256:daf9006f9a66333d1714f9e2de3abab93c7f78aa36aca38194defe53f3a61fc5",
+    "trustStatus": "untrusted"
+  },
+  "warnings": [],
+  "errors": [],
+  "nativeReview": "CLI displayed Hooks need review. Selecting Review hooks during same-conversation resume was followed by active-writer rejection; no review/trust action completed.",
+  "redactions": ["Replaced the absolute local repository path with <repo>", "Omitted unrelated plugin hook metadata"],
+  "boundaries": {
+    "discoveryQueryMethods": ["initialize", "initialized", "hooks/list"],
+    "hookExecuted": false,
+    "trustChanged": false,
+    "fundedRunnerStarted": false,
+    "desktopDispatchVerified": false
+  }
+}
