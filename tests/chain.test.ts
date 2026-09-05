@@ -10,7 +10,8 @@ import {
   type Address,
   type Hex,
 } from "viem";
-import { ASSETS, QUOTER, ROBINHOOD, ROUTER, createChain, type ChainConfig } from "../src/chain.js";
+import { ASSETS, DISCOVERY_TTL_MS, QUOTER, ROBINHOOD, ROUTER, RPC_RETRY_COUNT, RPC_TIMEOUT_MS,
+  createChain, type ChainConfig } from "../src/chain.js";
 import type { TradePlan } from "../src/core.js";
 
 // Local protocol fixtures only: no mainnet requests, wallets, or bytecode copies.
@@ -212,6 +213,78 @@ test("local snapshot uses 18/6 decimals, a DEX estimate and separate native gas"
   state.native = 50n * ETHER;
   assert.equal((await chain.snapshot()).portfolio.totalUsdE8, snapshot.portfolio.totalUsdE8);
   assert.equal(state.requests.filter(({ method }) => method === "eth_getCode").length, codeReads);
+});
+
+test("concurrent snapshots share discovery while fresh balances, quotes and pauses remain live", async t => {
+  const { state, chain } = fixture(t);
+  await Promise.all([chain.snapshot(), chain.snapshot()]);
+  assert.equal(state.requests.filter(({ method }) => method === 'eth_getCode').length, 22,
+    'concurrent observations must share a single complete discovery');
+  state.balances.TSLA = 3n * ETHER;
+  state.forward[100] = 3_000_000n;
+  const refreshed = await chain.snapshot();
+  const stock = refreshed.portfolio.positions.find(position => position.id === 'TSLA')!;
+  assert.equal(stock.balance, 3n * ETHER);
+  assert.equal(stock.priceUsdE8, 300n * USD);
+  state.paused.add('TSLA');
+  await assert.rejects(chain.snapshot(), /paused for a corporate action/);
+  assert.equal(state.requests.filter(({ method }) => method === 'eth_getCode').length, 22);
+});
+
+test("discovery expires at its bounded deadline, rejects failed refresh and recovers without stale pools", async t => {
+  const { state, chain } = fixture(t);
+  await chain.snapshot();
+  const codeReads = () => state.requests.filter(({ method }) => method === 'eth_getCode').length;
+  const originalReads = codeReads();
+  state.now += BigInt(DISCOVERY_TTL_MS / 1000) - 1n;
+  state.timestamp = state.now;
+  state.blockNumber++;
+  await chain.snapshot();
+  assert.equal(codeReads(), originalReads, 'verification remains cached immediately before expiry');
+  state.now++;
+  state.timestamp = state.now;
+  state.factory = WALLET;
+  await assert.rejects(chain.snapshot(), /Unexpected Uniswap factory/);
+  assert.equal(codeReads(), originalReads + 8);
+  await assert.rejects(chain.quote(trade), /Unexpected Uniswap factory/,
+    'failed refresh must not keep using the earlier verified pools');
+  state.factory = FACTORY;
+  await chain.snapshot();
+  assert.equal(codeReads(), originalReads + 8 + 8 + 22,
+    'failure is retryable only through a complete new verification');
+});
+
+test("clock rollback and a recreated chain require fresh discovery", async t => {
+  const { state, chain, config } = fixture(t);
+  await chain.snapshot();
+  state.now--;
+  state.timestamp = state.now;
+  state.factory = WALLET;
+  await assert.rejects(chain.snapshot(), /Unexpected Uniswap factory/);
+  state.factory = FACTORY;
+  await chain.snapshot();
+  state.decimals.USDG = 18;
+  await assert.rejects(createChain({ ...config, slippageBps: 100 }).snapshot(), /Unexpected USDG metadata/,
+    'a new configuration/client must never inherit another client\'s discovery');
+});
+
+test("HTTP reads have bounded retries and raw submissions are never transport-retried", async t => {
+  const { chain } = fixture(t);
+  assert.equal(chain.publicClient.transport.timeout, RPC_TIMEOUT_MS);
+  assert.equal(chain.publicClient.transport.retryCount, RPC_RETRY_COUNT);
+  assert.equal(RPC_TIMEOUT_MS, 8000);
+  assert.equal(RPC_RETRY_COUNT, 1);
+  const methods: string[] = [];
+  t.mock.method(globalThis, 'fetch', async (_input: string | URL | Request, options?: RequestInit) => {
+    methods.push(JSON.parse(options!.body as string).method);
+    return new Response('fixture unavailable', { status: 503 });
+  });
+  await assert.rejects(chain.publicClient.getChainId());
+  assert.deepEqual(methods, ['eth_chainId', 'eth_chainId']);
+  methods.length = 0;
+  // Synthetic bytes reach only this mock; no account or signer is involved.
+  await assert.rejects(chain.publicClient.sendRawTransaction({ serializedTransaction: '0x1234' }));
+  assert.deepEqual(methods, ['eth_sendRawTransaction']);
 });
 
 test("canonical checks reject missing code, wrong decimals, factory and pool", async (t) => {

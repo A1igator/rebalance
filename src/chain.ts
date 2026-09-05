@@ -31,6 +31,9 @@ const FACTORY: Address = "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA";
 // The upstream router retains its canonical WETH9 identity; WETH is not an allocation.
 const ROUTER_WETH: Address = "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73";
 const FEES = [100, 500, 3000, 10000] as const;
+export const DISCOVERY_TTL_MS = 10 * 60 * 1000;
+export const RPC_TIMEOUT_MS = 8_000;
+export const RPC_RETRY_COUNT = 1;
 
 export const VALUATION_NOTE =
   "Estimated in USDG from 0.01 stock-token DEX quotes; USDG is the unit reference. Not a fair-share-price oracle. DEX prices can differ from the underlying market, including while it is closed. Raw token units; ETH is gas only.";
@@ -142,14 +145,22 @@ export function createChain(config: ChainConfig) {
     cacheTime: 0,
     transport: http(url.toString(), {
       batch: false,
-      timeout: 20_000,
+      timeout: RPC_TIMEOUT_MS,
+      retryCount: RPC_RETRY_COUNT,
       fetchOptions: { headers: { "User-Agent": "rebalance-read-only-route-check/0.1" } },
     }),
   });
 
   let identityCheck: Promise<void> | undefined;
+  let verifiedAt: number | undefined;
   const pools = new Map<string, { fee: number; address: Address }[]>();
   async function verifyIdentity(blockNumber: bigint): Promise<void> {
+    const now = Date.now();
+    if (verifiedAt !== undefined && (now < verifiedAt || now - verifiedAt >= DISCOVERY_TTL_MS)) {
+      identityCheck = undefined;
+      verifiedAt = undefined;
+      pools.clear();
+    }
     identityCheck ??= (async () => {
       await Promise.all(
         [...assetList.map(({ address }) => address), FACTORY, QUOTER, ROUTER].map(async (address) => {
@@ -157,14 +168,14 @@ export function createChain(config: ChainConfig) {
           if (!code || code === "0x") throw new Error(`Expected mainnet contract has no code: ${address}`);
         }),
       );
-      for (const asset of assetList) {
+      await Promise.all(assetList.map(async (asset) => {
         const [symbol, decimals] = await Promise.all([
           publicClient.readContract({ address: asset.address, abi: erc20Abi, functionName: "symbol", blockNumber }),
           publicClient.readContract({ address: asset.address, abi: erc20Abi, functionName: "decimals", blockNumber }),
         ]);
         if (symbol !== asset.symbol || decimals !== asset.decimals) throw new Error(`Unexpected ${asset.id} metadata`);
-      }
-      for (const address of [QUOTER, ROUTER]) {
+      }));
+      await Promise.all([QUOTER, ROUTER].map(async (address) => {
         const [factory, weth] = await Promise.all([
           publicClient.readContract({ address, abi: IDENTITY_ABI, functionName: "factory", blockNumber }),
           publicClient.readContract({ address, abi: IDENTITY_ABI, functionName: "WETH9", blockNumber }),
@@ -172,8 +183,10 @@ export function createChain(config: ChainConfig) {
         if (getAddress(factory) !== getAddress(FACTORY) || getAddress(weth) !== getAddress(ROUTER_WETH)) {
           throw new Error(`Unexpected Uniswap factory or WETH9: ${address}`);
         }
-      }
-      for (const stock of stockList) {
+      }));
+      // Discover independent stocks together, limiting factory/code reads to
+      // four concurrent requests on the public rate-limited RPC.
+      const discoveredPools = await Promise.all(stockList.map(async (stock) => {
         const discovered: { fee: number; address: Address }[] = [];
         for (const fee of FEES) {
           const address = await publicClient.readContract({
@@ -186,10 +199,16 @@ export function createChain(config: ChainConfig) {
           discovered.push({ fee, address });
         }
         if (discovered.length === 0) throw new Error(`No Uniswap v3 ${stock.id}/USDG pool exists`);
-        pools.set(stock.id, discovered);
-      }
+        return [stock.id, discovered] as const;
+      }));
+      // Publish only a completely validated discovery. Dynamic balances,
+      // prices, allowances and corporate-action state are never cached here.
+      for (const [stock, discovered] of discoveredPools) pools.set(stock, discovered);
+      verifiedAt = Date.now();
     })().catch((error: unknown) => {
       identityCheck = undefined;
+      verifiedAt = undefined;
+      pools.clear();
       throw error;
     });
     await identityCheck;

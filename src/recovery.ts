@@ -321,7 +321,7 @@ export async function recover(options: RecoveryOptions = {}, overrides: Partial<
   }
 }
 
-export const AUTO_RECOVERY_GRACE_MS = 5 * 60 * 1000;
+export const AUTO_RECOVERY_GRACE_MS = 30_000;
 export type AutomaticRecoveryDependencies = {
   dataDir: string; config: () => Promise<Config | null>; account: typeof localAccount;
   now: () => number; noteSuccessfulSwap: (original: PendingTransaction) => Promise<void>;
@@ -395,7 +395,7 @@ export async function automaticRecovery(config: Config, chain: Pick<ReturnType<t
       const now = deps.now();
       if (!Number.isFinite(createdAt) || !Number.isSafeInteger(now) || createdAt > now) throw new RecoveryError('Invalid or future-dated pending timestamp; automatic recovery remains blocked.');
       if (now - createdAt < AUTO_RECOVERY_GRACE_MS) return blocked('recovery-wait',
-        `Waiting through the five-minute receipt grace until ${new Date(createdAt + AUTO_RECOVERY_GRACE_MS).toISOString()}; the original transaction has not been proved absent.`);
+        `Waiting through the 30-second receipt grace until ${new Date(createdAt + AUTO_RECOVERY_GRACE_MS).toISOString()}; the original transaction has not been proved absent.`);
       if (!record) {
         record = { version: 1, automatic: true, original, createdAt: new Date(now).toISOString(), originallyArmed: true };
         await atomicWriteJson(path('recovery.json'), record);

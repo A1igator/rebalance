@@ -145,7 +145,14 @@ export async function dispatch(config: Config, chain: Chain, tx: ChainTransactio
     let gas: bigint;
     try { gas = (await rpc.estimateGas({ account: config.wallet, to: tx.to, data: tx.data, value: tx.value }) * 120n + 99n) / 100n; }
     catch { throw new Error('Sender simulation/gas estimation failed; no transaction was signed'); }
-    const gasPrice = await rpc.getGasPrice();
+    const suggestedGasPrice = await rpc.getGasPrice();
+    if (typeof suggestedGasPrice !== 'bigint' || suggestedGasPrice <= 0n || suggestedGasPrice >= 2n ** 256n) {
+      throw new Error('RPC returned an invalid gas-price suggestion; no transaction was signed');
+    }
+    // Reserve modest initial fee headroom with integer ceiling. This is not
+    // a retry/replacement policy: an uncertain send keeps its original hash.
+    const gasPrice = (suggestedGasPrice * 120n + 99n) / 100n;
+    if (gasPrice >= 2n ** 256n) throw new Error('Buffered gas price exceeds uint256; no transaction was signed');
     const balance = await rpc.getBalance({ address: config.wallet, blockTag: 'pending' });
     if (gasPrice <= 0n || balance < tx.value + gas * gasPrice) throw new Error('Insufficient native ETH for this transaction and estimated gas');
     await requireDispatchReady(tx);

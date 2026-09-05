@@ -194,8 +194,8 @@ async function main() {
     case 'chart': {
       await inLock('chart.lock', async () => {
         const server = await serve(); print({ url: 'http://127.0.0.1:4663', viewOnly: true });
-        await new Promise<void>(resolve => {
-          const close = () => server.close(() => resolve());
+        await new Promise<void>((resolve, reject) => {
+          const close = () => { void server.closeChart().then(resolve, reject); };
           process.once('SIGINT', close); process.once('SIGTERM', close);
         });
       }); return;

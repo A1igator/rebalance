@@ -76,3 +76,5 @@ The native hook definition and trust settings are unchanged. Preparation and iso
 
 
 The [automatic recovery update](prompts/026-automatic-recovery.md) subsequently made routine stale-send recovery part of the armed raw-key graph. Bare launch includes that runtime behavior; it does not invoke the separate manual wrapper. An already active old process is still reused, so deploying new source alone does not reload it. The user can use the existing explicit recovery/resume path to adopt updated code. Cycles with no successful swap now avoid the hourly cooldown, while canonical successful swaps preserve the saved hourly cadence; see [recovery behavior](RECOVERY.md).
+
+The [event-driven runtime](EXECUTION_TIMING.md) and chart SSE endpoint are process code: updating files does not reload an existing runner/server. The assistant may reload the read-only chart server after verifying its process identity. The funded runner requires its permitted user-driven recovery/resume or launch lifecycle; bare launch still reuses an already active runner. Hook trust and dispatch are unchanged.

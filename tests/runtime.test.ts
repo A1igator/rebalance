@@ -1,3 +1,4 @@
+import type { Status } from '../src/runtime.js';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -265,7 +266,12 @@ test('monitor preserves a new stop before its first tick and disarms even after 
   await saved();
   await writeFile(CONFIG_PATH, '{corrupt');
   await assert.rejects(monitor(new AbortController().signal), SyntaxError);
-  assert.equal((await readJson<{ armed: boolean }>(STATE_PATH))?.armed, false);
+  const failed = await readJson<Status>(STATE_PATH);
+  assert.equal(failed?.armed, false);
+  assert.equal(failed?.graph.node, 'error');
+  assert.match(failed?.error ?? '', /Local control or transaction state/);
+  assert.doesNotMatch(JSON.stringify(failed), /corrupt/);
+  assert.equal((await events())[0]?.type, 'rebalance-attention');
 });
 
 test('one cycle can complete four buys and their approvals, then persistent cooldown blocks later drift', async t => {

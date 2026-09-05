@@ -35,7 +35,8 @@
     const receiptWait = { pending: "Waiting for receipt", unresolved: "Transaction unresolved", confirming: "Confirming transaction", "recovery-wait": "Automatic recovery waiting", "recovery-busy": "Recovery in progress" }[snapshot?.operation?.status];
     const entries = funded ? holdings : targets;
     const total = entries.reduce((sum, row) => sum + row.weight, 0);
-    const state = funded ? failed || receiptWait ? "Last known holdings" : "Current holdings" : targets.length ? "Targets" : "No allocation";
+    const retained = failed || receiptWait || snapshot?.operation?.status === "cooling-down";
+    const state = funded ? retained ? "Last known holdings" : "Current holdings" : targets.length ? "Targets" : "No allocation";
     let note = "Set targets through your agent";
     if (funded) {
       const observed = new Date(snapshot.updatedAt);
@@ -81,22 +82,96 @@
     }
   }
 
+  let stream = null;
+  let streamReady = false;
+  let refreshTimer = null;
+  let initialTimer = null;
+  let controller = null;
+  let refreshing = false;
+  let suspended = false;
+  let lastRendered = null;
+  let streamGeneration = 0;
+
+  function show(snapshot, disconnected = false) {
+    const key = JSON.stringify([snapshot, disconnected]);
+    if (key === lastRendered) return;
+    lastRendered = key;
+    render(snapshot, disconnected);
+  }
+
+  function accept(snapshot) {
+    if (snapshot?.app !== "Rebalance") throw new Error("Invalid local status");
+    lastSnapshot = snapshot;
+    show(snapshot);
+  }
+
   async function refresh() {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4500);
+    refreshTimer = null;
+    if (streamReady || suspended || refreshing) return;
+    refreshing = true;
+    const generation = streamGeneration;
+    const request = new AbortController();
+    controller = request;
+    const timeout = setTimeout(() => request.abort(), 4500);
     try {
-      const response = await fetch("/api/status", { cache: "no-store", signal: controller.signal });
+      const response = await fetch("/api/status", { cache: "no-store", signal: request.signal });
       if (!response.ok) throw new Error("Local status unavailable");
       const snapshot = await response.json();
-      if (snapshot?.app !== "Rebalance") throw new Error("Invalid local status");
-      lastSnapshot = snapshot;
-      render(snapshot);
+      if (!streamReady && !suspended && generation === streamGeneration) accept(snapshot);
     } catch {
-      render(lastSnapshot, true);
+      if (!streamReady && !suspended) show(lastSnapshot, true);
     } finally {
       clearTimeout(timeout);
-      setTimeout(refresh, 5000);
+      controller = null;
+      refreshing = false;
+      if (!streamReady && !suspended) refreshTimer = setTimeout(refresh, 5000);
     }
   }
-  refresh();
+
+  function fallback() {
+    if (!refreshTimer && !refreshing && !suspended) void refresh();
+  }
+
+  function connect() {
+    if (suspended) return;
+    if (typeof EventSource !== "function") { fallback(); return; }
+    try {
+      const source = new EventSource("/api/status/events");
+      stream = source;
+      // A silent connection should not leave the chart permanently loading.
+      initialTimer = setTimeout(() => { if (!streamReady) fallback(); }, 4500);
+      source.addEventListener("status", (event) => {
+        if (stream !== source || suspended) return;
+        try {
+          const snapshot = JSON.parse(event.data);
+          accept(snapshot);
+          streamGeneration++;
+          streamReady = true;
+          clearTimeout(initialTimer);
+          clearTimeout(refreshTimer); refreshTimer = null;
+          controller?.abort();
+        } catch {
+          streamReady = false;
+          source.close(); stream = null;
+          fallback();
+        }
+      });
+      // EventSource reconnects itself; polling runs only until a valid event.
+      source.onerror = () => {
+        if (stream !== source || suspended) return;
+        streamReady = false; fallback();
+      };
+    } catch { fallback(); }
+  }
+
+  window.addEventListener("pagehide", () => {
+    suspended = true; streamReady = false;
+    stream?.close(); stream = null;
+    clearTimeout(initialTimer); clearTimeout(refreshTimer); refreshTimer = null;
+    controller?.abort();
+  });
+  window.addEventListener("pageshow", () => {
+    if (suspended) { suspended = false; connect(); }
+  });
+  connect();
 })();

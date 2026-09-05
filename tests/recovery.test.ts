@@ -341,15 +341,45 @@ test('a newer retained stop permits receipt-only cleanup but never resumes the e
   assert.equal(await readJson(f.path('pending.json')), null);
 });
 
-test('automatic recovery waits a fixed five-minute grace without signing or changing cycle/stop', async t => {
+test('automatic recovery waits until exactly 30 seconds without signing or changing cycle/stop', async t => {
   const f = await fixture(t);
-  const result = await auto(f, { now: () => Date.parse(f.pending.createdAt) + AUTO_RECOVERY_GRACE_MS - 1 });
+  const createdAt = Date.parse(f.pending.createdAt);
+  assert.equal(AUTO_RECOVERY_GRACE_MS, 30_000);
+  const result = await auto(f, { now: () => createdAt + 29_999 });
   assert.equal(result?.blocked, true); assert.equal(result?.operation?.status, 'recovery-wait');
-  assert.match(result?.operation?.message ?? '', /five-minute/);
+  assert.match(result?.operation?.message ?? '', /30-second.*2026-09-05T20:00:30\.000Z/);
   assert.equal(f.keyReads, 0); assert.equal(f.sent.length, 0); assert.equal(f.resumeCalls, 0);
   assert.equal(await readJson(f.path('stop.json')), null);
   assert.equal(await readJson(f.path('recovery.json')), null);
   assert.deepEqual(await readJson(f.path('cycle.json')), f.cycle);
+  const eligible = await auto(f, { now: () => createdAt + 30_000 });
+  assert.equal(eligible?.blocked, false); assert.equal(eligible?.operation?.status, 'cancelled');
+  assert.equal(f.keyReads, 1); assert.equal(f.sent.length, 1); assert.equal(f.resumeCalls, 0);
+  assert.equal(await readJson(f.path('stop.json')), null);
+  assert.deepEqual(await readJson(f.path('cycle.json')), f.cycle);
+});
+
+test('a winning original receipt resolves before the grace timer without cancellation', async t => {
+  const f = await fixture(t);
+  f.mineOriginal();
+  const result = await auto(f, { now: () => Date.parse(f.pending.createdAt) + 1 });
+  assert.equal(result?.blocked, false); assert.equal(result?.operation?.status, 'confirmed');
+  assert.equal(result?.operation?.hash, originalHash);
+  assert.equal(f.keyReads, 0); assert.equal(f.sent.length, 0); assert.equal(f.successfulNotes, 1);
+  assert.equal(await readJson(f.path('pending.json')), null);
+});
+
+test('an original receipt awaiting canonical confirmations takes precedence over the recovery deadline', async t => {
+  const f = await fixture(t);
+  f.mineOriginal(); f.head = 100n;
+  const now = () => Date.parse(f.pending.createdAt) + 30_000;
+  const confirming = await auto(f, { now });
+  assert.equal(confirming?.blocked, true); assert.equal(confirming?.operation?.status, 'confirming');
+  assert.equal(f.keyReads, 0); assert.equal(f.sent.length, 0);
+  assert.deepEqual(await readJson(f.path('pending.json')), f.pending);
+  f.head = 101n;
+  assert.equal((await auto(f, { now }))?.operation?.status, 'confirmed');
+  assert.equal(f.keyReads, 0); assert.equal(f.sent.length, 0);
 });
 
 test('automatic stale prepared/unknown/broadcast cancellation preserves the active window and success state', async t => {
@@ -376,6 +406,8 @@ test('automatic pending cancellation is receipt-only across restarts and prepare
   assert.equal((await auto(f))?.blocked, true);
   const record = (await readJson<RecoveryRecord>(f.path('recovery.json')))!;
   assert.equal(record.cancellation?.status, 'unknown');
+  assert.equal((await auto(f, { now: () => Date.parse(f.pending.createdAt) + 86_400_000 }))?.blocked, true);
+  assert.equal(f.sent.length, 1); assert.equal(f.keyReads, 1, 'elapsed time must not authorize another cancellation');
   record.cancellation!.status = 'prepared';
   await atomicWriteJson(f.path('recovery.json'), record);
   assert.equal((await auto(f))?.blocked, true);
@@ -444,6 +476,19 @@ test('automatic stop/config/timestamp/signer checks never call the signing key',
     } else result = await auto(f, { now: () => Date.parse('2026-09-05T20:10:00Z') });
     assert.equal(result?.blocked, true, condition); assert.equal(f.keyReads, 0); assert.equal(f.sent.length, 0);
     assert.deepEqual(await readJson(f.path('pending.json')), f.pending);
+  }
+});
+
+test('invalid or backward clocks cannot turn an unresolved send into a cancellation', async t => {
+  for (const now of [NaN, Infinity, -Infinity, Number.MAX_SAFE_INTEGER + 1, 0,
+    Date.parse('2026-09-05T20:00:30Z') + 0.5, 8_640_000_000_000_001]) {
+    const f = await fixture(t);
+    const result = await auto(f, { now: () => now });
+    assert.equal(result?.blocked, true, String(now));
+    assert.equal(f.keyReads, 0); assert.equal(f.sent.length, 0);
+    assert.equal(await readJson(f.path('recovery.json')), null);
+    assert.deepEqual(await readJson(f.path('pending.json')), f.pending);
+    assert.deepEqual(await readJson(f.path('cycle.json')), f.cycle);
   }
 });
 

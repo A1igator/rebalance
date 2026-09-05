@@ -1,7 +1,6 @@
 import { resolve } from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
 import { createChain, type RouteQuote } from './chain.js';
-import { DATA, STATE_PATH, loadConfig, type Config } from './config.js';
+import { DATA, STATE_PATH, PENDING_PATH, loadConfig, type Config } from './config.js';
 import { planTrade, type Portfolio, type TradePlan } from './core.js';
 import { attentionCondition, ledgerCondition, rebalanceCompleted, transactionRecovered, type FailurePhase, type RebalanceAttention } from './events.js';
 import { automaticRecovery } from './recovery.js';
@@ -9,7 +8,8 @@ import { CYCLE_PATH, ACTIVE_CYCLE_SECONDS, readCycle, publicCycle, rebalanceInte
 export { CYCLE_PATH, ACTIVE_CYCLE_SECONDS, rebalanceInterval, beginRebalanceCycle, finishRebalanceCycle };
 export type { RebalanceCycle };
 import { runGraph, type GraphState } from './graph.js';
-import { atomicWriteJson, readJson } from './storage.js';
+import { atomicWriteJson, readJson, type PendingTransaction } from './storage.js';
+import { driveMonitor } from './monitor.js';
 import { dispatch, reconcile, type Operation } from './transactions.js';
 
 export const STOP_PATH = resolve(DATA, 'stop.json');
@@ -104,7 +104,7 @@ function runtimeAttention(state: Status): RebalanceAttention | null {
 }
 
 /** Caller holds the single-run lock, including for an observation-only check. */
-export async function tick(execute: boolean): Promise<Status> {
+export async function tick(execute: boolean, chainFor: typeof createChain = createChain): Promise<Status> {
   const state = await initialStatus();
   let previous: Status | null = null;
   let configured: Config | null;
@@ -143,7 +143,7 @@ export async function tick(execute: boolean): Promise<Status> {
       state.wallet = config.wallet;
       state.config = { targets: config.targets, rebalanceIntervalSeconds: config.rebalanceIntervalSeconds };
       state.armed = execute;
-      chain = createChain(config);
+      chain = chainFor(config);
       return true;
     },
     reconcile: async () => {
@@ -231,19 +231,35 @@ export async function tick(execute: boolean): Promise<Status> {
 }
 
 export async function monitor(signal: AbortSignal): Promise<void> {
+  let cached: { key: string; chain: ReturnType<typeof createChain> } | undefined;
+  const chainFor: typeof createChain = config => {
+    const key = JSON.stringify(config);
+    if (!cached || cached.key !== key) cached = { key, chain: createChain(config) };
+    return cached.chain;
+  };
   try {
-    // Explicit CLI start clears an older stop before announcing/spawning. A stop
-    // arriving while the background child starts must remain effective here.
-    while (!signal.aborted && !await readJson(STOP_PATH)) {
-      const current = await tick(true);
-      const config = await loadConfig();
-      if (!config) break;
-      const until = Date.now() + config.pollSeconds * 1000;
-      while (!signal.aborted && Date.now() < until && !await readJson(STOP_PATH)) {
-        await delay(Math.min(1000, Math.max(1, until - Date.now())), undefined, { signal }).catch(() => {});
-      }
-      if (current.operation?.status === 'reverted') break;
-    }
+    await driveMonitor({
+      dataDir: DATA, signal,
+      run: () => tick(true, chainFor),
+      read: async () => {
+        try {
+          const [config, cycle, pending, stop] = await Promise.all([
+            loadConfig(), readCycle(), readJson<PendingTransaction>(PENDING_PATH), readJson(STOP_PATH),
+          ]);
+          return { config, cycle: publicCycle(cycle), pending, stopped: stop !== null };
+        } catch (error) {
+          // A failed pre-traversal read must still surface attention. Never
+          // publish parser/provider contents from local configuration or RPC.
+          const current = await readJson<Status>(STATE_PATH).catch(() => null)
+            ?? await initialStatus().catch(() => null);
+          await attentionCondition(current?.wallet ?? null, { kind: 'runtime-failure', phase: 'unknown' }).catch(() => {});
+          if (current) await atomicWriteJson(STATE_PATH, { ...current, armed: false,
+            error: 'Local control or transaction state could not be read; execution stopped.',
+            graph: { node: 'error', trace: ['config', 'error'] } }).catch(() => {});
+          throw error;
+        }
+      },
+    });
   } finally {
     const current = await readJson<Record<string, unknown>>(STATE_PATH) ?? await initialStatus();
     await atomicWriteJson(STATE_PATH, { ...current, armed: false });

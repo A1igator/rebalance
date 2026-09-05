@@ -92,7 +92,7 @@ test('dispatch persists the prepared hash before sending and signs the intended 
     assert.equal(decoded.to?.toLowerCase(), transaction.to.toLowerCase());
     assert.equal(decoded.data, transaction.data);
     assert.equal(decoded.gas, 25_200n);
-    assert.equal(decoded.gasPrice, 2n);
+    assert.equal(decoded.gasPrice, 3n);
     assert.equal(record.gas, decoded.gas.toString());
     assert.equal(record.gasPrice, decoded.gasPrice.toString());
     assert.equal((await recoverTransactionAddress({ serializedTransaction: serializedTransaction as TransactionSerialized })).toLowerCase(), wallet.toLowerCase());
@@ -104,6 +104,37 @@ test('dispatch persists the prepared hash before sending and signs the intended 
   assert.equal(result.hash, keccak256(h.sent[0]!));
   assert.equal(result.status, 'pending');
   assert.equal((await readJson<PendingTransaction>(PENDING_PATH))!.status, 'broadcast');
+});
+
+test('initial legacy fee headroom uses exact ceiling arithmetic including beyond Number precision', async () => {
+  for (const [suggested, expected] of [
+    [1n, 2n], [5n, 6n], [101n, 122n], [9_007_199_254_740_993n, 10_808_639_105_689_192n],
+  ]) {
+    await rm(PENDING_PATH, { force: true });
+    const h = mockedChain();
+    h.rpc.getGasPrice = async () => suggested!;
+    h.rpc.getBalance = async () => 25_200n * expected!;
+    await dispatch(configuration(), h.chain, transaction);
+    assert.equal(h.sent.length, 1);
+    assert.equal(parseTransaction(h.sent[0]!).gasPrice, expected);
+    assert.equal((await readJson<PendingTransaction>(PENDING_PATH))!.gasPrice, expected!.toString());
+  }
+});
+
+test('balance must cover the buffered fee and invalid or overflowing suggestions never dispatch', async () => {
+  const h = mockedChain();
+  h.rpc.getGasPrice = async () => 5n;
+  h.rpc.getBalance = async () => 25_200n * 6n - 1n;
+  await assert.rejects(dispatch(configuration(), h.chain, transaction), /Insufficient native ETH/);
+  h.rpc.getBalance = async () => 25_200n * 6n;
+  await assert.rejects(dispatch(configuration(), h.chain, { ...transaction, value: 1n }), /Insufficient native ETH/);
+  h.rpc.getBalance = async () => 2n ** 256n - 1n;
+  for (const suggestion of [0n, -1n, 2n ** 256n, 2n ** 256n - 1n]) {
+    h.rpc.getGasPrice = async () => suggestion;
+    await assert.rejects(dispatch(configuration(), h.chain, transaction), /invalid gas-price|exceeds uint256/);
+  }
+  assert.equal(h.sent.length, 0);
+  assert.equal(await readJson(PENDING_PATH), null);
 });
 
 test('optional fee provenance validates without invalidating legacy pending records', async () => {
@@ -136,7 +167,7 @@ test('unknown or mismatched send outcomes preserve the original hash and block a
     assert.equal(record!.status, 'unknown');
     assert.equal(record!.hash, keccak256(h.sent[0]!));
     assert.equal(record!.gas, '25200');
-    assert.equal(record!.gasPrice, '2');
+    assert.equal(record!.gasPrice, '3');
     assert.equal(record!.sendFailure, 'unknown');
     await assert.rejects(dispatch(configuration(), h.chain, transaction), /pending transaction/);
     assert.equal(h.sent.length, 1);
@@ -179,7 +210,7 @@ test('recognized rejection diagnostics remain unknown sends, retain fee/hash ide
     assert.equal(record!.sendFailure, example.failure);
     assert.equal(record!.hash, keccak256(h.sent[0]!));
     assert.equal(record!.gas, '25200');
-    assert.equal(record!.gasPrice, '2');
+    assert.equal(record!.gasPrice, '3');
     h.rpc.getTransactionReceipt = async () => { throw new TransactionReceiptNotFoundError({ hash: record!.hash as Hex }); };
     const reconciled = await reconcile(configuration(), h.chain);
     assert.equal(reconciled.blocked, true);
