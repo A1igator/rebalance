@@ -1,15 +1,15 @@
 ---
 name: rebalance
-description: "Initialize and operate the local Rebalance app from one Codex or Claude Code conversation. Use for skill-only startup, user-selected allocations, holdings, monitoring and the view-only chart; not generic repository development."
+description: "Launch and operate the local Rebalance app from one Codex or Claude Code conversation. A bare invocation requests setup and arming together; scoped requests handle allocations, holdings, monitoring or the view-only chart. Not for generic repository development."
 ---
 
 # Rebalance
 
 Use the existing conversation as the app's interactive interface. Translate the user's intent into the local CLI, report public results, and let the local process perform recurring work. Core operation uses the CLI without MCP. Claude Code uses an optional MCP notification channel; Codex uses native Remote and a scheduled follow-up in the same conversation. Neither participates in trading.
 
-## Default invocation initializes the app
+## Default invocation initializes and arms the app
 
-Treat a bare `$rebalance` in Codex, `/rebalance` in Claude Code, or “initialize Rebalance” as a request to perform setup in this conversation. Do the work through tools; do not respond with a command list for the user to run. A narrower request such as status, events, target editing or stop performs only that operation. In particular, notification heartbeats do not run initialization.
+Treat the user's bare `$rebalance` in Codex, `/rebalance` in Claude Code, or “initialize Rebalance” as a full launch request: setup and arming automatic rebalancing under the saved allocation together. The user has chosen this meaning for the entry point; no separate “arm trading” message is needed. Perform the permitted work through tools in this conversation. A narrower request such as setup only, preview, status, events, target editing or stop performs only that operation. Loading the skill for reference or handling a notification heartbeat is not a launch request.
 
 Run from this repository and reuse its existing CLI commands:
 
@@ -19,8 +19,11 @@ Run from this repository and reuse its existing CLI commands:
 4. If the trading runner is already active, use its current public status and leave it running. Otherwise run `check` for a fresh read-only observation, receipt reconciliation and unsigned plan. If the runner lock is held, reread/reuse status; it may be starting or stopping. Report unavailable RPC or unresolved transactions without clearing records or forcing another runner. `check` is read-only onchain but may update local records through normal receipt/cycle reconciliation.
 5. Reuse the chart when GET `/api/status` returns valid Rebalance JSON matching the CLI's public wallet, network and target weights, with a live chart process. A HEAD request or successful HTML response alone does not verify the status endpoint. Otherwise start `chart --background` once and verify its public endpoint becomes available. The command's `starting` response alone is not readiness. Do not kill an unrelated process or take over an occupied port. Open the existing chart tab when available, or open the verified local chart URL.
 6. If notifications were requested in this conversation, reuse or finish the relevant Codex/Claude setup below. Reuse an existing matching heartbeat and preserve any user-paused notification preference; initialization must not create duplicate schedules or silently re-enable stopped notifications. The user completes native phone pairing or required agent consent; preserve honest delivery limits.
+7. For a full launch, the requested final step is `npm run cli -- start --background` under the saved configuration, when the executing agent's policy and tool permissions allow it. Reuse an active runner; do not spawn another while its lock is held or while an earlier start is still resolving. An explicit launch can resume a previously stopped runner through the ordinary start command; never clear stop, pending or cycle records manually. Verify startup with bounded public `status` checks: the background command's `starting` response is only a spawn acknowledgement. Report `armed`, current graph/error and any pending receipt or cooldown separately; an armed process is not proof of a completed trade. Deferred Ledger/Privy adapters remain deferred, and Ledger signing still requires physical confirmation.
 
-Finish with a short setup result: selected network/wallet and allocation, chart availability, notification state, and whether trading is armed. Bare initialization does not arm trades, clear a stop request or reset cycle/pending records. Explicit requests to start automatic rebalancing use the separate operation below, subject to the executing agent's tool permissions.
+User authorization does not override the executing agent's restrictions on financial actions. If those restrictions prevent starting an inactive runner, complete permitted setup and explicitly report that the requested launch is incomplete and trading remains unarmed. If the runner was already active, reuse it and report its actual state without restarting it. Do not claim that setup alone fulfilled a blocked launch request or delegate arming to another agent or schedule to work around the restriction.
+
+Finish with a short launch result: selected network/wallet and allocation, chart availability, notification state, whether trading is armed, and any remaining blocker. Preserve cycle timing and pending records throughout; an explicit setup-only or inspection request must not resume trading.
 
 ## Inspect and operate existing state
 
@@ -53,7 +56,7 @@ Changing the selected symbols replaces the tracked allocation; it does not liqui
 
 For a one-target change, the CLI proportionally redistributes the remainder among the other configured assets. Report the resulting full allocation. If the prior targets cannot be redistributed, request a complete split instead of guessing.
 
-An explicit request to start automatic rebalancing authorizes the local runner's subsequent swaps under the saved configuration. Start it, inspect its reported state, and let it continue without asking the LLM or user to approve each trade. A target edit while the runner is active affects subsequent plans. A request to inspect or configure alone does not start recurring execution. Stopping the runner stops future scheduling; it does not cancel an already broadcast transaction.
+An explicit request to start automatic rebalancing, including the bare full-launch invocation above, authorizes the local runner's subsequent swaps under the saved configuration. Where execution is permitted, start it, inspect its reported state, and let it continue without asking the LLM or user to approve each trade. A target edit while the runner is active affects subsequent plans. A request to inspect or configure alone does not start recurring execution. Stopping the runner stops future scheduling; it does not cancel an already broadcast transaction.
 
 Do not automatically convert native ETH into portfolio holdings. It remains the wallet's gas asset. Report a transaction as confirmed only after a receipt is observed.
 
