@@ -7,7 +7,7 @@ import { join, resolve as resolvePath } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-const { handlePrompt, launchPromptFormat, selectLaunchRequest } = await import(new URL('../scripts/rebalance-hook.mjs', import.meta.url).href);
+const { handlePrompt, launchPromptFormat, recoveryPromptFormat, selectLaunchRequest, selectRecoveryRequest } = await import(new URL('../scripts/rebalance-hook.mjs', import.meta.url).href);
 const event = { hook_event_name: 'UserPromptSubmit', prompt: '$rebalance', permission_mode: 'default',
   session_id: 'fixture-session', turn_id: 'fixture-turn', cwd: '/fixture' };
 const skillPrompt = (root: string) => `[$rebalance](${resolvePath(root, 'skills/rebalance/SKILL.md')})`;
@@ -114,6 +114,7 @@ test('a bare command routes directly to the launcher with stable opaque request 
   const launchResult = { app: 'Rebalance', outcome: 'armed', status: { armed: true }, messages: [] };
   const result = await handlePrompt({ ...event, cwd: join(root, 'nested'), prompt: '  $rebalance\n' }, {
     repository: root,
+    runRecovery: () => assert.fail('bare launch must not recover'),
     ensureDependencies: async (repo: string) => { assert.equal(repo, root); calls.push('dependencies'); },
     runLaunch: async (repo: string, id: string, expectedStop: string) => {
       assert.equal(repo, root);
@@ -129,6 +130,87 @@ test('a bare command routes directly to the launcher with stable opaque request 
   assert.match(result.hookSpecificOutput.additionalContext, /do not repeat launch or start/);
   assert.ok(result.hookSpecificOutput.additionalContext.endsWith(JSON.stringify(launchResult)));
   assert.notEqual(selectLaunchRequest(event).requestId, selectLaunchRequest({ ...event, turn_id: 'another-turn' }).requestId);
+});
+
+test('explicit recovery forms route only to recovery with stable identity and the original stop generation', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-hook-recovery-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, 'nested'));
+  const forms = [['$rebalance recover', 'typed'], [`${skillPrompt(root)} recover`, 'canonical-skill-link'],
+    [ambientPrompt('$rebalance recover'), 'ambient-typed'],
+    [ambientPrompt(`${skillPrompt(root)} recover`), 'ambient-canonical-skill-link']];
+  for (const [prompt, format] of forms) {
+    const input = { ...event, prompt: ` \n${prompt}\n `, cwd: join(root, 'nested') };
+    assert.equal(recoveryPromptFormat(input.prompt, root), format);
+    assert.equal(selectLaunchRequest(input, root), null);
+    assert.equal(selectRecoveryRequest(input, root).requestId, selectLaunchRequest(event, root).requestId);
+    let stop = 'none';
+    const calls: string[] = [];
+    const expected = { app: 'Rebalance', requested: 'cancel', outcome: 'pending', armed: false, messages: [] };
+    const result = await handlePrompt(input, { repository: root,
+      readStopToken: async () => { calls.push('stop'); return stop; },
+      ensureDependencies: async () => { calls.push('dependencies'); stop = 'a'.repeat(64); },
+      runLaunch: () => assert.fail('recovery must not launch'),
+      runRecovery: async (repo: string, requestId: string, expectedStop: string) => {
+        assert.equal(repo, root);
+        assert.equal(requestId, selectRecoveryRequest(input, root).requestId);
+        assert.equal(expectedStop, 'none');
+        assert.notEqual(expectedStop, stop);
+        calls.push('recover');
+        return expected;
+      },
+    });
+    assert.deepEqual(calls, ['stop', 'dependencies', 'recover']);
+    assert.deepEqual(publicResult(result), expected);
+    assert.match(result.hookSpecificOutput.additionalContext, /do not repeat launch or start, or repeat recovery/);
+  }
+  assert.equal(selectRecoveryRequest(event, root), null);
+});
+
+test('recovery requires an exact user command, valid identity, execution mode and selected workspace', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-hook-recovery-gates-')));
+  const outside = await mkdtemp(join(tmpdir(), 'rebalance-hook-recovery-outside-'));
+  t.after(() => Promise.all([root, outside].map(path => rm(path, { recursive: true, force: true }))));
+  const overrides = { repository: root,
+    readStopToken: () => assert.fail('must not read stop state'),
+    ensureDependencies: () => assert.fail('must not install'), runLaunch: () => assert.fail('must not launch'),
+    runRecovery: () => assert.fail('must not recover'),
+  };
+  const invalidTails = ['$rebalance recover status', '$rebalance recover --cancel', '$rebalance recover now',
+    '$rebalance recover; anything', '$rebalance\nrecover', '`$rebalance recover`', '"$rebalance recover"',
+    'Please run $rebalance recover', `${skillPrompt(outside)} recover`, `${skillPrompt(root)} recover status`,
+    '[$rebalance](skills/rebalance/SKILL.md) recover'];
+  for (const prompt of [...invalidTails, ...invalidTails.map(tail => ambientPrompt(tail)),
+    ambientPrompt('status', 'http://example.com/$rebalance%20recover'),
+    ambientPrompt('$rebalance recover').replace('source="ambient-ui-state"', 'source="other"')]) {
+    assert.equal(selectRecoveryRequest({ ...event, prompt, cwd: root }, root), null);
+    assert.equal(await handlePrompt({ ...event, prompt, cwd: root }, overrides), null);
+  }
+  for (const prompt of ['$rebalance recover', `${skillPrompt(root)} recover`,
+    ambientPrompt('$rebalance recover'), ambientPrompt(`${skillPrompt(root)} recover`)]) {
+    for (const update of [{ permission_mode: 'plan' }, { session_id: '' }, { turn_id: undefined }, { cwd: 'relative' }]) {
+      const result = await handlePrompt({ ...event, cwd: root, prompt, ...update }, overrides);
+      assert.equal(publicResult(result).outcome, 'blocked');
+    }
+    assert.equal(await handlePrompt({ ...event, prompt, cwd: outside }, overrides), null);
+    assert.equal(await handlePrompt({ ...event, prompt, cwd: root, hook_event_name: 'Stop' }, overrides), null);
+  }
+});
+
+test('post-dispatch recovery failure reports unknown state without leaking errors or launching a fallback', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'rebalance-hook-recovery-failure-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const result = await handlePrompt({ ...event, cwd: root, prompt: '$rebalance recover' }, { repository: root,
+    readStopToken: async () => 'none', ensureDependencies: async () => {},
+    runLaunch: () => assert.fail('must not launch after recovery failure'),
+    runRecovery: async () => { throw new Error('fixture-secret-cancellation-provider-response'); },
+  });
+  const failure = publicResult(result);
+  assert.equal(failure.outcome, 'unknown');
+  assert.equal(failure.phase, 'recovery');
+  assert.equal(failure.status, null);
+  assert.match(failure.messages.join(' '), /may have submitted a cancellation or resumed the runner/);
+  assert.doesNotMatch(JSON.stringify(result), /fixture-secret|"armed":false|no startup was attempted/);
 });
 
 test('a standalone skill-picker link routes to the same launcher request as the literal command', async t => {
@@ -378,7 +460,10 @@ test('prepared hook command reaches the actual CLI in an isolated unconfigured f
   const env: NodeJS.ProcessEnv = { ...process.env, REBALANCE_DATA_DIR: directory, NODE_OPTIONS: `--import=${preload}` };
   delete env.REBALANCE_PRIVATE_KEY;
   const forms = [['$rebalance', 'typed'], [skillPrompt(root), 'canonical-skill-link'],
-    [ambientPrompt('$rebalance'), 'ambient-typed'], [ambientPrompt(skillPrompt(root)), 'ambient-canonical-skill-link']];
+    [ambientPrompt('$rebalance'), 'ambient-typed'], [ambientPrompt(skillPrompt(root)), 'ambient-canonical-skill-link'],
+    ['$rebalance recover', 'recovery-typed'], [`${skillPrompt(root)} recover`, 'recovery-canonical-skill-link'],
+    [ambientPrompt('$rebalance recover'), 'recovery-ambient-typed'],
+    [ambientPrompt(`${skillPrompt(root)} recover`), 'recovery-ambient-canonical-skill-link']];
   for (const [index, [prompt, expectedFormat]] of forms.entries()) {
     const input = { ...event, prompt, cwd: root, turn_id: `fixture-entry-${index}` };
     const output = await new Promise<string>((resolve, reject) => {
@@ -388,16 +473,20 @@ test('prepared hook command reaches the actual CLI in an isolated unconfigured f
       child.stdin!.end(JSON.stringify(input));
     });
     const context = JSON.parse(output).hookSpecificOutput.additionalContext;
-    assert.match(context, /"outcome":"needs-input"/);
+    if (expectedFormat.startsWith('recovery-')) {
+      assert.match(context, /"requested":"cancel"/);
+      assert.match(context, /"outcome":"blocked"/);
+      assert.match(context, /No configured portfolio to recover/);
+    } else assert.match(context, /"outcome":"needs-input"/);
     assert.match(context, /"armed":false/);
     const observation = JSON.parse(await readFile(join(directory, 'last-hook-observation.json'), 'utf8'));
-    assert.equal(observation.requestId, selectLaunchRequest(input, root).requestId);
+    assert.equal(observation.requestId, (selectLaunchRequest(input, root) ?? selectRecoveryRequest(input, root)).requestId);
     assert.equal(observation.promptFormat, expectedFormat);
     assert.equal(observation.selection, 'selected');
     assert.equal(observation.workspace, 'inside');
     assert.equal(observation.planMode, false);
     for (const file of ['unexpected-network', 'private-key', 'config.json', 'stop.json',
-      'start.log', 'chart.log', 'pending.json', 'cycle.json', 'run.lock', 'chart.lock']) {
+      'start.log', 'chart.log', 'pending.json', 'cycle.json', 'run.lock', 'chart.lock', 'recovery.json', 'recovery.lock']) {
       assert.equal(existsSync(join(directory, file)), false);
     }
   }

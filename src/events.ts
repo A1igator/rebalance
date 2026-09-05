@@ -5,9 +5,25 @@ import { acquireLock, atomicWriteJson, readJson } from './storage.js';
 
 const EVENTS_PATH = resolve(DATA, 'events.json');
 const CONDITIONS_PATH = resolve(DATA, 'notification-state.json');
+const ATTENTION_PATH = resolve(DATA, 'attention-state.json');
 export type RebalanceEvent = {
-  id: string; type: 'ledger-rebalance-needed' | 'rebalance-completed';
+  id: string; type: 'ledger-rebalance-needed' | 'rebalance-completed' | 'rebalance-attention';
   createdAt: string; message: string; hash?: string; acknowledgedAt?: string;
+};
+export type FailurePhase = 'config' | 'reconcile' | 'observe' | 'plan' | 'interval' | 'quote' | 'execute' | 'publish' | 'unknown';
+export type RebalanceAttention = { kind: 'unresolved' | 'reverted'; hash?: string }
+  | { kind: 'runtime-failure'; phase: FailurePhase };
+
+const FAILURE_MESSAGES: Record<FailurePhase, string> = {
+  config: 'The local configuration could not be loaded.',
+  reconcile: 'The previous transaction could not be reconciled.',
+  observe: 'Fresh portfolio holdings or prices could not be read.',
+  plan: 'The rebalance plan could not be calculated.',
+  interval: 'The saved rebalance timing could not be read.',
+  quote: 'A usable swap quote could not be obtained.',
+  execute: 'Transaction preparation or execution failed.',
+  publish: 'The local runtime state could not be saved.',
+  unknown: 'A network or local runtime operation failed.',
 };
 
 async function edit<T>(action: () => Promise<T>): Promise<T> {
@@ -49,6 +65,44 @@ export async function ledgerCondition(wallet: string, targets: Record<string, nu
     await atomicWriteJson(CONDITIONS_PATH, { key, event });
     await publishEvent(event);
   } else await atomicWriteJson(CONDITIONS_PATH, { key: null });
+}
+
+/** Retain one attention transition, including across acknowledgement and restarts. */
+export async function attentionCondition(wallet: string | null, condition: RebalanceAttention | null): Promise<void> {
+  if (wallet !== null && !/^0x[0-9a-fA-F]{40}$/.test(wallet)) throw new Error('Invalid notification wallet');
+  let message: string | undefined;
+  let hash: string | undefined;
+  let classification: string | undefined;
+  if (condition?.kind === 'runtime-failure') {
+    if (!Object.hasOwn(FAILURE_MESSAGES, condition.phase)) throw new Error('Invalid notification failure phase');
+    classification = `runtime-failure:${condition.phase}`;
+    message = `Rebalance needs attention: ${FAILURE_MESSAGES[condition.phase]} No completion is confirmed by this alert. Review the current agent status before recovery.`;
+  } else if (condition) {
+    if (condition.kind !== 'unresolved' && condition.kind !== 'reverted') throw new Error('Invalid notification condition');
+    if (condition.hash !== undefined && !/^0x[0-9a-fA-F]{64}$/.test(condition.hash)) throw new Error('Invalid notification transaction hash');
+    hash = condition.hash?.toLowerCase();
+    classification = condition.kind;
+    message = condition.kind === 'unresolved'
+      ? 'Rebalance needs attention: a transaction has an unknown outcome. Further trades are paused while its saved transaction is reconciled. Review the agent status; do not retry the swap.'
+      : 'Rebalance needs attention: a transaction reverted. Further trades are paused; review the retained transaction through the agent.';
+  }
+  const key = condition ? createHash('sha256').update(JSON.stringify([wallet?.toLowerCase() ?? null, classification, hash ?? null])).digest('hex') : null;
+  const release = await acquireLock(DATA, 'attention.lock');
+  try {
+    const previous = await readJson<{ key: string | null; event?: RebalanceEvent }>(ATTENTION_PATH);
+    // Recover a condition/queue-write crash even if recovery cleared the current
+    // failure before the next tick. Existing acknowledgements remain effective.
+    if (previous?.event) await publishEvent(previous.event);
+    if (key === previous?.key) return;
+    if (!key) {
+      if (previous) await atomicWriteJson(ATTENTION_PATH, { key: null });
+      return;
+    }
+    const event: RebalanceEvent = { id: randomUUID(), type: 'rebalance-attention',
+      createdAt: new Date().toISOString(), message: message!, ...(hash ? { hash } : {}) };
+    await atomicWriteJson(ATTENTION_PATH, { key, event });
+    await publishEvent(event);
+  } finally { await release(); }
 }
 
 export async function rebalanceCompleted(hash: string): Promise<void> {

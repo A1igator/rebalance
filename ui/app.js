@@ -32,9 +32,10 @@
     const targets = rows(Object.entries(snapshot?.config?.targets || {}).map(([id, weight]) => ({ id, weight })));
     const funded = positive(portfolio?.totalUsdE8) && holdings.length > 0;
     const failed = disconnected || Boolean(snapshot?.error);
+    const receiptWait = { pending: "Waiting for receipt", unresolved: "Transaction unresolved", confirming: "Confirming transaction" }[snapshot?.operation?.status];
     const entries = funded ? holdings : targets;
     const total = entries.reduce((sum, row) => sum + row.weight, 0);
-    const state = funded ? failed ? "Last known holdings" : "Current holdings" : targets.length ? "Targets" : "No allocation";
+    const state = funded ? failed || receiptWait ? "Last known holdings" : "Current holdings" : targets.length ? "Targets" : "No allocation";
     let note = "Set targets through your agent";
     if (funded) {
       const observed = new Date(snapshot.updatedAt);
@@ -42,6 +43,7 @@
     } else if (targets.length) {
       note = portfolio ? positions.some((p) => positive(p.balance)) ? "Holdings below precision" : "Wallet empty" : "Holdings not checked";
     }
+    if (receiptWait) note = receiptWait;
     if (failed) note = "Update unavailable";
     byId("state").textContent = state;
     byId("note").textContent = note;

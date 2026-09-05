@@ -17,6 +17,7 @@ import { serve } from './server.js';
 import { acquireLock, atomicWriteJson, readJson, stringifyJson, type PendingTransaction } from './storage.js';
 import { validatePending } from './transactions.js';
 import { launch } from './launch.js';
+import { recover } from './recovery.js';
 
 const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
   wallet create                        Create/reuse a local wallet; public address only
@@ -30,6 +31,8 @@ const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
   check                                Fresh read/plan/quote; never sign
   launch [--setup-only]                 Prepare/reuse chart and arm/reuse the runner
     [--targets <ASSET=percent,...>]      Initial allocation only; preserve saved targets
+  recover                              Read-only assessment of a pending transaction
+  recover --cancel                     Explicit same-nonce self-cancellation and verified recovery
   start [--background]                 Arm deterministic automatic rebalancing
   stop                                 Stop before the next dispatch
   chart [--background]                 Serve the read-only chart at 127.0.0.1:4663
@@ -50,6 +53,7 @@ const { values, positionals: args } = parseArgs({ allowPositionals: true, option
   'resume-start': { type: 'boolean', default: false },
   'setup-only': { type: 'boolean', default: false }, 'request-id': { type: 'string' },
   'expected-stop': { type: 'string' },
+  cancel: { type: 'boolean', default: false },
 } });
 const print = (value: unknown) => process.stdout.write(stringifyJson(value));
 const requiredConfig = async () => { const c = await loadConfig(); if (!c) throw new Error('Configure explicit targets through the agent first'); return c; };
@@ -100,10 +104,10 @@ async function main() {
   const command = args[0];
   if (!command || command === 'help' || values.help) { process.stdout.write(HELP); return; }
   if (values['resume-start'] && (command !== 'start' || values.background)) throw new Error('Invalid background-start continuation');
-  if ((values['setup-only'] || values['request-id'] !== undefined) && command !== 'launch') {
-    throw new Error('--setup-only and --request-id apply only to launch');
-  }
-  if (values['expected-stop'] !== undefined && (!['start', 'launch'].includes(command) || values['resume-start'] ||
+  if (values['setup-only'] && command !== 'launch') throw new Error('--setup-only applies only to launch');
+  if (values['request-id'] !== undefined && !['launch', 'recover'].includes(command)) throw new Error('--request-id applies only to launch or recover');
+  if (values.cancel && command !== 'recover') throw new Error('--cancel applies only to recover');
+  if (values['expected-stop'] !== undefined && (!['start', 'launch', 'recover'].includes(command) || values['resume-start'] ||
       !/^(none|[a-f0-9]{64})$/.test(values['expected-stop']))) throw new Error('Invalid conditional-start token');
   if (values.background) {
     if (!['start', 'chart'].includes(command)) throw new Error('--background applies only to start or chart');
@@ -123,6 +127,12 @@ async function main() {
     case 'launch': {
       const result = await launch({ setupOnly: values['setup-only'], targets: values.targets,
         requestId: values['request-id'], expectedStop: values['expected-stop'] });
+      print(result);
+      if (result.outcome === 'blocked') process.exitCode = 1;
+      return;
+    }
+    case 'recover': {
+      const result = await recover({ cancel: values.cancel, requestId: values['request-id'], expectedStop: values['expected-stop'] });
       print(result);
       if (result.outcome === 'blocked') process.exitCode = 1;
       return;

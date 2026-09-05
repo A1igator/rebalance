@@ -98,8 +98,17 @@ test('real MCP stdio sessions deliver queued events, expose only acknowledgement
   assert.deepEqual(resumed.received.map(eventId), [second.id]);
   await resumed.client.callTool({ name: 'acknowledge_event', arguments: { id: second.id } });
   assert.deepEqual(await events(), []);
+  const attention = { id: 'unresolved-transaction-three', type: 'rebalance-attention' as const,
+    createdAt: '2026-09-04T20:10:00.000Z', message: 'A recorded transaction needs attention; do not retry the swap.',
+    hash: `0x${'3'.repeat(64)}` };
+  await publishEvent(attention);
+  await waitFor(() => resumed.received.length === 2, 'new attention events should use the existing notification channel');
+  assert.deepEqual(resumed.received[1]!.params, { content: attention.message,
+    meta: { event_id: attention.id, event_type: attention.type, created_at: attention.createdAt, transaction_hash: attention.hash } });
+  assert.deepEqual((await events()).map(event => event.id), [attention.id]);
+  await resumed.client.callTool({ name: 'acknowledge_event', arguments: { id: attention.id } });
   const saved = JSON.parse(await readFile(join(directory, 'events.json'), 'utf8')) as { id: string; acknowledgedAt?: string }[];
-  assert.equal(saved.length, 2, 'acknowledgement must preserve durable history');
+  assert.equal(saved.length, 3, 'acknowledgement must preserve durable history');
   assert.ok(saved.every(event => typeof event.acknowledgedAt === 'string'));
   assert.deepEqual(resumed.errors, []);
   await resumed.client.close();

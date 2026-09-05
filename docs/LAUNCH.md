@@ -63,3 +63,13 @@ Handled hook failures return structured public context with hook-process exit co
 The hook does not create Codex notification schedules, pair Remote, open an authenticated phone session or implement a custom bridge. The existing five-minute notification heartbeat remains independent. The agent can display the verified chart and report public results after dispatch. Claude Code retains the shared skill/launcher; this project hook definition targets Codex, and no Claude hook is installed by this change.
 
 The current assistant prepares/tests this integration but does not trust the hook, invoke the funded launcher or submit trades. Hardware/Privy execution remains deferred. Tests use isolated local fixtures and stubbed operations, not sponsor or mainnet execution evidence.
+
+## User-issued launch and explicit recovery
+
+On September 5, a later user-issued literal `$rebalance` produced the native structured launch result with `outcome=armed`. Read-only local status confirmed the active runner; a subsequent RPC check verified a successful Apple swap receipt. The next transaction is unresolved and prevents further stock purchases. This establishes the actual literal command path, not every native picker/framing path or a completed rebalance. Earlier discovery and failed-entry checks above remain historical evidence.
+
+The exact **`$rebalance recover`**, or the canonical project skill reference followed by ` recover`, now has a separate deterministic route to `recover --cancel`. The same exact ambient framing, project/identity checks, Plan barrier and pre-bootstrap stop capture apply. Bare launch never cancels. Other scoped/natural-language/notification prompts remain ignored. Diagnostic prompt formats for this route start with `recovery-`; observations still contain no prompt text or secrets.
+
+Read [the recovery action and limits](RECOVERY.md) before using it. This explicit user operation can pay gas to cancel an uncertain send at its original nonce, and resumes only a previously active runner after verified resolution with no newer stop. It journals request identities and both transaction hashes; an uncertain send or resume is never blindly retried. A lost subprocess result reports `unknown`. The conversation reports the structured result and does not invoke recovery again. Read-only CLI `recover` assesses without these effects.
+
+The native hook definition and trust settings are unchanged. Preparation and isolated tests do not establish that a funded cancellation was submitted or that trading resumed; only a subsequent user-issued command can produce that evidence. See [prompt 025](prompts/025-stalled-rebalance-recovery.md).

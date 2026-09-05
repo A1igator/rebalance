@@ -17,7 +17,7 @@ delete process.env.REBALANCE_PRIVATE_KEY;
 const { CONFIG_PATH, STATE_PATH, PENDING_PATH, LAST_TRANSACTION_PATH, validateConfig } = await import('../src/config.js');
 const { initialStatus, monitor, status, tick, STOP_PATH, CYCLE_PATH,
   rebalanceInterval, beginRebalanceCycle, finishRebalanceCycle, ACTIVE_CYCLE_SECONDS } = await import('../src/runtime.js');
-const { events } = await import('../src/events.js');
+const { events, acknowledgeEvent } = await import('../src/events.js');
 const wallet = '0x0000000000000000000000000000000000000001';
 const hash = `0x${'ab'.repeat(32)}`;
 const targets = { USDG: 2000, TSLA: 2000, AAPL: 2000, NVDA: 2000, AMZN: 2000 };
@@ -92,7 +92,10 @@ test('a failed fresh observation retains the last portfolio and cannot turn a pr
   assert.equal(result.updatedAt, observedAt);
   assert.deepEqual(result.portfolio, previous.portfolio);
   assert.equal(result.proposal, undefined);
-  assert.deepEqual(await events(), []);
+  const queued = await events();
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0]!.type, 'rebalance-attention');
+  assert.match(queued[0]!.message, /holdings or prices could not be read/);
 });
 
 test('recovery clears an unscoped cached operation instead of reusing it for a later completion', async t => {
@@ -102,8 +105,86 @@ test('recovery clears an unscoped cached operation instead of reusing it for a l
   mockRpc(t, 1);
   const result = await tick(false);
   assert.equal(result.operation, null);
-  assert.deepEqual(await events(), []);
+  assert.deepEqual((await events()).map(event => event.type), ['rebalance-attention']);
   assert.deepEqual(await readJson(LAST_TRANSACTION_PATH), legacy);
+});
+
+test('an unresolved receipt emits one attention alert before observation and preserves its transaction and cycle', async t => {
+  const previous = await saved({ proposal: null, operation: { status: 'confirmed', kind: 'swap', hash } });
+  const pending: PendingTransaction = { chainId: 4663, wallet, hash, nonce: 1,
+    kind: 'swap', createdAt: observedAt, status: 'unknown' };
+  await atomicWriteJson(PENDING_PATH, pending);
+  await beginRebalanceCycle(config);
+  const cycle = await readJson(CYCLE_PATH);
+  const requests = mockRpc(t);
+  const result = await tick(false);
+  assert.equal(result.operation?.status, 'unresolved');
+  assert.equal(result.error, null);
+  assert.equal(result.updatedAt, observedAt);
+  assert.deepEqual(result.portfolio, previous.portfolio);
+  assert.equal(result.proposal, undefined);
+  assert.deepEqual(requests, ['eth_chainId', 'eth_getTransactionReceipt']);
+  const queued = await events();
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0]!.type, 'rebalance-attention');
+  assert.equal(queued[0]!.hash, hash);
+  assert.doesNotMatch(queued[0]!.message, /Rebalance completed/);
+  await acknowledgeEvent(queued[0]!.id);
+  await tick(false);
+  assert.deepEqual(await events(), []);
+  assert.deepEqual(await readJson(PENDING_PATH), pending);
+  assert.deepEqual(await readJson(CYCLE_PATH), cycle);
+});
+
+test('runtime failure alerts omit provider text, stop repeating after acknowledgement and reset on a healthy traversal', async () => {
+  const script = `
+    import assert from 'node:assert/strict';
+    import { readFile } from 'node:fs/promises';
+    import { mock } from 'node:test';
+    globalThis.fetch = () => { throw new Error('This fixture cannot use a network'); };
+    let failing = true;
+    const secret = 'fixture-secret-provider-request';
+    const { evaluatePortfolio } = await import(process.argv[4]);
+    const targets = { USDG: 2000, TSLA: 2000, AAPL: 2000, NVDA: 2000, AMZN: 2000 };
+    const portfolio = evaluatePortfolio(Object.keys(targets).map(id => ({
+      id, symbol: id, decimals: 6, balance: 1000000n, priceUsdE8: 100000000n, targetBps: 2000,
+    })));
+    mock.module(process.argv[1], { namedExports: { createChain: () => ({
+      snapshot: async () => {
+        if (failing) throw new Error(secret);
+        return { portfolio, nativeBalance: 0n, blockNumber: 1n, valuationNote: 'Local fixture' };
+      },
+      quote: async () => { throw new Error('Balanced fixture cannot quote'); },
+      transaction: async () => { throw new Error('Fixture cannot prepare transactions'); },
+    }) } });
+    const runtime = await import(process.argv[2]);
+    const notifications = await import(process.argv[3]);
+    await runtime.tick(false);
+    const first = (await notifications.events())[0];
+    assert.equal(first.type, 'rebalance-attention');
+    assert.doesNotMatch(first.message, /fixture-secret/);
+    await notifications.acknowledgeEvent(first.id);
+    await runtime.tick(false);
+    assert.deepEqual(await notifications.events(), []);
+    failing = false;
+    const healthy = await runtime.tick(false);
+    assert.equal(healthy.error, null);
+    assert.equal(healthy.proposal, null);
+    assert.deepEqual(await notifications.events(), [], 'healthy observation alone is not a completed trade');
+    failing = true;
+    await runtime.tick(false);
+    const repeated = await notifications.events();
+    assert.equal(repeated.length, 1);
+    assert.notEqual(repeated[0].id, first.id);
+    assert.doesNotMatch(await readFile(process.argv[5], 'utf8'), /fixture-secret/);
+    process.stdout.write(JSON.stringify({ outcome: 'attention-transition-verified' }));
+  `;
+  const result = await promisify(execFile)(process.execPath,
+    ['--experimental-test-module-mocks', '--import', 'tsx', '--input-type=module', '-e', script, '--',
+      ...['chain', 'runtime', 'events', 'core'].map(name => new URL(`../src/${name}.ts`, import.meta.url).href),
+      join(directory, 'events.json')],
+    { env: { ...process.env, REBALANCE_DATA_DIR: directory }, timeout: 10_000 });
+  assert.deepEqual(JSON.parse(result.stdout), { outcome: 'attention-transition-verified' });
 });
 
 test('status reflects current targets without an RPC refresh and discards another wallet’s holdings', async t => {

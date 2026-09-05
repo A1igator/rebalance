@@ -3,7 +3,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createChain, type RouteQuote } from './chain.js';
 import { DATA, STATE_PATH, loadConfig, type Config } from './config.js';
 import { planTrade, type Portfolio, type TradePlan } from './core.js';
-import { ledgerCondition, rebalanceCompleted } from './events.js';
+import { attentionCondition, ledgerCondition, rebalanceCompleted, type FailurePhase, type RebalanceAttention } from './events.js';
 import { runGraph, type GraphState } from './graph.js';
 import { atomicWriteJson, readJson } from './storage.js';
 import { dispatch, reconcile, type Operation } from './transactions.js';
@@ -141,11 +141,31 @@ function publicError(error: unknown): string {
   return 'A network or local operation failed. Execution is paused; check connectivity and the agent status.';
 }
 
+function runtimeAttention(state: Status): RebalanceAttention | null {
+  if (state.error) {
+    const node = state.graph.trace.filter(node => node !== 'error').at(-1);
+    const phase: FailurePhase = node && ['config', 'reconcile', 'observe', 'plan', 'interval', 'quote', 'execute'].includes(node)
+      ? node as FailurePhase : 'unknown';
+    return { kind: 'runtime-failure', phase };
+  }
+  if (state.operation?.status === 'unresolved' || state.operation?.status === 'reverted') {
+    return { kind: state.operation.status, ...(state.operation.hash ? { hash: state.operation.hash } : {}) };
+  }
+  return null;
+}
+
 /** Caller holds the single-run lock, including for an observation-only check. */
 export async function tick(execute: boolean): Promise<Status> {
   const state = await initialStatus();
-  const previous = await readJson<Status>(STATE_PATH);
-  const configured = await loadConfig();
+  let previous: Status | null = null;
+  let configured: Config | null;
+  try {
+    previous = await readJson<Status>(STATE_PATH);
+    configured = await loadConfig();
+  } catch (error) {
+    await attentionCondition(state.wallet ?? previous?.wallet ?? null, { kind: 'runtime-failure', phase: 'config' }).catch(() => {});
+    throw error;
+  }
   if (configured && previous?.wallet?.toLowerCase() === configured.wallet.toLowerCase()) {
     // Keep the last observation visible while waiting for a receipt or a market
     // to reopen. Its original timestamp remains the chart's freshness signal.
@@ -227,8 +247,11 @@ export async function tick(execute: boolean): Promise<Status> {
     state.error = publicError(error);
     await atomicWriteJson(STATE_PATH, state);
   });
-  if (!state.error && configured && state.portfolio && state.proposal !== undefined) {
-    try {
+  try {
+    // Receipt barriers happen before observe/plan. They still need a durable
+    // alert; retained holdings or an old receipt never establish completion.
+    await attentionCondition(state.wallet, runtimeAttention(state));
+    if (!state.error && configured && state.portfolio && state.proposal !== undefined) {
       if (configured.mode === 'ledger') await ledgerCondition(configured.wallet, configured.targets, state.proposal !== null);
       const total = state.portfolio.totalUsdE8;
       const withinThreshold = total > 0n && state.portfolio.positions.every(position => {
@@ -238,8 +261,8 @@ export async function tick(execute: boolean): Promise<Status> {
       if (!state.proposal && withinThreshold && state.operation?.status === 'confirmed' && state.operation.kind === 'swap' && state.operation.hash) {
         await rebalanceCompleted(state.operation.hash);
       }
-    } catch { state.error = 'Notification queue unavailable; transaction state was retained.'; await atomicWriteJson(STATE_PATH, state); }
-  }
+    }
+  } catch { state.error = 'Notification queue unavailable; transaction state was retained.'; await atomicWriteJson(STATE_PATH, state); }
   return state;
 }
 

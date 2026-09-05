@@ -15,10 +15,10 @@ function barePromptFormat(prompt, root) {
 }
 
 /** Match the entire user request; browser metadata never supplies command authority. */
-export function launchPromptFormat(value, root = repository) {
+function promptFormat(value, root, match) {
   if (typeof value !== 'string') return null;
   const prompt = value.trim();
-  const direct = barePromptFormat(prompt, root);
+  const direct = match(prompt, root);
   if (direct) return direct;
   const lines = prompt.replace(/\r\n/g, '\n').split('\n');
   if (lines[0] !== '<in-app-browser-context source="ambient-ui-state">' ||
@@ -29,20 +29,39 @@ export function launchPromptFormat(value, root = repository) {
       lines[5] !== '</in-app-browser-context>') return null;
   // Only this framing is recognized. Do not search for or recursively unwrap commands.
   const request = /^(?:[ \t]*\n)*## My request:\n([\s\S]*)$/.exec(lines.slice(6).join('\n'));
-  const form = request && barePromptFormat(request[1].trim(), root);
+  const form = request && match(request[1].trim(), root);
   return form ? `ambient-${form}` : null;
+}
+
+export function launchPromptFormat(value, root = repository) {
+  return promptFormat(value, root, barePromptFormat);
+}
+
+export function recoveryPromptFormat(value, root = repository) {
+  return promptFormat(value, root, (prompt, repo) => {
+    if (!prompt.endsWith(' recover')) return null;
+    return barePromptFormat(prompt.slice(0, -8), repo);
+  });
 }
 
 /** Prompt data never becomes a command. Accept the typed command or this project's picker reference. */
 export function selectLaunchRequest(input, root = repository) {
+  return selectRequest(input, root, launchPromptFormat, 'launch');
+}
+
+export function selectRecoveryRequest(input, root = repository) {
+  return selectRequest(input, root, recoveryPromptFormat, 'recovery');
+}
+
+function selectRequest(input, root, format, operation) {
   if (!input || input.hook_event_name !== 'UserPromptSubmit' ||
       typeof input.prompt !== 'string') return null;
-  if (!launchPromptFormat(input.prompt, root)) return null;
-  if (input.permission_mode === 'plan') return { blocked: 'Rebalance launch was not run in Plan mode.' };
+  if (!format(input.prompt, root)) return null;
+  if (input.permission_mode === 'plan') return { blocked: `Rebalance ${operation} was not run in Plan mode.` };
   if (typeof input.cwd !== 'string' || !isAbsolute(input.cwd) ||
       typeof input.session_id !== 'string' || !input.session_id ||
       typeof input.turn_id !== 'string' || !input.turn_id) {
-    return { blocked: 'Rebalance launch needs a project directory and stable session/turn identity; nothing was started.' };
+    return { blocked: `Rebalance ${operation} needs a project directory and stable session/turn identity; nothing was started.` };
   }
   return { cwd: input.cwd, requestId: createHash('sha256')
     .update(JSON.stringify([input.session_id, input.turn_id])).digest('hex') };
@@ -53,7 +72,7 @@ export async function recordHookObservation(input, root = repository) {
   let temporary;
   try {
     const prompt = typeof input?.prompt === 'string' ? input.prompt.trim() : null;
-    const selected = selectLaunchRequest(input, root);
+    const selected = selectLaunchRequest(input, root) ?? selectRecoveryRequest(input, root);
     const hasIdentity = typeof input?.session_id === 'string' && input.session_id &&
       typeof input?.turn_id === 'string' && input.turn_id;
     const observation = {
@@ -63,6 +82,7 @@ export async function recordHookObservation(input, root = repository) {
         .update(JSON.stringify([input.session_id, input.turn_id])).digest('hex') : null,
       event: input?.hook_event_name === 'UserPromptSubmit' ? 'UserPromptSubmit' : 'other',
       promptFormat: launchPromptFormat(input?.prompt, root) ??
+        (recoveryPromptFormat(input?.prompt, root) ? `recovery-${recoveryPromptFormat(input.prompt, root)}` : null) ??
         (prompt === null ? 'missing' : prompt.includes('$rebalance') ? 'other-with-command' : 'other'),
       promptLength: typeof input?.prompt === 'string' ? input.prompt.length : null,
       selection: selected?.blocked ? 'blocked' : selected ? 'selected' : 'ignored',
@@ -91,7 +111,7 @@ export function hookReply(result) {
     hookSpecificOutput: {
       hookEventName: 'UserPromptSubmit',
       additionalContext: 'The deterministic Rebalance command handler already handled this invocation. '
-        + 'Report the public result below; do not repeat launch or start. An outcome is not a trade receipt.\n'
+        + 'Report the public result below; do not repeat launch or start, or repeat recovery. An outcome is not a trade receipt.\n'
         + JSON.stringify(result),
     },
   };
@@ -104,10 +124,11 @@ function hookFailure(phase) {
     'stop-state': 'The Rebalance hook could not read its saved stop state; no startup was attempted. Preserve local records for recovery.',
     dependencies: 'The Rebalance hook could not prepare its locked dependencies; no startup was attempted. Check the local runtime and dependencies; Node.js 24 or later is required.',
     launch: 'The Rebalance launcher may have started the runner, but its result could not be verified. Current trading state is unknown. Inspect public status; do not repeat launch or start.',
+    recovery: 'The Rebalance recovery command may have submitted a cancellation or resumed the runner, but its result could not be verified. Inspect public status and read-only recovery; do not repeat cancellation or start.',
   };
   // These fixed messages are deliberately independent of caught errors, paths,
   // stdin and subprocess output. A dispatched launcher can outlive its result.
-  return hookReply({ app: 'Rebalance', outcome: phase === 'launch' ? 'starting' : 'blocked',
+  return hookReply({ app: 'Rebalance', outcome: phase === 'launch' ? 'starting' : phase === 'recovery' ? 'unknown' : 'blocked',
     status: null, phase, messages: [messages[phase]] });
 }
 
@@ -138,7 +159,15 @@ async function readStopToken(root) {
 }
 
 async function runLaunch(root, requestId, expectedStop) {
-  const args = ['--import', 'tsx', resolve(root, 'src/cli.ts'), 'launch',
+  return runCommand(root, ['launch'], requestId, expectedStop);
+}
+
+async function runRecovery(root, requestId, expectedStop) {
+  return runCommand(root, ['recover', '--cancel'], requestId, expectedStop);
+}
+
+async function runCommand(root, command, requestId, expectedStop) {
+  const args = ['--import', 'tsx', resolve(root, 'src/cli.ts'), ...command,
     '--request-id', requestId, '--expected-stop', expectedStop];
   let stdout;
   try {
@@ -154,7 +183,9 @@ async function runLaunch(root, requestId, expectedStop) {
 }
 
 export async function handlePrompt(input, overrides = {}) {
-  const selected = selectLaunchRequest(input, overrides.repository ?? repository);
+  const rootPath = overrides.repository ?? repository;
+  const recovery = selectRecoveryRequest(input, rootPath);
+  const selected = recovery ?? selectLaunchRequest(input, rootPath);
   if (!selected) return null;
   if (selected.blocked) return hookReply({ app: 'Rebalance', outcome: 'blocked', messages: [selected.blocked] });
   let phase = 'workspace';
@@ -169,8 +200,9 @@ export async function handlePrompt(input, overrides = {}) {
     const expectedStop = await (overrides.readStopToken ?? readStopToken)(root);
     phase = 'dependencies';
     await (overrides.ensureDependencies ?? ensureDependencies)(root);
-    phase = 'launch';
-    return hookReply(await (overrides.runLaunch ?? runLaunch)(root, selected.requestId, expectedStop));
+    phase = recovery ? 'recovery' : 'launch';
+    const run = recovery ? overrides.runRecovery ?? runRecovery : overrides.runLaunch ?? runLaunch;
+    return hookReply(await run(root, selected.requestId, expectedStop));
   } catch {
     return hookFailure(phase);
   }
