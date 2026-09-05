@@ -1,0 +1,22 @@
+{
+  "name": "rebalance",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local agent-controlled deterministic rebalancer for Robinhood mainnet",
+  "license": "MIT",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "cli": "tsx src/cli.ts",
+    "start": "tsx src/cli.ts start",
+    "chart": "tsx src/cli.ts chart",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": { "viem": "2.56.3" },
+  "devDependencies": {
+    "@types/node": "26.4.1",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2"
+  }
+}

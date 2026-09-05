@@ -88,6 +88,24 @@ Codex updated `PLAN.md`, `README.md`, `AGENTS.md`, `CLAUDE.md`, `docs/NETWORK.md
 
 Validation: active-document consistency, local Markdown links and Git whitespace checks. The interrupted turn only read files; no incorrect Base-only commit was made. No application code, dependencies, runtime RPC probe, wallet, key, deployment or transaction was created.
 
+## Implementation begins — 2026-09-04
+
+Human authorized implementation, creation of a local wallet, an agent graph and one conversational interface with a startup skill. Exact inputs and material delegation prompts are preserved in [the implementation record](prompts/011-implementation-start.md). Codex generated the TypeScript allocation core, local storage, chain adapter, runtime/CLI, tests, bundled chart, skill and graph documentation. Parallel agents implemented the allocation/storage, read-only chain spike/adapter and chart/skill; root implemented configuration, transaction dispatch, graph orchestration and application plumbing. This entry is updated with actual validation as the milestone progresses.
+
+The initial core checkpoint contains the package/lockfile, TypeScript configuration, allocation module and its 18 passing tests. Network evidence contains public, read-only requests and responses: canonical WETH/USDG and four Uniswap v3 pools on Robinhood 4663. These observations are not successful signed swaps. A new wallet was generated with viem locally after the human requested it; only its public address was displayed. Private bytes are ignored local files, never committed. No actual swap, Privy wallet operation or Ledger hardware test has occurred.
+
+Dependencies are pinned below; the full transitive tree and integrity hashes are in `package-lock.json`. No copied application boilerplate, fonts, external UI images or upstream implementation code was added. The original SVG/CSS chart was generated in this session. Standard contract ABI declarations describe official Uniswap/ERC20 interfaces; contract source URLs are in `src/chain.ts`.
+
+| Dependency/component | Upstream URL | Version/commit | License | Use |
+| --- | --- | --- | --- | --- |
+| viem | https://github.com/wevm/viem | 2.56.3 | MIT | EVM reads, ABI encoding and local signing |
+| TypeScript | https://github.com/microsoft/TypeScript | 7.0.2 | Apache-2.0 | Type checking |
+| tsx | https://github.com/privatenumber/tsx | 4.23.13 | MIT | Local TypeScript CLI/test runner |
+| Node type definitions | https://github.com/DefinitelyTyped/DefinitelyTyped | @types/node 26.4.1 | MIT | Compile-time Node APIs |
+| Ledger DMK implementation skill | https://github.com/LedgerHQ/agent-skills | 2edb3937d80dec28f46c87c29aae841e6874fc7d | Consulted remotely; not vendored | Deferred hardware integration guidance; no SDK/hardware adoption claimed |
+
+Skill creation used the installed `skill-creator` guidance and current official Codex/Claude skill documentation. The [graph article](https://robcressy.com/blog/loops-to-graphs-ai-agent-systems) supplied the requested conceptual framing; no article text was copied into application code. No MCP, graph service or application LLM SDK is a dependency.
+
 ## Development log template
 
 For each material implementation session, append:
@@ -104,10 +122,10 @@ Do not record a guessed model version or fabricated review. Keep material projec
 
 Initial state: the workspace had an initialized `main` branch with **zero commits and zero project files**. No earlier project implementation, design assets, or code were imported. Research links identify existing external platforms, not work authored by this project.
 
-No application dependencies have been installed or vendored yet. The proposed libraries/protocols in the plan are candidates, not completed integrations. Before adding one, record:
+The initial planning session had no dependencies. Adopted dependencies are now recorded in the implementation entry above; remaining proposed libraries/protocols are candidates, not completed integrations.
 
 | Dependency/component | Upstream URL | Version/commit | License | How used / modifications |
 | --- | --- | --- | --- | --- |
-| None yet | — | — | — | Documentation-only starting point |
+| Initial state: none | — | — | — | Documentation-only starting point, superseded by implementation register above |
 
 The MIT license covers original project files; it does not override licenses on Uniswap, Ledger, fonts, libraries, boilerplate or other third-party materials.
