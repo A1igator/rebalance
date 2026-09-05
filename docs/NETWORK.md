@@ -16,7 +16,7 @@ Use Robinhood's documented stock-token metadata, transfer behavior and price-fee
 
 The official [Uniswap v4 deployment registry](https://developers.uniswap.org/docs/protocols/v4/deployments) lists Robinhood mainnet. Verify exact contract identities and available pools instead of inferring addresses across chains.
 
-First demonstrate an actual Uniswap swap on Robinhood mainnet using supported live assets; ETH/USDC is a candidate, not a verified route. Canonical stock holdings can be displayed independently, but a claim of stock rebalancing requires executable stock routes and valid price/transfer behavior. If stocks lack a usable route, demonstrate another supported live pair on Robinhood and mark stock execution incomplete; do not substitute mock stocks or test pools. Local simulations/forks remain development tests, with actual Robinhood mainnet receipts required for the demo.
+The live portfolio is USDG plus four canonical Robinhood stock tokens: TSLA, AAPL, NVDA and AMZN. All four stock/USDG Uniswap v3 routes passed bidirectional live quote checks; see [the RWA report](RWA_CHECK.md) and retained public evidence. Runtime uses DEX estimates of actual ERC20 units, checks advisory corporate-action pauses and keeps native ETH outside allocations for gas. WETH is excluded. A funded sender simulation and actual receipts are still required before claiming completed stock rebalancing. No mock assets or alternative-chain fallback is used.
 
 ## Local verification
 
@@ -28,4 +28,4 @@ Robinhood's documented [Nitro full node](https://docs.robinhood.com/chain/run-a-
 - Verify chain ID 4663, Robinhood assets/decimals/semantics, Uniswap router/pool identities and actual route depth.
 - Select and validate price sources, market-calendar behavior, pauses, sequencer status and independent slippage/price bounds.
 - Complete an actual Robinhood mainnet transaction and receipt, clearly distinguished from a local test/simulation.
-- Record the Robinhood manifest and verification mode. The current repository remains planning-only; no wallet setup or transaction has occurred.
+- The manifest and live read-only evidence are recorded in `RWA_CHECK.md`; verification remains RPC mode. The application and local wallet now exist. No funded swap or receipt has occurred.
