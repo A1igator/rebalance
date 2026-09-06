@@ -11,13 +11,15 @@ import { createChain, ROBINHOOD } from './chain.js';
 import { CONFIG_PATH, DATA, PENDING_PATH, createWallet, loadConfig, parseTargets, percentToBps, validateConfig, type Config } from './config.js';
 import { redistributeTargets } from './core.js';
 import { GRAPH } from './graph.js';
-import { events, acknowledgeEvent } from './events.js';
+import { events, acknowledgeEvent, publishEvent } from './events.js';
 import { STOP_PATH, monitor, status, tick } from './runtime.js';
 import { serve } from './server.js';
 import { acquireLock, atomicWriteJson, readJson, stringifyJson, type PendingTransaction } from './storage.js';
 import { validatePending } from './transactions.js';
 import { launch } from './launch.js';
 import { recover } from './recovery.js';
+import { configureCodexNotifications, codexNotificationStatus, prepareCodexNotifications,
+  runCodexNotifications, stopCodexNotifications } from './codex-notifications.js';
 
 const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
   wallet create                        Create/reuse a local wallet; public address only
@@ -40,6 +42,12 @@ const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
   graph                                Print the app graph edges
   events                               Read retained notification events
   events ack <id>                      Mark an event handled in the agent session
+  notifications configure --thread <id> [--codex <executable>]
+                                       Bind notification delivery to the existing Codex conversation
+  notifications start [--background]   Enable/reuse the notification-only listener
+  notifications status                 Read listener preference and delivery state
+  notifications test                   Publish a connection test; never perform trading
+  notifications stop                   Pause notification delivery; leave trading unchanged
 Native ETH is gas-only; select USDG + four stocks from the verified manifest.
 Supported stocks: ${Object.keys(ASSETS).filter(id => id !== 'USDG').join(', ')}.
 Privy and Ledger execution are deferred. Never pass a private key as a CLI argument.
@@ -54,6 +62,8 @@ const { values, positionals: args } = parseArgs({ allowPositionals: true, option
   'setup-only': { type: 'boolean', default: false }, 'request-id': { type: 'string' },
   'expected-stop': { type: 'string' },
   cancel: { type: 'boolean', default: false },
+  thread: { type: 'string' }, codex: { type: 'string' },
+  'enabled-only': { type: 'boolean', default: false }, 'notification-token': { type: 'string' },
 } });
 const print = (value: unknown) => process.stdout.write(stringifyJson(value));
 const requiredConfig = async () => { const c = await loadConfig(); if (!c) throw new Error('Configure explicit targets through the agent first'); return c; };
@@ -100,6 +110,114 @@ async function background(command: string): Promise<void> {
   print({ status: 'starting', command, pid: child.pid, log: `.local/${command}.log` });
 }
 
+function notificationPidAlive(value: unknown): value is number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0 || value > 2_147_483_647) return false;
+  try { process.kill(value, 0); return true; }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
+    if ((error as NodeJS.ErrnoException).code === 'EPERM') return true;
+    throw error;
+  }
+}
+
+async function notificationWorker(token: string) {
+  const abort = new AbortController();
+  const stop = () => abort.abort();
+  process.once('SIGINT', stop); process.once('SIGTERM', stop);
+  try { await runCodexNotifications({ token, signal: abort.signal }); }
+  finally { process.off('SIGINT', stop); process.off('SIGTERM', stop); }
+}
+
+async function notificationStart() {
+  let release: (() => Promise<void>) | undefined;
+  try { release = await acquireLock(DATA, 'codex-notifications-launch.lock'); }
+  catch (error) {
+    if (!(error instanceof Error) || !/^Lock codex-notifications-launch\.lock is held/.test(error.message)) throw error;
+    print({ ...await codexNotificationStatus(), state: 'starting', message: 'Another notification launch is in progress; no second worker was started.' });
+    return;
+  }
+  let foregroundToken: string | null = null;
+  try {
+    const prepared = await prepareCodexNotifications({ restoreOnly: values['enabled-only'] });
+    if (!prepared.token || !prepared.status.enabled || prepared.status.running) {
+      print({ ...prepared.status, state: !prepared.status.configured ? 'unconfigured' : !prepared.status.enabled
+        ? (prepared.status.running ? 'stopping' : 'paused') : 'running' });
+      return;
+    }
+    const recordPath = resolve(DATA, 'codex-notifications-process.json');
+    const previous = await readJson<{ pid: number; token: string }>(recordPath);
+    if (previous && notificationPidAlive(previous.pid)) {
+      print({ ...prepared.status, state: 'starting', pid: previous.pid,
+        message: 'An existing notification worker is starting or stopping; it was not duplicated.' });
+      return;
+    }
+    if (!values.background) {
+      foregroundToken = prepared.token;
+      await atomicWriteJson(recordPath, { pid: process.pid, token: prepared.token });
+    }
+    else {
+      const log = await open(resolve(DATA, 'codex-notifications.log'), 'a', 0o600);
+      try {
+        const child = spawn(process.execPath, ['--import', 'tsx', fileURLToPath(import.meta.url),
+          'notifications', 'run', '--notification-token', prepared.token], {
+          cwd: process.cwd(), detached: true, stdio: ['ignore', log.fd, log.fd], env: process.env,
+        });
+        await new Promise<void>((resolveStarted, reject) => { child.once('spawn', resolveStarted); child.once('error', reject); });
+        child.unref();
+        await atomicWriteJson(recordPath, { pid: child.pid, token: prepared.token });
+        // A spawn is not readiness. Observe only this notifier's own public state.
+        let current = await codexNotificationStatus();
+        for (let attempt = 0; attempt < 20 && current.enabled && !current.running && notificationPidAlive(child.pid); attempt++) {
+          await delay(50); current = await codexNotificationStatus();
+        }
+        print({ ...current, pid: child.pid, state: !current.enabled ? 'paused' : current.running ? 'running'
+          : notificationPidAlive(child.pid) ? 'starting' : 'unavailable' });
+      } finally { await log.close(); }
+    }
+  } finally { await release(); }
+  if (foregroundToken) await notificationWorker(foregroundToken);
+}
+
+async function notificationCommand() {
+  if (args.length !== 2 || !['configure', 'start', 'run', 'status', 'stop', 'test'].includes(args[1]!)) {
+    throw new Error('Use notifications configure, start, status, test or stop');
+  }
+  for (const key of ['targets', 'wallet', 'mode', 'rpc', 'threshold', 'slippage', 'poll', 'rebalance-interval-seconds'] as const) {
+    if (values[key] !== undefined) throw new Error('Portfolio options do not apply to notifications');
+  }
+  const action = args[1];
+  if (values.background && action !== 'start') throw new Error('--background applies only to notifications start');
+  if (values['enabled-only'] && action !== 'start') throw new Error('--enabled-only applies only to notifications start');
+  if ((values.thread !== undefined || values.codex !== undefined) && action !== 'configure') {
+    throw new Error('Notification binding options apply only to notifications configure');
+  }
+  if (values['notification-token'] !== undefined && action !== 'run') throw new Error('Notification continuation token applies only to its worker');
+  if (action === 'configure') {
+    if (!values.thread) throw new Error('Specify the existing conversation --thread');
+    print(await configureCodexNotifications({ threadId: values.thread, command: values.codex }));
+  } else if (action === 'status') print(await codexNotificationStatus());
+  else if (action === 'stop') {
+    await stopCodexNotifications();
+    const current = await codexNotificationStatus();
+    print({ ...current, state: current.running ? 'stopping' : 'paused' });
+  } else if (action === 'test') {
+    const current = await codexNotificationStatus();
+    if (!current.configured || !current.enabled || !current.running) {
+      throw new Error('Start a configured notification listener before publishing a connection test');
+    }
+    const id = `notification-test-${randomUUID()}`;
+    await publishEvent({ id, type: 'notification-test', createdAt: new Date().toISOString(),
+      message: 'Rebalance notification connection test; no trading action or financial outcome.' });
+    print({ eventId: id, status: 'published',
+      message: 'Connection test retained locally; agent acknowledgement and phone delivery are not yet verified.' });
+  } else if (action === 'start') await notificationStart();
+  else {
+    const token = values['notification-token'];
+    if (!token || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(token)) throw new Error('Invalid notification worker continuation token');
+    await notificationWorker(token);
+  }
+}
+
 async function main() {
   const command = args[0];
   if (!command || command === 'help' || values.help) { process.stdout.write(HELP); return; }
@@ -109,6 +227,9 @@ async function main() {
   if (values.cancel && command !== 'recover') throw new Error('--cancel applies only to recover');
   if (values['expected-stop'] !== undefined && (!['start', 'launch', 'recover'].includes(command) || values['resume-start'] ||
       !/^(none|[a-f0-9]{64})$/.test(values['expected-stop']))) throw new Error('Invalid conditional-start token');
+  if (command !== 'notifications' && (values.thread !== undefined || values.codex !== undefined ||
+      values['notification-token'] !== undefined || values['enabled-only'])) throw new Error('Notification options apply only to notifications');
+  if (command === 'notifications') { await notificationCommand(); return; }
   if (values.background) {
     if (!['start', 'chart'].includes(command)) throw new Error('--background applies only to start or chart');
     if (command === 'start') {

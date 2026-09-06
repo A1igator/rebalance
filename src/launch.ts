@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import type { Status } from './runtime.js';
+import type { CodexNotificationStatus } from './codex-notifications.js';
 import { acquireLock, atomicWriteJson, readJson } from './storage.js';
 
 const REPOSITORY = fileURLToPath(new URL('..', import.meta.url));
@@ -25,6 +26,8 @@ export type LaunchResult = {
   outcome: 'armed' | 'ready' | 'starting' | 'blocked' | 'busy' | 'needs-input' | 'already-handled';
   status: Status | null;
   chart: { state: 'ready' | 'unavailable' | 'blocked' | 'not-checked'; url: string; message?: string };
+  notifications: { state: 'not-checked' | 'unconfigured' | 'paused' | 'running' | 'starting' | 'unavailable';
+    status: CodexNotificationStatus | null; message?: string };
   messages: string[];
 };
 type SpawnRecord = { runner?: number; chart?: number };
@@ -81,7 +84,8 @@ function defaultDependencies(): LaunchDependencies {
 export async function launch(options: LaunchOptions = {}, overrides: Partial<LaunchDependencies> = {}): Promise<LaunchResult> {
   const deps = { ...defaultDependencies(), ...overrides };
   const result: LaunchResult = { app: 'Rebalance', requested: options.setupOnly ? 'setup-only' : 'full',
-    outcome: 'blocked', status: null, chart: { state: 'not-checked', url: CHART_URL }, messages: [] };
+    outcome: 'blocked', status: null, chart: { state: 'not-checked', url: CHART_URL },
+    notifications: { state: 'not-checked', status: null }, messages: [] };
   if (options.requestId !== undefined && (!options.requestId || options.requestId.length > 2048)) {
     result.messages.push('Invalid launch request identifier.'); return result;
   }
@@ -94,6 +98,7 @@ export async function launch(options: LaunchOptions = {}, overrides: Partial<Lau
     `${createHash('sha256').update(options.requestId).digest('hex')}.json`);
   let release: (() => Promise<void>) | undefined;
   let startAttempted = false;
+  let restoreNotifications = false;
   const stopToken = async () => {
     const stopped = await readJson(resolve(deps.dataDir, 'stop.json'));
     return stopped === null ? 'none' : createHash('sha256').update(JSON.stringify(stopped)).digest('hex');
@@ -124,6 +129,32 @@ export async function launch(options: LaunchOptions = {}, overrides: Partial<Lau
     const command = await deps.command(args);
     if (!command.ok) throw new Error('A local launch command failed; inspect public status before retrying.');
     return command.value;
+  };
+  const ensureNotifications = async () => {
+    try {
+      const readNotificationStatus = (value: unknown): CodexNotificationStatus => {
+        const s = value as CodexNotificationStatus | null;
+        if (!s || typeof s.configured !== 'boolean' || typeof s.enabled !== 'boolean' || typeof s.running !== 'boolean') {
+          throw new Error('Invalid notification status');
+        }
+        return s;
+      };
+      let current = readNotificationStatus(await run(['notifications', 'status']));
+      let state: LaunchResult['notifications']['state'];
+      if (!current.configured) state = 'unconfigured';
+      else if (!current.enabled) state = 'paused';
+      else if (current.running) state = 'running';
+      else {
+        const started = await run(['notifications', 'start', '--background', '--enabled-only']);
+        current = readNotificationStatus(started);
+        state = !current.configured ? 'unconfigured' : !current.enabled ? 'paused' : current.running ? 'running'
+          : (started as { state?: string }).state === 'starting' ? 'starting' : 'unavailable';
+      }
+      result.notifications = { state, status: current };
+    } catch {
+      result.notifications = { state: 'unavailable', status: null,
+        message: 'Notification listener setup is unavailable; the trading launch outcome is unchanged.' };
+    }
   };
   let spawned: SpawnRecord = {};
   const recordSpawn = async (kind: keyof SpawnRecord, value: unknown) => {
@@ -179,6 +210,7 @@ export async function launch(options: LaunchOptions = {}, overrides: Partial<Lau
     // Record receipt before side effects. Even an interrupted launch must not be
     // replayed by a hook after a later user stop. A new prompt is a new request.
     if (requestPath) await atomicWriteJson(requestPath, { receivedAt: new Date().toISOString(), setupOnly: !!options.setupOnly });
+    restoreNotifications = true;
     spawned = await readJson<SpawnRecord>(recordPath) ?? {};
     if (!result.status!.config) {
       if (!options.targets) {
@@ -275,5 +307,9 @@ export async function launch(options: LaunchOptions = {}, overrides: Partial<Lau
     result.messages.push(error instanceof Error && error.constructor === Error
       ? error.message.slice(0, 300) : 'Launch failed; preserve local records and inspect public status.');
     return result;
-  } finally { await release?.(); }
+  } finally {
+    // Notification-only setup cannot gate or reinterpret the financial launch.
+    if (restoreNotifications) await ensureNotifications();
+    await release?.();
+  }
 }

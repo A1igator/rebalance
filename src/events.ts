@@ -7,7 +7,7 @@ const EVENTS_PATH = resolve(DATA, 'events.json');
 const CONDITIONS_PATH = resolve(DATA, 'notification-state.json');
 const ATTENTION_PATH = resolve(DATA, 'attention-state.json');
 export type RebalanceEvent = {
-  id: string; type: 'ledger-rebalance-needed' | 'rebalance-completed' | 'rebalance-attention' | 'rebalance-recovered';
+  id: string; type: 'ledger-rebalance-needed' | 'rebalance-completed' | 'rebalance-attention' | 'rebalance-recovered' | 'notification-test';
   createdAt: string; message: string; hash?: string; acknowledgedAt?: string;
 };
 export type FailurePhase = 'config' | 'reconcile' | 'recover' | 'observe' | 'plan' | 'interval' | 'quote' | 'execute' | 'publish' | 'unknown';

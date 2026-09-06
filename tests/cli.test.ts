@@ -33,6 +33,10 @@ async function fixture(t: TestContext) {
       writeFileSync(join(directory, 'unexpected-network'), 'blocked');
       throw new Error('CLI test transport is disabled');
     };
+    if (process.env.REBALANCE_TEST_NOTIFICATION_GATE === '1' && process.argv.includes('notifications') && process.argv.includes('run')) {
+      writeFileSync(join(directory, 'notification-child-waiting'), 'ready');
+      while (!existsSync(join(directory, 'release-notification-child'))) await delay(10);
+    }
     if (process.env.REBALANCE_TEST_GATE === '1' && process.argv.includes('start') && !process.argv.includes('--background')) {
       writeFileSync(join(directory, 'child-waiting'), 'ready');
       while (!existsSync(join(directory, 'release-child'))) await delay(10);
@@ -182,4 +186,127 @@ test('actual launch command reports missing initial targets without creating key
     assert.equal(existsSync(join(directory, file)), false);
   }
   await assert.rejects(command(['status', '--setup-only']));
+});
+
+
+const notificationThread = '00000000-0000-4000-8000-000000000001';
+async function configureNotifications(command: (args: string[]) => Promise<{ stdout: string }>) {
+  return JSON.parse((await command(['notifications', 'configure', '--thread', notificationThread,
+    '--codex', '/usr/bin/false'])).stdout);
+}
+
+test('notification configure/status/stop persist preference without changing financial controls', async t => {
+  const { directory, command } = await fixture(t);
+  const records = ['config.json', 'stop.json', 'pending.json', 'cycle.json', 'recovery.json'];
+  for (const file of records.slice(1)) await atomicWriteJson(join(directory, file), { fixture: file });
+  const before = await Promise.all(records.map(file => readFile(join(directory, file), 'utf8')));
+  const configured = await configureNotifications(command);
+  assert.equal(configured.configured, true); assert.equal(configured.enabled, true); assert.equal(configured.running, false);
+  assert.equal(configured.threadId, notificationThread);
+  const paused = JSON.parse((await command(['notifications', 'stop'])).stdout);
+  assert.equal(paused.enabled, false); assert.equal(paused.running, false);
+  const restored = JSON.parse((await command(['notifications', 'start', '--background', '--enabled-only'])).stdout);
+  assert.equal(restored.state, 'paused'); assert.equal(restored.enabled, false);
+  assert.equal(JSON.parse((await command(['notifications', 'status'])).stdout).enabled, false);
+  assert.deepEqual(await Promise.all(records.map(file => readFile(join(directory, file), 'utf8'))), before);
+  for (const file of ['run.lock', 'private-key', 'unexpected-network', 'codex-notifications.log']) assert.equal(existsSync(join(directory, file)), false, file);
+});
+
+test('notification background start reuses one worker and stop pauses only notification delivery', { timeout: 15_000 }, async t => {
+  const { directory, command } = await fixture(t);
+  const stop = { requestId: 'preserve-financial-stop' };
+  await atomicWriteJson(join(directory, 'stop.json'), stop);
+  await configureNotifications(command);
+  const first = JSON.parse((await command(['notifications', 'start', '--background'])).stdout);
+  assert.equal(first.state, 'running'); assert.equal(first.running, true);
+  t.after(() => { try { process.kill(first.pid, 'SIGKILL'); } catch {} });
+  const record = await readFile(join(directory, 'codex-notifications-process.json'), 'utf8');
+  const second = JSON.parse((await command(['notifications', 'start', '--background'])).stdout);
+  assert.equal(second.running, true);
+  assert.equal(await readFile(join(directory, 'codex-notifications-process.json'), 'utf8'), record, 'reuse does not spawn or replace the worker record');
+  await command(['notifications', 'stop']);
+  await until(() => !existsSync(join(directory, 'codex-notifications.lock')), 'notification stop should release only its own worker lock');
+  const stopped = JSON.parse((await command(['notifications', 'status'])).stdout);
+  assert.equal(stopped.enabled, false); assert.equal(stopped.running, false);
+  assert.deepEqual(await readJson(join(directory, 'stop.json')), stop);
+  for (const file of ['run.lock', 'private-key', 'pending.json', 'unexpected-network', 'start.log']) assert.equal(existsSync(join(directory, file)), false, file);
+});
+
+test('a stop between notification spawn and worker startup wins, and the pending process is not duplicated', { timeout: 15_000 }, async t => {
+  const { directory, command } = await fixture(t);
+  await configureNotifications(command);
+  const first = JSON.parse((await command(['notifications', 'start', '--background'], { REBALANCE_TEST_NOTIFICATION_GATE: '1' })).stdout);
+  t.after(() => { try { process.kill(first.pid, 'SIGKILL'); } catch {} });
+  assert.equal(first.state, 'starting');
+  await until(() => existsSync(join(directory, 'notification-child-waiting')), 'child should pause before importing the worker');
+  const second = JSON.parse((await command(['notifications', 'start', '--background'])).stdout);
+  assert.equal(second.pid, first.pid); assert.equal(second.state, 'starting');
+  await command(['notifications', 'stop']);
+  const paused = await readFile(join(directory, 'codex-notifications.json'), 'utf8');
+  await writeFile(join(directory, 'release-notification-child'), 'go');
+  await until(() => { try { process.kill(first.pid, 0); return false; } catch { return true; } }, 'stale notification handoff should exit');
+  assert.equal(await readFile(join(directory, 'codex-notifications.json'), 'utf8'), paused);
+  assert.equal(JSON.parse((await command(['notifications', 'status'])).stdout).enabled, false);
+  for (const file of ['run.lock', 'private-key', 'pending.json', 'unexpected-network', 'start.log']) assert.equal(existsSync(join(directory, file)), false, file);
+});
+
+test('notification commands reject trading options and cross-command continuation flags', async t => {
+  const { directory, command } = await fixture(t);
+  for (const args of [
+    ['notifications', 'status', '--targets', 'AAPL=100'], ['notifications', 'stop', '--background'],
+    ['notifications', 'status', '--enabled-only'], ['status', '--thread', notificationThread],
+    ['notifications', 'run', '--notification-token', 'invalid'], ['notifications', 'start', '--notification-token', notificationThread],
+    ['notifications', 'configure', '--codex', '/usr/bin/false'], ['notifications', 'status', 'extra'],
+    ['notifications', 'configure', '--thread', notificationThread, '--socket', '/tmp/obsolete.sock'],
+  ]) await assert.rejects(command(args), args.join(' '));
+  for (const file of ['codex-notifications.json', 'run.lock', 'private-key', 'unexpected-network', 'codex-notifications.log']) assert.equal(existsSync(join(directory, file)), false, file);
+});
+
+
+test('notification binding needs only the existing conversation and does not start a daemon or worker', async t => {
+  const { directory, command } = await fixture(t);
+  const result = JSON.parse((await command(['notifications', 'configure', '--thread', notificationThread])).stdout);
+  assert.equal(result.threadId, notificationThread);
+  assert.equal(result.command, 'codex');
+  assert.equal(result.configured, true); assert.equal(result.enabled, true); assert.equal(result.running, false);
+  assert.equal(Object.hasOwn(result, 'socketPath'), false);
+  const saved = await readJson<Record<string, unknown>>(join(directory, 'codex-notifications.json'));
+  assert.equal(Object.hasOwn(saved!, 'socketPath'), false);
+  for (const file of ['run.lock', 'private-key', 'pending.json', 'unexpected-network', 'start.log',
+    'codex-notifications.lock', 'codex-notifications.log', 'codex-notifications-process.json']) {
+    assert.equal(existsSync(join(directory, file)), false, file);
+  }
+});
+
+
+test('notification test requires an enabled worker and publishes only a retained fixed connection-test event', { timeout: 15_000 }, async t => {
+  const { directory, command } = await fixture(t);
+  const records = ['config.json', 'stop.json', 'pending.json', 'cycle.json', 'recovery.json'];
+  for (const file of records.slice(1)) await atomicWriteJson(join(directory, file), { fixture: file });
+  const before = await Promise.all(records.map(file => readFile(join(directory, file), 'utf8')));
+  await assert.rejects(command(['notifications', 'test']));
+  assert.equal(existsSync(join(directory, 'events.json')), false);
+  await configureNotifications(command);
+  await assert.rejects(command(['notifications', 'test']));
+  assert.equal(existsSync(join(directory, 'events.json')), false);
+  const worker = JSON.parse((await command(['notifications', 'start', '--background'])).stdout);
+  assert.equal(worker.running, true);
+  t.after(() => { try { process.kill(worker.pid, 'SIGKILL'); } catch {} });
+  const published = JSON.parse((await command(['notifications', 'test'])).stdout);
+  assert.equal(published.status, 'published');
+  assert.match(published.eventId, /^notification-test-[0-9a-f-]{36}$/);
+  assert.match(published.message, /not yet verified/);
+  const queued = await readJson<{ id: string; type: string; message: string; createdAt: string; acknowledgedAt?: string }[]>(join(directory, 'events.json'));
+  assert.equal(queued?.length, 1);
+  assert.equal(queued![0]!.id, published.eventId);
+  assert.equal(queued![0]!.type, 'notification-test');
+  assert.equal(queued![0]!.message, 'Rebalance notification connection test; no trading action or financial outcome.');
+  assert.ok(Number.isFinite(Date.parse(queued![0]!.createdAt)));
+  assert.equal(queued![0]!.acknowledgedAt, undefined, 'publication must not imply acknowledgement or verified delivery');
+  await command(['notifications', 'stop']);
+  await until(() => !existsSync(join(directory, 'codex-notifications.lock')), 'notification worker should stop');
+  await assert.rejects(command(['notifications', 'test']));
+  assert.deepEqual(await readJson(join(directory, 'events.json')), queued, 'paused testing cannot create orphan entries');
+  assert.deepEqual(await Promise.all(records.map(file => readFile(join(directory, file), 'utf8'))), before);
+  for (const file of ['run.lock', 'private-key', 'unexpected-network', 'start.log']) assert.equal(existsSync(join(directory, file)), false, file);
 });

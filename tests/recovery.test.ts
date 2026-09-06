@@ -122,7 +122,7 @@ async function fixture(t: TestContext, active = false) {
       resumeCalls++; armed = true;
       await rm(path('stop.json'));
       return { app: 'Rebalance', requested: 'full', outcome: 'armed', status: publicStatus(true),
-        chart: { state: 'ready', url: 'fixture' }, messages: [] } satisfies LaunchResult;
+        chart: { state: 'ready', url: 'fixture' }, notifications: { state: 'not-checked', status: null }, messages: [] } satisfies LaunchResult;
     }, pause: async () => {}, attempts: 2 };
   return { path, pending, cycle, rpc, deps, sent, receipts, txs, mineOriginal,
     get keyReads() { return keyReads; }, get resumeCalls() { return resumeCalls; },

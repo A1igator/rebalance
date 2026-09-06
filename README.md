@@ -18,7 +18,9 @@ For Codex, a project **UserPromptSubmit hook** can route bare `$rebalance`, type
 
 One-time setup: open Codex CLI in the repository, choose **Review hooks**, and trust the **UserPromptSubmit** entry from **`.codex/hooks.json`** that runs **`scripts/rebalance-hook.mjs`**. Use `/hooks` if the startup review screen is absent. The initial native discovery check found this hook correctly loaded but untrusted; a later check confirmed it trusted. Project trust alone is insufficient. Then type `$rebalance` or choose its skill suggestion for normal launch in the existing conversation.
 
-The current assistant prepares/tests the wiring but cannot activate real-money trading or trust the live hook on the user's behalf. Routine pending-state recovery belongs to the user-started deterministic runner, including pending transactions carried into a full raw-key launch. Native notification schedules and Remote pairing remain host setup outside the launcher, and existing requested notifications are reused. An armed status is not proof of a completed trade.
+For Claude, the project **UserPromptExpansion hook** routes a bare user-issued **`/rebalance`** directly to the same launcher using native `prompt_id` (Claude 2.1.196+). It is prepared in `.claude/settings.json`; the user accepts any native project/hook consent. Scoped arguments and model-invoked Skill calls do not arm. Isolated tests pass; native Claude dispatch remains to be observed on the next user invocation. [Claude entry contract](docs/LAUNCH.md#claude-deterministic-skill-entry--2026-09-06)
+
+The current assistant prepares/tests the wiring but cannot activate real-money trading or trust the live hook on the user's behalf. Routine pending-state recovery belongs to the user-started deterministic runner, including pending transactions carried into a full raw-key launch. Native Remote pairing remains host setup. The launcher restores configured, enabled event notifications and preserves paused preferences. An armed status is not proof of a completed trade.
 
 For contributors and reproducible verification, the underlying commands are:
 
@@ -61,7 +63,7 @@ An armed raw-key runner automatically handles stale sends after a 30-second rece
 
 The optional [notification channel](docs/NOTIFICATIONS.md) feeds retained events into the **same running Claude session**. With `/rc`, that session can be used from a phone. Ledger drift, runtime-attention, transaction-recovery and completed-rebalance alerts are distinct; completion requires a confirmed swap and a fresh portfolio within the drift threshold. Phone pushes are Claude-controlled and require user setup. The channel neither signs nor relays permissions. Trading remains independent of it.
 
-For Codex, use [native Remote](https://learn.chatgpt.com/docs/remote-connections) to continue the existing conversation from the mobile app. A native [current-chat scheduled task](https://learn.chatgpt.com/docs/automations), configured as a five-minute heartbeat, checks retained events only and reports meaningful new events. It does not trade or create a custom Codex app-server/MCP bridge. The desktop host must remain available; mobile pairing and notification delivery depend on the user's setup and are not yet verified. See the same notification guide for setup and retained-event handling.
+For Codex, a file-driven notification worker queues retained events into the same loaded conversation through native shared queue storage without taking over its active writer. Use [native Remote](https://learn.chatgpt.com/docs/remote-connections) for phone access. The existing five-minute heartbeat remains a migration fallback until actual replacement delivery is verified; Codex's own ten-second revision check handles these cross-process additions, as explained in the [notification guide](docs/NOTIFICATIONS.md). Trading is independent, and queue acceptance does not prove phone delivery.
 
 ## What the evidence establishes
 
@@ -76,6 +78,6 @@ For Codex, use [native Remote](https://learn.chatgpt.com/docs/remote-connections
 
 [Plan](PLAN.md) · [Rules/check-ins](docs/HACKATHON.md) · [AI and dependency provenance](docs/AI_USAGE.md) · [Ledger Stack](docs/LEDGER_AGENT_STACK.md) · [Privy](docs/PRIVY.md) · [Uniswap feedback](FEEDBACK.md) · [Ledger feedback](docs/LEDGER_FEEDBACK.md)
 
-Planned partners: **Uniswap, Ledger and Privy**. Source/spec/prompt history is preserved on `main`; actual hardware, Privy, full-rebalance, phone-delivery and submission evidence remain to be collected. Read [AGENTS.md](AGENTS.md) before development. Original work is [MIT licensed](LICENSE); dependencies retain their licenses.
+Planned partners: **Uniswap, Ledger and Privy**. Source/spec/prompt history is preserved on `main`; actual hardware, Privy, phone-delivery and submission evidence remain to be collected. Read [AGENTS.md](AGENTS.md) before development. Original work is [MIT licensed](LICENSE); dependencies retain their licenses.
 
-The [execution timing guide](docs/EXECUTION_TIMING.md) explains event-driven receipt progression, bounded fallback checks, the 30-second recovery grace, RPC discovery reuse, fee headroom and local chart streaming. Codex phone notifications remain a separate scheduled host capability.
+The [execution timing guide](docs/EXECUTION_TIMING.md) explains event-driven receipt progression, bounded fallback checks, the 30-second recovery grace, RPC discovery reuse, fee headroom and local chart streaming. Event notification delivery remains separate from trading and native phone notification behavior.

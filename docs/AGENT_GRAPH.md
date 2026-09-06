@@ -1,6 +1,6 @@
 # Rebalance's agent graph
 
-The user's existing Codex or Claude Code conversation is the interactive interface. A project skill translates intent into CLI operations. The local runner then executes a graph of deterministic stages with shared state and transaction feedback. It does not call another model, spawn subagents, or require an agent framework. Core trading requires no MCP server. Outside trading, Claude uses an optional notification channel and Codex uses a scheduled follow-up in this conversation.
+The user's existing Codex or Claude Code conversation is the interactive interface. A project skill translates intent into CLI operations. The local runner then executes a graph of deterministic stages with shared state and transaction feedback. It does not call another model, spawn subagents, or require an agent framework. Core trading requires no MCP server. Outside trading, Claude uses an optional notification channel and Codex uses a file-driven worker and its native queue for this same existing conversation.
 
 The separation of target ownership, shared state, and external observations takes inspiration from [Rob Cressy's “Loops to Graphs” article](https://robcressy.com/blog/loops-to-graphs-ai-agent-systems). The user decides the allocation; the application measures drift and carries out that choice.
 
@@ -19,7 +19,7 @@ flowchart TD
   chart[Read-only local chart and CLI status]
   events[(Persisted public notification events)]
   channel[Claude MCP notification channel]
-  heartbeat[Codex notification check every five minutes]
+  codexQueue[File-driven Codex native queue]
   push[Agent app notifications through native Remote]
 
   intent -->|Project skill and CLI| config
@@ -45,9 +45,9 @@ flowchart TD
   state -->|Public results and errors| intent
   state --> events
   events --> channel
-  events --> heartbeat
+  events --> codexQueue
   channel -->|Same running conversation| intent
-  heartbeat -->|Same conversation; report new events only| intent
+  codexQueue -->|Same existing conversation; report new events only| intent
   intent -->|Notifications only| push
 ```
 
@@ -82,7 +82,7 @@ When the project's channel server is configured, start Claude with `claude --dan
 
 Phone push requires Claude Code 2.1.110 or later, the mobile app using the same account and organization, OS notification permission, and `/config` → `Push when Claude decides` with Remote Control active. Claude decides whether to send a push; queue acknowledgement is not proof of phone delivery. If Claude is closed, notifications wait while the local trading process keeps operating. [Remote Control notification behavior](https://code.claude.com/docs/en/remote-control).
 
-Codex uses native [Remote connections](https://learn.chatgpt.com/docs/remote-connections) to continue this same desktop conversation on ChatGPT mobile. A [scheduled follow-up](https://learn.chatgpt.com/docs/automations#schedule-a-task-inside-a-chat) reads retained events every five minutes and reports only new meaningful outcomes or attention requests. This reporting uses scheduled model runs and is outside the deterministic trading graph. It never starts trading or signs. Pairing, host availability and app notifications determine mobile access/delivery; no arbitrary MCP-to-Codex push ingress is claimed. See [notification setup](NOTIFICATIONS.md).
+Codex uses native [Remote connections](https://learn.chatgpt.com/docs/remote-connections) to continue this same desktop conversation on ChatGPT mobile. A file-driven notification worker passes retained event IDs to its native local queue through shared storage without taking over this conversation's writer. The conversation reports and acknowledges meaningful outcomes or attention requests. This model reporting remains outside the deterministic trading graph; the prior five-minute heartbeat stays only until replacement delivery is verified. It never starts trading or signs. Pairing, host availability and app notifications determine mobile access/delivery; no arbitrary MCP-to-Codex push ingress is claimed. See [notification setup](NOTIFICATIONS.md).
 
 ## What anchors the graph
 

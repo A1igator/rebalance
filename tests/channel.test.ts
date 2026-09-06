@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -79,11 +80,13 @@ test('real MCP stdio sessions deliver queued events, expose only acknowledgement
     id: 'online-ledger-two', type: 'ledger-rebalance-needed' as const,
     createdAt: '2026-09-04T20:05:00.000Z', message: 'Device confirmation is needed for the recorded condition.',
   };
+  const queuedAt = Date.now();
   await publishEvent(second);
   await waitFor(() => initial.received.length === 2, 'a newly queued event should arrive while the same session stays open');
   assert.equal(eventId(initial.received[1]!), second.id);
+  assert.ok(Date.now() - queuedAt < 1_500, 'atomic queue replacement should wake delivery without the former two-second sweep');
   await delay(2_200);
-  assert.deepEqual(initial.received.map(eventId), [first.id, second.id], 'repeated polling must not flood the running session');
+  assert.deepEqual(initial.received.map(eventId), [first.id, second.id], 'watch notifications must not resend unacknowledged events in the same session');
   const acknowledgement = await initial.client.callTool({ name: 'acknowledge_event', arguments: { id: first.id } });
   assert.notEqual(acknowledgement.isError, true);
   assert.deepEqual((await events()).map(event => event.id), [second.id]);
@@ -119,4 +122,42 @@ test('real MCP stdio sessions deliver queued events, expose only acknowledgement
   assert.deepEqual(acknowledged.received, [], 'acknowledged events must stay hidden after a new process starts');
   assert.deepEqual(acknowledged.errors, []);
   await acknowledged.client.close();
+});
+
+
+test('a stalled stdio write ends the channel after its deadline and preserves unacknowledged entries', { timeout: 15_000 }, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'rebalance-channel-blocked-test-'));
+  const data = join(root, '.local'); await mkdir(data);
+  const queue = [{ id: 'blocked-first', type: 'rebalance-attention', createdAt: '2026-09-06T00:00:00.000Z', message: 'x'.repeat(4 * 1024 * 1024) },
+    { id: 'unsent-second', type: 'rebalance-completed', createdAt: '2026-09-06T00:00:01.000Z', message: 'Still queued.' }];
+  await writeFile(join(data, 'events.json'), JSON.stringify(queue));
+  const child = spawn(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('../src/channel.ts', import.meta.url))], {
+    cwd: fileURLToPath(new URL('..', import.meta.url)), env: { ...process.env, REBALANCE_DATA_DIR: data }, stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  t.after(async () => { child.kill('SIGKILL'); await rm(root, { recursive: true, force: true }); });
+  let stderr = '';
+  child.stderr.on('data', chunk => { stderr += chunk.toString(); });
+  const exited = new Promise<number | null>((resolve, reject) => { child.once('exit', resolve); child.once('error', reject); });
+  const initialized = new Promise<void>(resolve => {
+    let output = '';
+    const receive = (chunk: Buffer) => {
+      output += chunk.toString();
+      if (!output.includes('\n')) return;
+      const response = JSON.parse(output.slice(0, output.indexOf('\n'))) as { id: number; result?: unknown };
+      assert.equal(response.id, 1); assert.ok(response.result);
+      child.stdout.off('data', receive);
+      child.stdout.pause();
+      resolve();
+    };
+    child.stdout.on('data', receive);
+  });
+  child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {
+    protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'blocked-channel-test', version: '1.0.0' },
+  } }) + '\n');
+  await initialized;
+  child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
+  // Stop consuming stdout, forcing the notification write to remain unresolved.
+  assert.equal(await exited, 1);
+  assert.equal(stderr, 'Rebalance notification transport timed out; queued events retained.\n');
+  assert.deepEqual(JSON.parse(await readFile(join(data, 'events.json'), 'utf8')), queue);
 });

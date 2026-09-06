@@ -2,6 +2,8 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { events, acknowledgeEvent } from './events.js';
+import { DATA } from './config.js';
+import { createEventStream, type EventStream } from './event-stream.js';
 
 // Claude's channel extension: https://code.claude.com/docs/en/channels-reference
 // No HTTP listener, signer tools, model calls, or permission-relay capability.
@@ -23,30 +25,39 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
   } catch { return { content: [{ type: 'text', text: 'Acknowledgement failed; event remains available.' }], isError: true }; }
 });
 
-const sent = new Set<string>();
-let polling = false;
-let initialized = false;
-async function poll() {
-  if (polling || !initialized) return;
-  polling = true;
-  try {
-    for (const event of await events()) {
-      if (sent.has(event.id)) continue;
-      await server.notification({ method: 'notifications/claude/channel', params: {
-        content: event.message,
-        meta: { event_id: event.id, event_type: event.type, created_at: event.createdAt, ...(event.hash ? { transaction_hash: event.hash } : {}) },
-      } });
-      // MCP writes aren't delivery acknowledgements. Keep the durable event until
-      // the agent calls acknowledge_event; a later session can receive it again.
-      sent.add(event.id);
-    }
-  } catch { process.stderr.write('Rebalance notification read/delivery unavailable; queued events retained.\n'); }
-  finally { polling = false; }
-}
-server.oninitialized = () => { initialized = true; void poll(); };
+let stream: EventStream | undefined;
+let stopped = false;
+const stop = async () => {
+  if (stopped) return;
+  stopped = true;
+  stream?.close();
+  await server.close();
+};
+server.oninitialized = () => {
+  if (stopped) return;
+  if (stream) { stream.wake(); return; }
+  stream = createEventStream({
+    directory: DATA,
+    read: events,
+    deliver: async event => {
+      // A blocked stdio write must not cause a second concurrent send. End this
+      // transport after its deadline; the next session replays its durable queue.
+      const deadline = setTimeout(() => {
+        process.stderr.write('Rebalance notification transport timed out; queued events retained.\n');
+        void stop().finally(() => { process.exit(1); });
+      }, 10_000);
+      try {
+        await server.notification({ method: 'notifications/claude/channel', params: {
+          content: event.message,
+          meta: { event_id: event.id, event_type: event.type, created_at: event.createdAt, ...(event.hash ? { transaction_hash: event.hash } : {}) },
+        } });
+      } finally { clearTimeout(deadline); }
+    },
+    onError: phase => { process.stderr.write(`Rebalance notification ${phase} unavailable; queued events retained.\n`); },
+  });
+};
+server.onclose = () => { void stop(); };
 await server.connect(new StdioServerTransport());
-const timer = setInterval(() => { void poll(); }, 2000);
-const stop = async () => { clearInterval(timer); await server.close(); };
 process.once('SIGINT', () => { void stop(); });
 process.once('SIGTERM', () => { void stop(); });
 process.stdin.once('end', () => { void stop(); });

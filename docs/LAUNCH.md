@@ -60,13 +60,13 @@ Possible results distinguish `armed`, setup-only `ready`, `starting`, `busy`, `n
 
 Handled hook failures return structured public context with hook-process exit code zero so the host can deliver the result. Failures before launcher dispatch report `blocked` and the failed phase; failures after dispatch report `starting` with `status=null`, explicitly preserving unknown trading state. Caught exceptions, event text and child stderr are never copied into those messages. Hook discovery/trust failures and a missing executable happen before this handler can report anything; inspect native hook review for those.
 
-The hook does not create Codex notification schedules, pair Remote, open an authenticated phone session or implement a custom bridge. The existing five-minute notification heartbeat remains independent. The agent can display the verified chart and report public results after dispatch. Claude Code retains the shared skill/launcher; this project hook definition targets Codex, and no Claude hook is installed by this change.
+Launch restores a configured, enabled notification listener separately from trading, preserves paused notifications and reports its state separately. It does not create a schedule, pair Remote or prove delivery. The agent can display the verified chart and report public results after dispatch. Codex and Claude now have separate native entry definitions that reuse the same launcher; see the Claude section below and [notification setup](NOTIFICATIONS.md).
 
 The current assistant prepares/tests this integration but does not trust the hook, invoke the funded launcher or submit trades. Hardware/Privy execution remains deferred. Tests use isolated local fixtures and stubbed operations, not sponsor or mainnet execution evidence.
 
 ## User-issued launch and explicit recovery
 
-On September 5, a later user-issued literal `$rebalance` produced the native structured launch result with `outcome=armed`. Read-only local status confirmed the active runner; a subsequent RPC check verified a successful Apple swap receipt. The next transaction is unresolved and prevents further stock purchases. This establishes the actual literal command path, not every native picker/framing path or a completed rebalance. Earlier discovery and failed-entry checks above remain historical evidence.
+On September 5, a later user-issued literal `$rebalance` produced the native structured launch result with `outcome=armed`. Read-only local status confirmed the active runner; a subsequent RPC check verified a successful Apple swap receipt. The next transaction was initially unresolved. Later user-issued recovery/relaunch led to the five-asset completion recorded at 2026-09-05T23:33:58.399Z. This establishes the actual literal command path and subsequent receipts, not every native picker/framing path. Earlier discovery and failed-entry checks above remain historical evidence.
 
 The exact **`$rebalance recover`**, or the canonical project skill reference followed by ` recover`, has a separate optional deterministic route to `recover --cancel`. The same exact ambient framing, project/identity checks, Plan barrier and pre-bootstrap stop capture apply. Bare launch does not call that wrapper; the armed raw-key graph may cancel automatically as part of recovery, including for pending state present at startup. Other scoped/natural-language/notification prompts remain ignored. Diagnostic prompt formats for this route start with `recovery-`; observations still contain no prompt text or secrets.
 
@@ -82,3 +82,24 @@ The [event-driven runtime](EXECUTION_TIMING.md) and chart SSE endpoint are proce
 ## Local checkout relocation — 2026-09-06
 
 The owner's checkout moved to `/Users/aliabdoli/Documents/git/rebalance`. Both project skill links remain relative and resolve to that checkout's canonical `skills/rebalance/SKILL.md`. The old location contains only a relocation note because this existing Codex task cannot use a symlinked writable root. Open the new folder for project discovery; cached old skill links are historical. The hook definition derives the Git root dynamically and its contents are unchanged. Native project/hook trust is path-scoped and was not copied to the new location. Pure prompt matching was verified; no funded launch or new native hook dispatch was performed. Trading was stopped for the move. [Operation record](prompts/034-notifications-and-repository-move.md)
+
+
+## Claude deterministic skill entry — 2026-09-06
+
+Claude uses native **`UserPromptExpansion`**, before expansion of a directly user-issued **`/rebalance`**, with the definition in [`.claude/settings.json`](../.claude/settings.json) and handler in [`scripts/rebalance-claude-hook.mjs`](../scripts/rebalance-claude-hook.mjs):
+
+```text
+UserPromptExpansion → exact /rebalance + native prompt_id
+                    → shared dependency setup / launch / deduplication
+                    → public hook result → Claude reports it
+```
+
+The matcher is `^rebalance$`. The handler also requires `expansion_type=slash_command`, `command_name=rebalance`, empty `command_args`, exact bare `/rebalance` text, the canonical project, an absolute working directory, native session identity and UUID `prompt_id`. Plan mode, subagents, missing identity, scoped arguments, natural-language mentions and model-invoked Skill tools cannot launch. Only this one hook event is installed; there is no duplicate `UserPromptSubmit` dispatch or transcript-derived request identity. Native `prompt_id` requires Claude Code **2.1.196+**; the observed installed version is **2.1.263**.
+
+The adapter namespaces Claude session identity and passes the native prompt ID into the shared handler's request identity. Dependency installation, pre-bootstrap stop capture, launcher serialization, replay after a newer stop and unknown-start results retain the existing behavior. Hook output tells Claude to report the structured result without running launch/start/recovery again. This entry only handles bare launch; the separate explicit recovery selector described above remains Codex-specific, while ordinary armed raw-key recovery remains automatic.
+
+The project definition is prepared for native loading and user review. Current Claude documentation says project hook changes are normally picked up by its file watcher; `/hooks` displays their definitions. The user accepts any project/hook consent required by the host. This implementation never changes native trust, permission or organization-policy settings. The next normal application action is **`/rebalance` in Claude from this repository**; an extra manual application CLI/arming message is not part of the design. If no native hook result appears, the launch remains unverified: inspect hook loading and exact event matching, do not claim setup-only completed a full launch.
+
+Tests execute the actual script only against unconfigured temporary storage with network disabled, or use injected fixture operations. They establish selection, deduplication and result handling; they do not establish native Claude dispatch or real-money arming. Trading remains stopped after the folder move until a subsequent user-issued permitted launch.
+
+Sources: [expansion hook](https://code.claude.com/docs/en/hooks#userpromptexpansion), [common prompt identity](https://code.claude.com/docs/en/hooks#common-input-fields), [project-relative exec arguments](https://code.claude.com/docs/en/hooks#reference-scripts-by-path).

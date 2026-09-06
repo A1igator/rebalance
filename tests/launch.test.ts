@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { launch, type LaunchDependencies } from '../src/launch.js';
 import type { Status } from '../src/runtime.js';
+import type { CodexNotificationStatus } from '../src/codex-notifications.js';
 import { atomicWriteJson, readJson } from '../src/storage.js';
 
 const targets = { USDG: 500, AAPL: 2375, NVDA: 2375, MSFT: 2375, AMD: 2375 };
@@ -21,12 +22,21 @@ async function fixture(t: TestContext) {
   t.after(() => rm(dataDir, { recursive: true, force: true }));
   const current = status();
   const calls: string[][] = [];
+  const notificationCalls: string[][] = [];
+  const notifications: CodexNotificationStatus = { configured: false, enabled: false, running: false,
+    threadId: null, command: null, acceptedCount: 0, queuedEventIds: [], uncertainEventIds: [], error: null, note: 'fixture' };
   const alive = new Set([101]);
   await atomicWriteJson(join(dataDir, 'chart.lock'), { pid: 101, createdAt: 'fixture' });
   const deps: LaunchDependencies = {
     dataDir, attempts: 3, pause: async () => {}, alive: pid => alive.has(pid),
     chartStatus: async () => ({ state: 'response', value: structuredClone(current) }),
     command: async args => {
+      if (args[0] === 'notifications') {
+        notificationCalls.push(args);
+        if (args[1] === 'start') { assert.deepEqual(args.slice(2), ['--background', '--enabled-only']); notifications.running = notifications.enabled; }
+        else assert.equal(args[1], 'status');
+        return { ok: true, value: { ...structuredClone(notifications), state: notifications.running ? 'running' : 'paused' } };
+      }
       calls.push(args);
       if (args[0] === 'status' || args[0] === 'check') return { ok: true, value: structuredClone(current) };
       if (args[0] === 'wallet') { current.wallet = wallet; return { ok: true, value: { address: wallet, created: true } }; }
@@ -50,7 +60,7 @@ async function fixture(t: TestContext) {
       assert.fail(`Unexpected fixture command: ${args[0]}`);
     },
   };
-  return { dataDir, current, calls, alive, deps };
+  return { dataDir, current, calls, alive, deps, notifications, notificationCalls };
 }
 const count = (calls: string[][], command: string) => calls.filter(args => args[0] === command).length;
 
@@ -491,4 +501,68 @@ test('expected-stop accepts lowercase digest snapshots and rejects malformed tok
   const expectedStop = createHash('sha256').update(JSON.stringify(stopped)).digest('hex');
   assert.equal((await launch({ expectedStop }, f.deps)).outcome, 'armed');
   assert.equal(f.calls.find(args => args[0] === 'start')?.[3], expectedStop);
+});
+
+
+test('launch restores an enabled notification listener once and reuses it on later skill launches', async t => {
+  const f = await fixture(t);
+  Object.assign(f.notifications, { configured: true, enabled: true, threadId: '00000000-0000-4000-8000-000000000001' });
+  const first = await launch({ setupOnly: true }, f.deps);
+  assert.equal(first.outcome, 'ready');
+  assert.equal(first.notifications.state, 'running');
+  assert.equal(first.notifications.status?.running, true);
+  const second = await launch({ setupOnly: true }, f.deps);
+  assert.equal(second.notifications.state, 'running');
+  assert.deepEqual(f.notificationCalls, [['notifications', 'status'], ['notifications', 'start', '--background', '--enabled-only'], ['notifications', 'status']]);
+  assert.equal(count(f.calls, 'start'), 0, 'notification restoration cannot arm trading during setup-only');
+});
+
+test('launch preserves paused notification preference and all financial records', async t => {
+  const f = await fixture(t); f.notifications.configured = true;
+  const records = ['stop.json', 'pending.json', 'cycle.json', 'recovery.json'];
+  for (const file of records) await atomicWriteJson(join(f.dataDir, file), { fixture: file });
+  const before = await Promise.all(records.map(file => readFile(join(f.dataDir, file), 'utf8')));
+  const result = await launch({ setupOnly: true }, f.deps);
+  assert.equal(result.outcome, 'ready');
+  assert.equal(result.notifications.state, 'paused');
+  assert.deepEqual(f.notificationCalls, [['notifications', 'status']]);
+  assert.equal(f.notifications.enabled, false);
+  assert.deepEqual(await Promise.all(records.map(file => readFile(join(f.dataDir, file), 'utf8'))), before);
+});
+
+test('notification failure is separate from the verified financial launch outcome', async t => {
+  const f = await fixture(t); const command = f.deps.command;
+  f.deps.command = async args => args[0] === 'notifications' ? { ok: false, value: { error: 'private endpoint diagnostic' } } : command(args);
+  const result = await launch({}, f.deps);
+  assert.equal(result.outcome, 'armed');
+  assert.equal(result.status?.armed, true);
+  assert.equal(result.notifications.state, 'unavailable');
+  assert.doesNotMatch(JSON.stringify(result), /private endpoint diagnostic/);
+  assert.equal(count(f.calls, 'start'), 1);
+});
+
+test('notification restore rechecks a pause racing its status read and never overrides it', async t => {
+  const f = await fixture(t); Object.assign(f.notifications, { configured: true, enabled: true });
+  const command = f.deps.command;
+  f.deps.command = async args => {
+    if (args[0] === 'notifications' && args[1] === 'start') f.notifications.enabled = false;
+    return command(args);
+  };
+  const result = await launch({ setupOnly: true }, f.deps);
+  assert.equal(result.outcome, 'ready');
+  assert.equal(result.notifications.state, 'paused');
+  assert.equal(f.notifications.running, false);
+  assert.equal(count(f.calls, 'start'), 0);
+});
+
+test('replayed launch requests do not restore notifications or undo a newer notification stop', async t => {
+  const f = await fixture(t); Object.assign(f.notifications, { configured: true, enabled: true });
+  await launch({ setupOnly: true, requestId: 'notification-replay' }, f.deps);
+  Object.assign(f.notifications, { enabled: false, running: false });
+  const calls = f.notificationCalls.length;
+  const replay = await launch({ setupOnly: true, requestId: 'notification-replay' }, f.deps);
+  assert.equal(replay.outcome, 'already-handled');
+  assert.equal(replay.notifications.state, 'not-checked');
+  assert.equal(f.notificationCalls.length, calls);
+  assert.equal(f.notifications.enabled, false);
 });
