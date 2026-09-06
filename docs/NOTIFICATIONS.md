@@ -12,7 +12,7 @@ The queue is stored in ignored `.local/events.json`. Ledger alerts are deduplica
 
 ## Claude Code
 
-The optional project `.mcp.json` starts `src/channel.ts` over stdio. It uses the official MCP SDK and Claude's channel extension, with one `acknowledge_event` tool. It exposes no HTTP endpoint, trading tool, key, permission relay or alternative chat interface. Commands still use the project skill and CLI. A notification may cause Claude to respond; that inference is outside the deterministic trading graph.
+The optional project `.mcp.json` starts `src/channel.ts` over stdio. It uses the official MCP SDK and Claude's channel extension, with one `acknowledge_event` tool. It exposes no HTTP endpoint, trading tool, key, permission relay or alternative chat interface. Commands still use the project skill and CLI. A notification may cause Claude to respond; that inference is outside the deterministic trading graph. The current adapter discovers queued events with a two-second interval, then pushes them over the channel; it does not yet watch the queue file. Startup replay is immediate. Replacing that interval with file events and a fallback watchdog remains an implementation gap, identified in the [September 6 review](prompts/034-notifications-and-repository-move.md).
 
 Custom channels currently require Claude's research-preview development opt-in. From this repository, start the single interactive session with:
 
