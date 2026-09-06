@@ -27,8 +27,14 @@ async function fixture(t: TestContext) {
   await atomicWriteJson(path('status.json'), initial);
   let activeWatchers = 0;
   let reads = 0;
+  let gasReads = 0;
   const watchers: FSWatcher[] = [];
   const server = await serve(0, { dataDir: directory,
+    readGas: async () => {
+      gasReads++;
+      return { gasPriceWei: '15000000', ethUsdE8: '400000000000',
+        gasObservedAt: '2026-09-06T02:00:00.000Z', usdObservedAt: '2026-09-06T02:00:00.000Z' };
+    },
     readStatus: async () => {
       reads++;
       const saved = await readJson<Status>(path('status.json'));
@@ -51,7 +57,8 @@ async function fixture(t: TestContext) {
     await server.closeChart();
     await rm(directory, { recursive: true, force: true });
   });
-  return { url, path, server, watchers, get activeWatchers() { return activeWatchers; }, get reads() { return reads; } };
+  return { url, path, server, watchers, get activeWatchers() { return activeWatchers; }, get reads() { return reads; },
+    get gasReads() { return gasReads; } };
 }
 
 function readResponse(url: string, method = 'GET', headers: Record<string, string> = {}) {
@@ -98,7 +105,13 @@ test('chart HTTP and SSE retain host/origin checks, view-only methods and ordina
   assert.equal((await readResponse(`${f.url}/api/status`, 'HEAD')).body, '');
   assert.equal(f.reads, beforeHead, 'HEAD does not observe portfolio data');
   assert.equal((await readResponse(`${f.url}/`, 'HEAD')).code, 200);
-  for (const endpoint of ['/api/status', '/api/status/events']) {
+  const gas = await readResponse(`${f.url}/api/gas`);
+  assert.equal(gas.code, 200);
+  assert.deepEqual(JSON.parse(gas.body), { gasPriceWei: '15000000', ethUsdE8: '400000000000',
+    gasObservedAt: '2026-09-06T02:00:00.000Z', usdObservedAt: '2026-09-06T02:00:00.000Z' });
+  assert.equal((await readResponse(`${f.url}/api/gas`, 'HEAD')).body, '');
+  assert.equal(f.gasReads, 1, 'HEAD does not request external gas or USD quotes');
+  for (const endpoint of ['/api/status', '/api/status/events', '/api/gas']) {
     assert.equal((await readResponse(f.url + endpoint, 'POST')).code, 405);
     assert.equal((await readResponse(f.url + endpoint, 'GET', { Host: 'attacker.example' })).code, 403);
     assert.equal((await readResponse(f.url + endpoint, 'GET', { Origin: 'https://attacker.example' })).code, 403);
@@ -106,6 +119,7 @@ test('chart HTTP and SSE retain host/origin checks, view-only methods and ordina
   const headStream = await readResponse(`${f.url}/api/status/events`, 'HEAD');
   assert.equal(headStream.code, 405); assert.equal(headStream.headers.allow, 'GET');
   assert.equal(f.activeWatchers, 0);
+  assert.equal(f.gasReads, 1, 'rejected requests never read quote sources');
   assert.deepEqual(await readJson(f.path('status.json')), initial);
 });
 
@@ -202,7 +216,8 @@ test('chart uses events while connected and one polling fallback only while disc
   let deferFetch = false;
   let resolveFetch: (() => void) | undefined;
   const lifecycle = new Map<string, () => void>();
-  const elements = new Map<string, { textContent: string; replaceChildren: () => void; append: () => void }>();
+  const elements = new Map<string, { textContent: string; replaceChildren: () => void; append: () => void; setAttribute: () => void }>();
+  const statusTimers = () => [...timers.values()].filter(timer => timer.ms === 4500 || timer.fn.name === 'refresh');
   class Source {
     static instances: Source[] = [];
     handlers = new Map<string, (event: { data: string }) => void>();
@@ -217,7 +232,8 @@ test('chart uses events while connected and one polling fallback only while disc
     EventSource: Source, AbortController,
     setTimeout: (fn: () => void, ms: number) => { const id = ++nextTimer; timers.set(id, { fn, ms }); return id; },
     clearTimeout: (id: number) => timers.delete(id),
-    fetch: async () => {
+    fetch: async (url: string) => {
+      if (url === '/api/gas') return { ok: true, json: async () => ({ gasPriceWei: null, ethUsdE8: null, gasObservedAt: null, usdObservedAt: null }) };
       fetches++;
       if (deferFetch) await new Promise<void>(resolve => { resolveFetch = resolve; });
       return { ok: true, json: async () => initial };
@@ -225,7 +241,7 @@ test('chart uses events while connected and one polling fallback only while disc
     window: { addEventListener: (name: string, fn: () => void) => lifecycle.set(name, fn) },
     document: {
       getElementById: (id: string) => {
-        if (!elements.has(id)) elements.set(id, { textContent: '', replaceChildren: () => { if (id === 'segments') renders++; }, append: () => {} });
+        if (!elements.has(id)) elements.set(id, { textContent: '', replaceChildren: () => { if (id === 'segments') renders++; }, append: () => {}, setAttribute: () => {} });
         return elements.get(id);
       },
       createElementNS: () => ({ setAttribute: () => {}, textContent: '' }),
@@ -234,7 +250,7 @@ test('chart uses events while connected and one polling fallback only while disc
   const source = Source.instances[0]!;
   assert.equal(fetches, 0, 'normal connection begins without a polling fetch');
   source.send(initial);
-  assert.equal(timers.size, 0, 'valid stream disables the initial fallback deadline');
+  assert.equal(statusTimers().length, 0, 'valid stream disables the initial fallback deadline');
   assert.equal(renders, 1);
   source.send(initial);
   assert.equal(renders, 1, 'identical events do not redraw the pie');
@@ -243,7 +259,7 @@ test('chart uses events while connected and one polling fallback only while disc
   assert.equal(fetches, 1, 'repeated errors share one fallback request');
   assert.equal([...timers.values()].filter(timer => timer.ms === 5000).length, 1);
   source.send({ ...initial, updatedAt: 'fresh' });
-  assert.equal(timers.size, 0, 'reconnection cancels the polling timeout');
+  assert.equal(statusTimers().length, 0, 'reconnection cancels the polling timeout');
   assert.equal(fetches, 1); assert.equal(renders, 2);
   deferFetch = true;
   source.onerror!();

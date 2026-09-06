@@ -9,15 +9,18 @@
     <script src="/app.js" defer></script>
   </head>
   <body>
-    <svg id="allocation" viewBox="0 0 540 540" role="img" aria-labelledby="chart-title chart-description">
+    <svg id="allocation" viewBox="-15 0 570 580" role="img" aria-labelledby="chart-title chart-description">
       <title id="chart-title">Allocation unavailable</title>
       <desc id="chart-description">Connecting to the local app.</desc>
       <circle class="track" cx="270" cy="270" r="164" fill="none" stroke-width="78"/>
       <g id="segments" transform="rotate(-90 270 270)"></g>
+      <g id="target-segments" transform="rotate(-90 270 270)"></g>
       <g id="labels"></g>
-      <text id="state" x="270" y="266" class="state">Connecting</text>
-      <text id="note" x="270" y="293" class="note">Local allocation</text>
-      <text id="gas" x="510" y="533" class="gas">ETH gas · unavailable</text>
+      <text id="state" x="270" y="257" class="state">Connecting</text>
+      <text id="note" x="270" y="280" class="note">Local allocation</text>
+      <text id="comparison" x="270" y="305" class="comparison"></text>
+      <text id="gas" x="30" y="546" class="gas">ETH gas · unavailable</text>
+      <text id="gas-price" x="30" y="565" class="gas gas-price">Gas price · unavailable</text>
     </svg>
   </body>
 </html>

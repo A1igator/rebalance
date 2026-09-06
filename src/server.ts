@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { DATA } from './config.js';
 import { status, type Status } from './runtime.js';
 import { stringifyJson } from './storage.js';
+import { createGasDisplayReader, type GasDisplay } from './gas-display.js';
 
 const assets = {
   '/': ['index.html', 'text/html; charset=utf-8'],
@@ -15,6 +16,7 @@ const assets = {
 type ChartDependencies = {
   dataDir: string;
   readStatus: () => Promise<Status>;
+  readGas: () => Promise<GasDisplay>;
   watchChanges: (directory: string, listener: (event: string, filename: string | null) => void) => FSWatcher;
 };
 const publicFiles = new Set(['status.json', 'config.json', 'cycle.json', 'wallet.json', 'run.lock', 'stop.json']);
@@ -78,7 +80,7 @@ function streamStatus(response: ServerResponse, deps: ChartDependencies): void {
 }
 
 export async function serve(port = 4663, overrides: Partial<ChartDependencies> = {}) {
-  const deps: ChartDependencies = { dataDir: DATA, readStatus: status,
+  const deps: ChartDependencies = { dataDir: DATA, readStatus: status, readGas: createGasDisplayReader(),
     watchChanges: (directory, listener) => watch(directory, listener), ...overrides };
   const server = createServer(async (request, response) => {
     response.setHeader('Cache-Control', 'no-store');
@@ -99,6 +101,11 @@ export async function serve(port = 4663, overrides: Partial<ChartDependencies> =
       response.writeHead(405, { Allow: 'GET, HEAD' }).end('View only'); return;
     }
     try {
+      if (request.url === '/api/gas') {
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(request.method === 'HEAD' ? undefined : stringifyJson(await deps.readGas()));
+        return;
+      }
       if (request.url === '/api/status') {
         response.writeHead(200, { 'Content-Type': 'application/json' });
         response.end(request.method === 'HEAD' ? undefined : stringifyJson(await deps.readStatus()));
