@@ -92,12 +92,71 @@ test('actual and target rings share stable colors/order despite different config
   assert.deepEqual(actual.map(node => node.attrs.stroke), targets.map(node => node.attrs.stroke));
   assert.deepEqual(actual.map(node => node.attrs['stroke-dashoffset']), targets.map(node => node.attrs['stroke-dashoffset']));
   assert.deepEqual(actual.map(node => node.attrs['stroke-dasharray']), targets.map(node => node.attrs['stroke-dasharray']));
-  assert.equal(Number(actual[0]!.attrs['stroke-dashoffset']), -0.25, 'both rings center the same half-percent gap across their start boundary');
+  assert.equal(Math.abs(Number(actual[0]!.attrs['stroke-dashoffset'])), 0, 'colored segments start at the true allocation boundary');
+  assert.equal(actual[0]!.attrs['stroke-dasharray'], '5 95', 'divider rendering does not subtract from the colored allocation share');
   assert.ok(targets.every(node => Number(node.attrs.r) + Number(node.attrs['stroke-width']) / 2 < 125));
   assert.equal(page.element('comparison').textContent, 'Outer actual · Inner target');
   assert.match(page.element('chart-description').textContent, /Inner ring, targets: USDG 5%/);
   assert.equal(page.element('labels').children.filter(node => node.attrs.class === 'target-weight').length, 5);
   assert.ok(!actual.some(node => node.textContent.includes('ETH')));
+  page.hide();
+});
+
+test('ring dividers have parallel straight edges and equal pixel width at both radii', async () => {
+  const page = await browser();
+  const outer = page.element('actual-dividers').children;
+  const inner = page.element('target-dividers').children;
+  assert.equal(outer.length, 5); assert.equal(inner.length, 5);
+  const boundaries = [0, 5, 28.75, 52.5, 76.25];
+  for (const [cuts, radius, thickness] of [[outer, 164, 78], [inner, 110, 13]] as const) {
+    cuts.forEach((cut, index) => {
+      assert.equal(cut.tag, 'line', 'SVG line strokes have constant-width parallel sides, unlike angular wedge cuts');
+      assert.equal(cut.attrs['stroke-linecap'], 'butt');
+      assert.equal(Number(cut.attrs['stroke-width']), 4, 'ordinary dividers keep the same pixel width across both rings');
+      const x1 = Number(cut.attrs.x1) - 270, y1 = Number(cut.attrs.y1) - 270;
+      const x2 = Number(cut.attrs.x2) - 270, y2 = Number(cut.attrs.y2) - 270;
+      const angle = boundaries[index]! * Math.PI / 50;
+      assert.ok(Math.abs(x1 * y2 - y1 * x2) < 1e-8, 'divider centerline follows the radial allocation boundary');
+      assert.ok(Math.abs(Math.hypot(x1, y1) - (radius - thickness / 2 - 2)) < 1e-8, 'cut starts inside the inner edge');
+      assert.ok(Math.abs(Math.hypot(x2, y2) - (radius + thickness / 2 + 2)) < 1e-8, 'cut finishes past the outer edge');
+      assert.ok(Math.abs(x2 / Math.hypot(x2, y2) - Math.cos(angle)) < 1e-8);
+      assert.ok(Math.abs(y2 / Math.hypot(x2, y2) - Math.sin(angle)) < 1e-8, 'equal actual/target allocations share exact divider centers');
+    });
+  }
+  page.hide();
+});
+
+test('divider widths preserve a visible portion of a 0.01 percent slice without enlarging its allocation', async () => {
+  const page = await browser();
+  const weights = [1, 2499, 2500, 2500, 2500];
+  const targets = Object.fromEntries(Object.keys(allocation).map((id, index) => [id, weights[index]]));
+  page.source.send({ ...current, config: { targets }, portfolio: { ...current.portfolio, positions: current.portfolio.positions.map((p, index) => ({ ...p, weightBps: weights[index] })) } });
+  const sliceAngle = 0.01 * Math.PI / 50;
+  for (const [segmentsId, dividersId, innerRadius] of [['segments', 'actual-dividers', 125], ['target-segments', 'target-dividers', 103.5]] as const) {
+    const segments = page.element(segmentsId).children;
+    const cuts = page.element(dividersId).children;
+    assert.equal(segments.length, 5); assert.equal(cuts.length, 5);
+    assert.ok(Math.abs(Number(segments[0]!.attrs['stroke-dasharray']!.split(' ')[0]) - 0.01) < 1e-12);
+    const leading = Number(cuts[0]!.attrs['stroke-width']), trailing = Number(cuts[1]!.attrs['stroke-width']);
+    assert.ok(leading > 0 && leading < 4 && trailing > 0 && trailing < 4, 'only the cuts bordering the dust slice become narrower');
+    const retainedAngle = sliceAngle - Math.asin(leading / (2 * innerRadius)) - Math.asin(trailing / (2 * innerRadius));
+    assert.ok(retainedAngle >= sliceAngle / 2 - 1e-12, 'at least half the tiny slice survives even at the narrower inner edge');
+    assert.equal(Number(cuts[2]!.attrs['stroke-width']), 4, 'unrelated larger slices retain ordinary divider width');
+  }
+  page.hide();
+});
+
+test('a single full allocation has no artificial seam and clears earlier divider cuts', async () => {
+  const page = await browser();
+  page.source.send({ ...current, portfolio: { ...current.portfolio, positions: current.portfolio.positions.map(p => ({ ...p, weightBps: p.id === 'AAPL' ? 10000 : 0 })) } });
+  assert.equal(page.element('segments').children.length, 1);
+  assert.equal(page.element('segments').children[0]!.attrs['stroke-dasharray'], '100 0');
+  assert.equal(page.element('actual-dividers').children.length, 0);
+  assert.equal(page.element('target-dividers').children.length, 5);
+  page.source.send({ ...current, config: { targets: { USDG: 0, AAPL: 10000, NVDA: 0, MSFT: 0, AMD: 0 } } });
+  assert.equal(page.element('target-segments').children.length, 1);
+  assert.equal(page.element('target-dividers').children.length, 0);
+  assert.equal(page.element('actual-dividers').children.length, 5, 'actual holdings keep their own true boundaries');
   page.hide();
 });
 

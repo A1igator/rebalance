@@ -26,6 +26,8 @@ A local portfolio rebalancer with one Claude Code/Codex conversation as its only
 | Privy | Automatically sign through Privy and execute when drift exceeds the threshold |
 | Ledger | Track drift while disconnected; on connection, refresh the rebalance and prompt through the agent for physical device confirmation |
 
+The [parallel-divider correction](docs/prompts/032-parallel-ring-dividers.md) replaces widening angular gaps with straight cuts of constant width. Actual/target boundaries still come from their respective weights; tiny slices retain a visible portion and single-asset rings have no artificial seam.
+
 Automatic modes need no per-trade human input and no LLM calls. They work with the coding agent closed. **There are no per-trade, daily or cumulative spending caps or budget counters.** Trade size comes from the target allocation and available balance. Keep sponsor-specific authorization features, such as supported Privy contract/method restrictions, without monetary limits or a new human-approval requirement.
 
 The user configures the wallet, signer, assets, target weights, drift threshold, polling interval and interval between rebalance cycles through the agent. The network is Robinhood mainnet, chain ID 4663. Use ordinary swap settings for slippage and transaction expiry. Changing targets applies on the next evaluation; report the resulting complete allocation without adding another approval workflow. Target edits and restarts do not reset the persisted cycle interval.

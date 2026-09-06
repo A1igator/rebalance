@@ -153,6 +153,35 @@
     return element;
   }
 
+  function drawRing(entries, segmentsId, dividersId, radius, width) {
+    const segments = byId(segmentsId), dividers = byId(dividersId);
+    segments.replaceChildren(); dividers.replaceChildren();
+    const total = entries.reduce((sum, entry) => sum + entry.weight, 0);
+    const innerRadius = radius - width / 2, outerRadius = radius + width / 2;
+    let offset = 0;
+    entries.forEach((entry, index) => {
+      const share = entry.weight / total * 100;
+      segments.append(svgElement("circle", {
+        cx: 270, cy: 270, r: radius, fill: "none", "stroke-width": width, pathLength: 100,
+        stroke: color(entry.id), "stroke-dasharray": `${share} ${100 - share}`, "stroke-dashoffset": -offset,
+      }));
+      if (entries.length > 1) {
+        const previousShare = entries[(index + entries.length - 1) % entries.length].weight / total * 100;
+        // A straight masked stroke has parallel edges. Limit its width so the
+        // two neighboring cuts together remove at most half of a tiny slice.
+        const gap = Math.min(4, 2 * innerRadius * Math.sin(Math.min(previousShare, share) * Math.PI / 200));
+        const angle = offset / 100 * Math.PI * 2;
+        const cos = Math.cos(angle), sin = Math.sin(angle);
+        dividers.append(svgElement("line", {
+          x1: 270 + cos * (innerRadius - 2), y1: 270 + sin * (innerRadius - 2),
+          x2: 270 + cos * (outerRadius + 2), y2: 270 + sin * (outerRadius + 2),
+          stroke: "black", "stroke-width": gap, "stroke-linecap": "butt",
+        }));
+      }
+      offset += share;
+    });
+  }
+
   function render(snapshot, disconnected = false) {
     const portfolio = snapshot?.portfolio;
     const positions = Array.isArray(portfolio?.positions) ? portfolio.positions : [];
@@ -181,32 +210,14 @@
     allocationDescription = `${state}. ${note}. ${funded ? "Outer ring, actual holdings" : "Targets only"}: ${entries.map((r) => `${r.id} ${percent.format(r.weight / 100)}%`).join(", ")}.${funded && targets.length ? ` Inner ring, targets: ${targets.map((r) => `${r.id} ${percent.format(r.weight / 100)}%`).join(", ")}.` : ""}`;
     statusDisconnected = disconnected;
     renderGas();
-    const segments = byId("segments");
-    const targetSegments = byId("target-segments");
     const labels = byId("labels");
-    segments.replaceChildren(); targetSegments.replaceChildren(); labels.replaceChildren();
-    if (funded && targets.length) {
-      const targetTotal = targets.reduce((sum, row) => sum + row.weight, 0);
-      let targetOffset = 0;
-      for (const entry of targets) {
-        const share = entry.weight / targetTotal * 100;
-        const gap = targets.length > 1 ? Math.min(0.5, share / 4) : 0;
-        targetSegments.append(svgElement("circle", {
-          cx: 270, cy: 270, r: 110, fill: "none", "stroke-width": 13, pathLength: 100,
-          stroke: color(entry.id), "stroke-dasharray": `${share - gap} ${100 - share + gap}`, "stroke-dashoffset": -(targetOffset + gap / 2),
-        }));
-        targetOffset += share;
-      }
-    }
+    labels.replaceChildren();
+    drawRing(entries, "segments", "actual-dividers", 164, 78);
+    drawRing(funded ? targets : [], "target-segments", "target-dividers", 110, 13);
     let offset = 0;
     const placed = [];
     for (const entry of entries) {
       const share = entry.weight / total * 100;
-      const gap = entries.length > 1 ? Math.min(0.5, share / 4) : 0;
-      segments.append(svgElement("circle", {
-        cx: 270, cy: 270, r: 164, fill: "none", "stroke-width": 78, pathLength: 100,
-        stroke: color(entry.id), "stroke-dasharray": `${share - gap} ${100 - share + gap}`, "stroke-dashoffset": -(offset + gap / 2),
-      }));
       const angle = ((offset + share / 2) / 100 * 360 - 90) * Math.PI / 180;
       placed.push({ ...entry, x: 270 + Math.cos(angle) * 235, y: 270 + Math.sin(angle) * 235 });
       offset += share;
