@@ -1,0 +1,87 @@
+{
+  "verifiedAt": "2026-09-06T02:39:44.787Z",
+  "verificationTiming": "The swap was read earlier in this verification session; verifiedAt records completion of the subsequent approval read, whose timestamp was captured directly. No exact earlier swap-read timestamp was captured.",
+  "network": {
+    "name": "Robinhood mainnet",
+    "chainId": 4663,
+    "rpcChainId": "0x1237",
+    "canonicalRpc": "https://rpc.mainnet.chain.robinhood.com"
+  },
+  "verification": {
+    "readOnly": true,
+    "methods": [
+      "eth_chainId",
+      "eth_getTransactionReceipt",
+      "eth_getTransactionByHash",
+      "eth_getBlockByNumber"
+    ],
+    "checks": [
+      "Both receipts reported status 0x1.",
+      "Each receipt transaction hash and sender matched its transaction.",
+      "Each transaction chainId was 0x1237.",
+      "Each receipt block hash matched its transaction and eth_getBlockByNumber result.",
+      "The approval transaction targeted canonical USDG and approved the same router targeted by the swap."
+    ],
+    "authority": "Public RPC observations; not light-client verification or an L1-finality claim."
+  },
+  "references": {
+    "swap": {
+      "transactionHash": "0xc5f28da6296df5dadbc6ad61ad0382e4c3531456f8abea838d17f2071e0bb280",
+      "chainId": 4663,
+      "from": "0x2c45b399914f1d25e484545a8314ef2a5938741b",
+      "to": "0xcaf681a66d020601342297493863e78c959e5cb2",
+      "nonce": 22,
+      "selector": "0x5ae401dc",
+      "blockNumber": "55516741",
+      "blockHash": "0xaf7ae59da806bfc1c252b814808ea75ba4bd159ce08832147e6cf53cdef9e9f3",
+      "blockTimestampHex": "0x6a9ca6e4",
+      "minedAt": "2026-09-05T23:33:56.000Z",
+      "receiptStatus": "0x1",
+      "gasUsed": "168785",
+      "gasUsedForL1": "0",
+      "effectiveGasPriceWei": "424024000",
+      "paidFeeWei": "71568890840000",
+      "transactionGasLimit": "216086",
+      "transactionGasPriceWeiHex": "0x1df0cb80"
+    },
+    "approval": {
+      "transactionHash": "0xd02a355336fb725c5887a757b6b97948d64bb4966c20a4ad21818ac113f04c38",
+      "chainId": 4663,
+      "from": "0x2c45b399914f1d25e484545a8314ef2a5938741b",
+      "to": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+      "nonce": 21,
+      "selector": "0x095ea7b3",
+      "valueWei": "0",
+      "approvedSpender": "0xcaf681a66d020601342297493863e78c959e5cb2",
+      "approvedAmountMicroUsdg": "1183973",
+      "blockNumber": "55516707",
+      "blockHash": "0xe5b49a42bec4e8a043e8b9593c0b2623e3f39a852ec8c614cd1ca64bb3875b17",
+      "blockTimestampHex": "0x6a9ca6e1",
+      "minedAt": "2026-09-05T23:33:53.000Z",
+      "receiptStatus": "0x1",
+      "gasUsed": "57976",
+      "gasUsedForL1": "0",
+      "effectiveGasPriceWei": "415962000",
+      "paidFeeWei": "24115812912000",
+      "transactionGasLimitHex": "0x11393",
+      "transactionGasPriceWeiHex": "0x1eae9a20"
+    }
+  },
+  "formulas": {
+    "paidFeeWei": "receipt.gasUsed * receipt.effectiveGasPrice",
+    "currentBenchmarkFeeWei": "reference.gasUsed * currentRpcGasPriceWei",
+    "currentBenchmarkUsdE8": "currentBenchmarkFeeWei * currentEthUsdE8 / 10^18, using integer arithmetic"
+  },
+  "limits": [
+    "These are two individual successful application transactions, not a complete rebalance-cycle fee record.",
+    "Repricing their measured gas with current ETH/USD and gas quotes is approximate; it is not eth_estimateGas for a proposed transaction.",
+    "The original approvals, route, amount, token state and calldata can differ from a future transaction.",
+    "Robinhood bundles L2 execution and L1 data charges into charged gas; gasUsedForL1 must not be added again.",
+    "Both sampled receipts reported gasUsedForL1 equal to zero; this does not establish that future L1 data charges will be zero.",
+    "No private keys, credentials or signed raw transactions were read or retained in this evidence."
+  ],
+  "officialSources": [
+    "https://docs.robinhood.com/chain/connecting/",
+    "https://docs.robinhood.com/chain/gas-and-fees/"
+  ]
+}

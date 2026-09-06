@@ -2,10 +2,12 @@ import { createServer, type ServerResponse } from 'node:http';
 import { watch, type FSWatcher } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { DATA } from './config.js';
+import { DATA, loadConfig } from './config.js';
 import { status, type Status } from './runtime.js';
 import { stringifyJson } from './storage.js';
 import { createGasDisplayReader, type GasDisplay } from './gas-display.js';
+import { GAS_REFERENCE } from './gas-reference.js';
+import { projectRebalanceFees } from './fee-projection.js';
 
 const assets = {
   '/': ['index.html', 'text/html; charset=utf-8'],
@@ -17,6 +19,7 @@ type ChartDependencies = {
   dataDir: string;
   readStatus: () => Promise<Status>;
   readGas: () => Promise<GasDisplay>;
+  readConfig: typeof loadConfig;
   watchChanges: (directory: string, listener: (event: string, filename: string | null) => void) => FSWatcher;
 };
 const publicFiles = new Set(['status.json', 'config.json', 'cycle.json', 'wallet.json', 'run.lock', 'stop.json']);
@@ -80,7 +83,7 @@ function streamStatus(response: ServerResponse, deps: ChartDependencies): void {
 }
 
 export async function serve(port = 4663, overrides: Partial<ChartDependencies> = {}) {
-  const deps: ChartDependencies = { dataDir: DATA, readStatus: status, readGas: createGasDisplayReader(),
+  const deps: ChartDependencies = { dataDir: DATA, readStatus: status, readGas: createGasDisplayReader(), readConfig: loadConfig,
     watchChanges: (directory, listener) => watch(directory, listener), ...overrides };
   const server = createServer(async (request, response) => {
     response.setHeader('Cache-Control', 'no-store');
@@ -102,8 +105,18 @@ export async function serve(port = 4663, overrides: Partial<ChartDependencies> =
     }
     try {
       if (request.url === '/api/gas') {
+        if (request.method === 'HEAD') {
+          response.writeHead(200, { 'Content-Type': 'application/json' }).end(); return;
+        }
+        // Public fixed-price projection only. Unavailable local holdings must not
+        // hide independent gas/ETH quotes or turn into a fabricated zero fee.
+        const [gas, rebalance] = await Promise.all([
+          deps.readGas(),
+          Promise.all([deps.readStatus(), deps.readConfig()])
+            .then(([snapshot, config]) => projectRebalanceFees(snapshot, config)).catch(() => null),
+        ]);
         response.writeHead(200, { 'Content-Type': 'application/json' });
-        response.end(request.method === 'HEAD' ? undefined : stringifyJson(await deps.readGas()));
+        response.end(stringifyJson({ ...gas, reference: GAS_REFERENCE, rebalance }));
         return;
       }
       if (request.url === '/api/status') {

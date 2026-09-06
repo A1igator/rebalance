@@ -6,12 +6,17 @@
   const time = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
   const colors = { USDG: "#b4cbb8", AAPL: "#8dbafa", NVDA: "#bad776", MSFT: "#b5a1df", AMD: "#e3a37c" };
   const assetOrder = Object.keys(colors);
+  // Match the display-only projection gate in src/fee-projection.ts when a newer status event arrives.
+  const projectionNodes = new Set(["intent", "config", "observe", "plan", "interval", "quote", "wait"]);
+  const projectionOperations = new Set(["confirmed", "cancelled", "recovered-revert", "needs-rebalance", "cooling-down", "waiting-ledger", "waiting-privy", "stopping"]);
   let lastSnapshot = null;
   let statusDisconnected = false;
   let allocationDescription = "Connecting to the local app.";
   const quoteMaxAgeMs = 90000;
   const quoteIntervalMs = 30000;
   let gasQuote = { gas: null, usd: null };
+  let gasReference = null;
+  let rebalanceProjection = null;
   let gasRequestFailed = false;
   let gasController = null;
   let gasTimeout = null;
@@ -58,6 +63,36 @@
   function sourceNote(part, source) {
     return part ? `${source}, observed ${new Date(part.timestamp).toISOString()}${stale(part) ? "; last known, current quote unavailable" : ""}` : `${source} unavailable`;
   }
+  function referenceOf(value) {
+    const swapGas = unsigned(value?.swapGas), approvalGas = unsigned(value?.approvalGas);
+    const hash = (input) => typeof input === "string" && /^0x[0-9a-fA-F]{64}$/.test(input);
+    return value?.chainId === 4663 && swapGas > 0n && approvalGas > 0n && hash(value.swapHash) && hash(value.approvalHash) ? { ...value, swapGas, approvalGas } : null;
+  }
+  function projectionOf(value) {
+    const timestamp = observedAt(value?.observedAt);
+    if (!value || !Number.isInteger(value.swaps) || value.swaps < 0 || value.swaps > 16 || timestamp === null || typeof value.wallet !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(value.wallet)) return null;
+    const targets = value.targets, balances = value.balances;
+    if (!targets || !balances || typeof targets !== "object" || typeof balances !== "object" || Array.isArray(targets) || Array.isArray(balances)) return null;
+    const entries = Object.entries(targets);
+    if (!entries.length || entries.some(([id, weight]) => !Number.isInteger(weight) || weight < 0 || weight > 10000 || unsigned(balances[id]) === null) || entries.reduce((sum, [, weight]) => sum + weight, 0) !== 10000) return null;
+    return { ...value, timestamp };
+  }
+  function projectionMatches(projection) {
+    if (!projection || lastSnapshot?.chain?.id !== 4663 || typeof lastSnapshot?.wallet !== "string" || lastSnapshot.wallet.toLowerCase() !== projection.wallet.toLowerCase()) return false;
+    if (lastSnapshot.error !== null || !projectionNodes.has(lastSnapshot.graph?.node)) return false;
+    const operation = lastSnapshot.operation;
+    if (operation !== null && (!operation || !projectionOperations.has(operation.status) || operation.sendFailure !== undefined ||
+        (operation.chainId !== undefined && operation.chainId !== 4663) ||
+        (operation.wallet !== undefined && (typeof operation.wallet !== "string" || operation.wallet.toLowerCase() !== projection.wallet.toLowerCase())))) return false;
+    const targets = lastSnapshot?.config?.targets;
+    if (!targets || Object.keys(targets).length !== Object.keys(projection.targets).length) return false;
+    const positions = lastSnapshot?.portfolio?.positions;
+    if (!Array.isArray(positions)) return false;
+    return Object.entries(projection.targets).every(([id, target]) => {
+      const position = positions.find((item) => (item.id || item.symbol) === id);
+      return targets[id] === target && position && unsigned(position.balance) !== null && unsigned(position.balance) === unsigned(projection.balances[id]);
+    });
+  }
   function renderGas() {
     clearTimeout(gasStaleTimer); gasStaleTimer = null;
     const balance = unsigned(lastSnapshot?.nativeBalance);
@@ -70,13 +105,33 @@
     const gasLabel = gas ? `${units(gas.amount, 9)} gwei${stale(gas) ? " last known" : ""}` : "unavailable";
     const gasUsd = gas && usd ? `${dollars(gas.amount, usd.amount, 12)} / gas${stale(gas) || stale(usd) ? " last known" : ""}` : "USD unavailable";
     byId("gas").textContent = `${balanceLabel}${balance !== null && balanceStale ? " last known" : ""} · ${balanceUsd}`;
-    byId("gas-price").textContent = `Gas price · ${gasLabel} · ${gasUsd}`;
+    byId("gas-price").textContent = `Gas price · ${gasLabel}`;
+    const reference = lastSnapshot?.chain?.id === 4663 ? gasReference : null;
+    const costReady = reference && gas && usd;
+    const costsStale = stale(gas) || stale(usd);
+    byId("gas-estimate").textContent = costReady ? `Swap ≈${dollars(gas.amount * reference.swapGas, usd.amount, 2)} · + approval ≈${dollars(gas.amount * reference.approvalGas, usd.amount, 2)}${costsStale ? " · last known" : ""}` : "Swap estimate · unavailable";
+    const projection = projectionMatches(rebalanceProjection) ? rebalanceProjection : null;
+    const projectionStale = projection && (gasRequestFailed || statusDisconnected || Boolean(lastSnapshot?.error) || Date.now() - projection.timestamp >= quoteMaxAgeMs);
+    let rebalanceLabel = "Rebalance estimate · unavailable";
+    if (projection?.swaps === 0) {
+      rebalanceLabel = projectionStale ? "Rebalance · $0 (last known projection)" : "Rebalance · $0 (on target)";
+    } else if (projection && costReady) {
+      const legs = BigInt(projection.swaps);
+      const low = dollars(gas.amount * reference.swapGas * legs, usd.amount, 2);
+      const high = dollars(gas.amount * (reference.swapGas + reference.approvalGas) * legs, usd.amount, 2);
+      rebalanceLabel = `Rebalance ≈${low}–${high} · ${projection.swaps} ${projection.swaps === 1 ? "swap" : "swaps"}${projectionStale || costsStale ? " · last known" : ""}`;
+    }
+    byId("gas-rebalance").textContent = rebalanceLabel;
     const balanceDetails = `${balanceLabel}; ${balanceAt === null ? "observation time unavailable" : `balance observed ${new Date(balanceAt).toISOString()}`}; ${balanceUsd}; ${sourceNote(usd, "Coinbase ETH/USD spot")}. ETH gas is excluded from portfolio allocation.`;
     const priceDetails = `Gas price ${gasLabel}; ${sourceNote(gas, "Robinhood RPC eth_gasPrice")}; ${gasUsd}; ${sourceNote(usd, "Coinbase ETH/USD spot")}. USD amount is per gas unit, not a transaction fee; a full transaction uses multiple gas units.`;
+    const referenceDetails = reference ? `Approximate transaction costs use verified historical single-pool receipts on Robinhood 4663: swap ${reference.swapHash}, ${reference.swapGas} gas; approval ${reference.approvalHash}, ${reference.approvalGas} gas. Gas usage of a new transaction may differ.` : "Historical transaction gas reference unavailable.";
+    const projectionDetails = `${rebalanceLabel}. ${projection ? `Fixed-price projection observed ${new Date(projection.timestamp).toISOString()}; matching wallet, targets and balances. The range assumes zero to one approval per swap leg.` : "A fresh projection matching this wallet, allocation and holdings is unavailable."} Estimates exclude market movement, liquidity-provider fees and slippage; they are not a measured rebalance cycle cost.`;
     byId("gas").setAttribute("aria-label", balanceDetails);
     byId("gas-price").setAttribute("aria-label", priceDetails);
-    byId("chart-description").textContent = `${allocationDescription} ${balanceDetails} ${priceDetails}`;
-    const deadlines = [gas?.timestamp, usd?.timestamp, balanceAt].filter((timestamp) => timestamp !== null && timestamp !== undefined).map((timestamp) => timestamp + quoteMaxAgeMs).filter((deadline) => deadline > Date.now());
+    byId("gas-estimate").setAttribute("aria-label", `${byId("gas-estimate").textContent}. ${referenceDetails}`);
+    byId("gas-rebalance").setAttribute("aria-label", projectionDetails);
+    byId("chart-description").textContent = `${allocationDescription} ${balanceDetails} ${priceDetails} ${referenceDetails} ${projectionDetails}`;
+    const deadlines = [gas?.timestamp, usd?.timestamp, balanceAt, projection?.timestamp].filter((timestamp) => timestamp !== null && timestamp !== undefined).map((timestamp) => timestamp + quoteMaxAgeMs).filter((deadline) => deadline > Date.now());
     if (!suspended && deadlines.length) gasStaleTimer = setTimeout(renderGas, Math.min(...deadlines) - Date.now());
   }
   function rows(values) {
@@ -234,6 +289,8 @@
           gas: quotePart(quote.gasPriceWei, quote.gasObservedAt, gasQuote.gas, true),
           usd: quotePart(quote.ethUsdE8, quote.usdObservedAt, gasQuote.usd, false),
         };
+        gasReference = referenceOf(quote.reference);
+        rebalanceProjection = projectionOf(quote.rebalance);
         gasRequestFailed = false;
         renderGas();
       }

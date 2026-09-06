@@ -30,6 +30,7 @@ async function fixture(t: TestContext) {
   let gasReads = 0;
   const watchers: FSWatcher[] = [];
   const server = await serve(0, { dataDir: directory,
+    readConfig: async () => null,
     readGas: async () => {
       gasReads++;
       return { gasPriceWei: '15000000', ethUsdE8: '400000000000',
@@ -107,10 +108,18 @@ test('chart HTTP and SSE retain host/origin checks, view-only methods and ordina
   assert.equal((await readResponse(`${f.url}/`, 'HEAD')).code, 200);
   const gas = await readResponse(`${f.url}/api/gas`);
   assert.equal(gas.code, 200);
-  assert.deepEqual(JSON.parse(gas.body), { gasPriceWei: '15000000', ethUsdE8: '400000000000',
-    gasObservedAt: '2026-09-06T02:00:00.000Z', usdObservedAt: '2026-09-06T02:00:00.000Z' });
+  const gasBody = JSON.parse(gas.body);
+  assert.deepEqual({ ...gasBody, reference: undefined, rebalance: undefined }, {
+    gasPriceWei: '15000000', ethUsdE8: '400000000000', gasObservedAt: '2026-09-06T02:00:00.000Z',
+    usdObservedAt: '2026-09-06T02:00:00.000Z', reference: undefined, rebalance: undefined });
+  assert.equal(gasBody.reference.chainId, 4663);
+  assert.equal(gasBody.reference.swapGas, '168785');
+  assert.equal(gasBody.reference.approvalGas, '57976');
+  assert.equal(gasBody.rebalance, null, 'unconfigured fixtures have no invented rebalance estimate');
+  const readsBeforeGasHead = f.reads;
   assert.equal((await readResponse(`${f.url}/api/gas`, 'HEAD')).body, '');
   assert.equal(f.gasReads, 1, 'HEAD does not request external gas or USD quotes');
+  assert.equal(f.reads, readsBeforeGasHead, 'HEAD does not project portfolio trades');
   for (const endpoint of ['/api/status', '/api/status/events', '/api/gas']) {
     assert.equal((await readResponse(f.url + endpoint, 'POST')).code, 405);
     assert.equal((await readResponse(f.url + endpoint, 'GET', { Host: 'attacker.example' })).code, 403);

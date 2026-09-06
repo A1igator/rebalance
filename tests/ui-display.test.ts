@@ -6,12 +6,17 @@ import { runInNewContext } from 'node:vm';
 const observed = '2026-09-06T02:30:00.000Z';
 const initialTime = Date.parse(observed);
 const allocation = { USDG: 500, AAPL: 2375, NVDA: 2375, MSFT: 2375, AMD: 2375 };
+const wallet = '0x1111111111111111111111111111111111111111';
 const current = {
   app: 'Rebalance', nativeBalance: '400000000000000', updatedAt: observed,
+  chain: { id: 4663 }, wallet,
+  graph: { node: 'plan' }, error: null, operation: null,
   config: { targets: allocation },
   portfolio: { totalUsdE8: '500000000', positions: Object.entries(allocation).map(([id, weightBps]) => ({ id, symbol: id, weightBps, balance: '1' })) },
 };
-const quote = { gasPriceWei: '20000000', ethUsdE8: '200000000000', gasObservedAt: observed, usdObservedAt: observed };
+const reference = { chainId: 4663, swapGas: '168785', approvalGas: '57976', swapHash: `0x${'1'.repeat(64)}`, approvalHash: `0x${'2'.repeat(64)}` };
+const projection = { swaps: 2, observedAt: observed, wallet, targets: allocation, balances: Object.fromEntries(Object.keys(allocation).map(id => [id, '1'])) };
+const quote = { gasPriceWei: '20000000', ethUsdE8: '200000000000', gasObservedAt: observed, usdObservedAt: observed, reference, rebalance: projection };
 type DisplayNode = { tag: string; textContent: string; attrs: Record<string, string>; children: DisplayNode[]; replaceChildren: () => void; append: (child: DisplayNode) => void; setAttribute: (key: string, value: string) => void };
 type Response = { ok: boolean; json: () => Promise<unknown> };
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
@@ -154,7 +159,10 @@ test('read failures preserve actual/target comparison as last known holdings', a
 test('gas balance, dollar conversion and per-unit gas price use exact integer scaling', async () => {
   const page = await browser();
   assert.equal(page.element('gas').textContent, 'Gas · 0.0004 ETH · $0.80');
-  assert.equal(page.element('gas-price').textContent, 'Gas price · 0.02 gwei · $0.00000004 / gas');
+  assert.equal(page.element('gas-price').textContent, 'Gas price · 0.02 gwei');
+  assert.match(page.element('gas-price').attrs['aria-label']!, /\$0\.00000004 \/ gas/);
+  assert.equal(page.element('gas-estimate').textContent, 'Swap ≈<$0.01 · + approval ≈<$0.01');
+  assert.equal(page.element('gas-rebalance').textContent, 'Rebalance ≈$0.01–$0.02 · 2 swaps');
   assert.match(page.element('gas').attrs['aria-label']!, /Coinbase ETH\/USD spot/);
   assert.match(page.element('gas-price').attrs['aria-label']!, /Robinhood RPC eth_gasPrice/);
   assert.match(page.element('gas-price').attrs['aria-label']!, /not a transaction fee/);
@@ -165,7 +173,8 @@ test('zero values stay zero and subprecision positive values are never rounded i
   const page = await browser({ gas: async () => ({ ok: true, json: async () => ({ ...quote, gasPriceWei: '1' }) }) });
   page.source.send({ ...current, nativeBalance: '1' });
   assert.match(page.element('gas').textContent, /0\.000000000000000001 ETH · <\$0\.01/);
-  assert.match(page.element('gas-price').textContent, /0\.000000001 gwei · <\$0\.000000000001 \/ gas/);
+  assert.match(page.element('gas-price').textContent, /0\.000000001 gwei/);
+  assert.match(page.element('gas-price').attrs['aria-label']!, /<\$0\.000000000001 \/ gas/);
   page.source.send({ ...current, nativeBalance: '0' });
   assert.equal(page.element('gas').textContent, 'Gas · 0 ETH · $0.00');
   page.hide();
@@ -177,7 +186,8 @@ test('invalid or missing native balances and quote fields remain unavailable', a
     page.source.send({ ...current, nativeBalance });
     assert.equal(page.element('gas').textContent, 'ETH gas · unavailable · USD unavailable');
   }
-  assert.equal(page.element('gas-price').textContent, 'Gas price · unavailable · USD unavailable');
+  assert.equal(page.element('gas-price').textContent, 'Gas price · unavailable');
+  assert.equal(page.element('gas-estimate').textContent, 'Swap estimate · unavailable');
   page.hide();
 });
 
@@ -201,7 +211,8 @@ test('HTTP quote failures retain prior values labeled last known', async () => {
   await page.advance(30000);
   assert.match(page.element('gas').textContent, /\$0\.80 last known/);
   assert.match(page.element('gas-price').textContent, /0\.02 gwei last known/);
-  assert.match(page.element('gas-price').textContent, /\$0\.00000004 \/ gas last known/);
+  assert.match(page.element('gas-price').attrs['aria-label']!, /\$0\.00000004 \/ gas last known/);
+  assert.match(page.element('gas-estimate').textContent, /last known/);
   assert.equal(page.renders, 1);
   page.hide();
 });
@@ -211,8 +222,8 @@ test('gas and USD observations expire independently even while the status stream
   await page.advance(30000);
   page.source.send({ ...current, updatedAt: new Date(page.now).toISOString() });
   assert.match(page.element('gas').textContent, /\$0\.80 last known/);
-  assert.match(page.element('gas-price').textContent, /0\.02 gwei ·/);
-  assert.match(page.element('gas-price').textContent, /\/ gas last known/);
+  assert.equal(page.element('gas-price').textContent, 'Gas price · 0.02 gwei');
+  assert.match(page.element('gas-price').attrs['aria-label']!, /\/ gas last known/);
   await page.advance(60000);
   assert.match(page.element('gas-price').textContent, /0\.02 gwei last known/);
   page.hide();
@@ -223,8 +234,8 @@ test('partial malformed quote updates retain only the failed source as last know
   page.setGas(async () => ({ ok: true, json: async () => ({ ...quote, ethUsdE8: null, gasPriceWei: '30000000', gasObservedAt: new Date(page.now).toISOString() }) }));
   await page.advance(30000);
   assert.match(page.element('gas').textContent, /\$0\.80 last known/);
-  assert.match(page.element('gas-price').textContent, /0\.03 gwei ·/);
-  assert.match(page.element('gas-price').textContent, /\$0\.00000006 \/ gas last known/);
+  assert.equal(page.element('gas-price').textContent, 'Gas price · 0.03 gwei');
+  assert.match(page.element('gas-price').attrs['aria-label']!, /\$0\.00000006 \/ gas last known/);
   page.hide();
 });
 
@@ -254,4 +265,87 @@ test('a hanging gas request has a five-second abort deadline and no concurrent r
   assert.equal(page.calls.filter(call => call.url === '/api/gas').length, 1);
   page.hide();
   assert.equal(page.timers.size, 0);
+});
+
+test('transaction estimates multiply the observed rate by historical swap and approval gas', async () => {
+  const page = await browser({ gas: async () => ({ ok: true, json: async () => ({ ...quote, gasPriceWei: '417860000', ethUsdE8: '250205000000' }) }) });
+  assert.equal(page.element('gas-price').textContent, 'Gas price · 0.41786 gwei');
+  assert.equal(page.element('gas-estimate').textContent, 'Swap ≈$0.18 · + approval ≈$0.06');
+  assert.equal(page.element('gas-rebalance').textContent, 'Rebalance ≈$0.35–$0.47 · 2 swaps');
+  assert.match(page.element('gas-estimate').attrs['aria-label']!, /historical single-pool receipts/);
+  assert.match(page.element('gas-rebalance').attrs['aria-label']!, /zero to one approval per swap leg/);
+  assert.match(page.element('gas-rebalance').attrs['aria-label']!, /exclude market movement, liquidity-provider fees and slippage/);
+  page.hide();
+});
+
+test('a fresh matching zero-swap projection costs zero even when price sources are unavailable', async () => {
+  const page = await browser({ gas: async () => ({ ok: true, json: async () => ({ ...quote, gasPriceWei: null, ethUsdE8: null, rebalance: { ...projection, swaps: 0 } }) }) });
+  assert.equal(page.element('gas-estimate').textContent, 'Swap estimate · unavailable');
+  assert.equal(page.element('gas-rebalance').textContent, 'Rebalance · $0 (on target)');
+  page.hide();
+});
+
+test('a changed wallet, target allocation or holding balance invalidates an earlier projection immediately', async () => {
+  const page = await browser({ gas: async () => ({ ok: true, json: async () => ({ ...quote, rebalance: { ...projection, swaps: 0 } }) }) });
+  for (const next of [
+    { ...current, wallet: '0x2222222222222222222222222222222222222222' },
+    { ...current, chain: { id: 1 } },
+    { ...current, config: { targets: { ...allocation, USDG: 600, AAPL: 2275 } } },
+    { ...current, portfolio: { ...current.portfolio, positions: current.portfolio.positions.map((p, i) => ({ ...p, balance: i === 0 ? '2' : p.balance })) } },
+  ]) {
+    page.source.send(next);
+    assert.equal(page.element('gas-rebalance').textContent, 'Rebalance estimate · unavailable');
+  }
+  page.source.send({ ...current, config: { targets: { AMD: 2375, MSFT: 2375, NVDA: 2375, AAPL: 2375, USDG: 500 } }, portfolio: { ...current.portfolio, positions: [...current.portfolio.positions].reverse() } });
+  assert.equal(page.element('gas-rebalance').textContent, 'Rebalance · $0 (on target)', 'insertion order does not invalidate matching projection content');
+  page.hide();
+});
+
+test('fresh null projections clear retained estimates instead of preserving an old zero cost', async () => {
+  const page = await browser({ gas: async () => ({ ok: true, json: async () => ({ ...quote, rebalance: { ...projection, swaps: 0 } }) }) });
+  assert.equal(page.element('gas-rebalance').textContent, 'Rebalance · $0 (on target)');
+  page.setGas(async () => ({ ok: true, json: async () => ({ ...quote, rebalance: null }) }));
+  await page.advance(30000);
+  assert.equal(page.element('gas-rebalance').textContent, 'Rebalance estimate · unavailable');
+  page.hide();
+});
+
+test('stale projections are labeled last known independently of fresh price sources', async () => {
+  const page = await browser({ gas: async () => ({ ok: true, json: async () => ({ ...quote, rebalance: { ...projection, swaps: 0 } }) }) });
+  page.setGas(async () => ({ ok: true, json: async () => ({ ...quote, gasObservedAt: new Date(page.now).toISOString(), usdObservedAt: new Date(page.now).toISOString(), rebalance: { ...projection, swaps: 0 } }) }));
+  await page.advance(90000);
+  page.source.send({ ...current, updatedAt: new Date(page.now).toISOString() });
+  assert.equal(page.element('gas-rebalance').textContent, 'Rebalance · $0 (last known projection)');
+  assert.doesNotMatch(page.element('gas-price').textContent, /last known/);
+  page.hide();
+});
+
+test('invalid historical references or malformed projections cannot manufacture transaction estimates', async () => {
+  const page = await browser({ gas: async () => ({ ok: true, json: async () => ({ ...quote, reference: { ...reference, chainId: 1 }, rebalance: { ...projection, swaps: -1 } }) }) });
+  assert.equal(page.element('gas-estimate').textContent, 'Swap estimate · unavailable');
+  assert.equal(page.element('gas-rebalance').textContent, 'Rebalance estimate · unavailable');
+  page.setGas(async () => ({ ok: true, json: async () => ({ ...quote, reference: { ...reference, swapGas: '0' }, rebalance: { ...projection, balances: {} } }) }));
+  await page.advance(30000);
+  assert.equal(page.element('gas-estimate').textContent, 'Swap estimate · unavailable');
+  assert.equal(page.element('gas-rebalance').textContent, 'Rebalance estimate · unavailable');
+  page.hide();
+});
+
+test('new transaction or recovery states invalidate an old on-target projection before quotes refresh', async () => {
+  const page = await browser({ gas: async () => ({ ok: true, json: async () => ({ ...quote, rebalance: { ...projection, swaps: 0 } }) }) });
+  assert.equal(page.element('gas-rebalance').textContent, 'Rebalance · $0 (on target)');
+  for (const status of ['pending', 'unresolved', 'confirming', 'reverted', 'recovery-wait', 'recovery-busy']) {
+    page.source.send({ ...current, operation: { status } });
+    assert.equal(page.element('gas-rebalance').textContent, 'Rebalance estimate · unavailable', status);
+  }
+  for (const node of ['execute', 'reconcile', 'recover', 'receipt', 'error']) {
+    page.source.send({ ...current, graph: { node } });
+    assert.equal(page.element('gas-rebalance').textContent, 'Rebalance estimate · unavailable', node);
+  }
+  page.source.send({ ...current, error: 'Read unavailable' });
+  assert.equal(page.element('gas-rebalance').textContent, 'Rebalance estimate · unavailable');
+  page.source.send({ ...current, operation: { status: 'cancelled' } });
+  assert.equal(page.element('gas-rebalance').textContent, 'Rebalance · $0 (on target)', 'a settled operation with the same basis remains usable');
+  assert.equal(page.calls.filter(call => call.url === '/api/gas').length, 1, 'status events invalidate display without extra quote fetches');
+  page.hide();
 });
