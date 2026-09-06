@@ -1,6 +1,6 @@
 # Robinhood networks and integration evidence
 
-Initial documentation review: **2026-09-04**. Subsequent public mainnet RPC checks and local wallet setup are recorded below and in the linked evidence. Mainnet funding has been observed; the app has not signed or submitted an approval or swap.
+Initial documentation review: **2026-09-04**. Current-state correction: **2026-09-06**. Subsequent public mainnet RPC checks and local wallet setup are recorded below and in the linked evidence. The user-armed app has submitted approvals/swaps and recorded its first complete five-asset rebalance; earlier no-trade and partial-portfolio observations remain historical.
 
 ## Decision
 
@@ -16,11 +16,11 @@ Use Robinhood's documented stock-token metadata, transfer behavior and price-fee
 
 The official [Uniswap v4 deployment registry](https://developers.uniswap.org/docs/protocols/v4/deployments) lists Robinhood mainnet. Verify exact contract identities and available pools instead of inferring addresses across chains.
 
-The current demo portfolio is USDG plus four canonical Robinhood stock tokens: AAPL, NVDA, MSFT and AMD. All four stock/USDG Uniswap v3 routes passed bidirectional live quote checks; see [the original RWA report](RWA_CHECK.md), [current demo report](DEMO_PORTFOLIO.md) and retained public evidence. Runtime uses DEX estimates of actual ERC20 units, checks advisory corporate-action pauses and keeps native ETH outside allocations for gas. WETH is excluded. The first Apple swap has a verified successful receipt; the other three stocks remain unbought in the last observation. Further receipts and a fresh within-threshold portfolio are required before claiming a completed rebalance. No mock assets or alternative-chain fallback is used.
+The current demo portfolio is USDG plus four canonical Robinhood stock tokens: AAPL, NVDA, MSFT and AMD. All four stock/USDG Uniswap v3 routes passed bidirectional live quote checks; see [the original RWA report](RWA_CHECK.md), [current demo report](DEMO_PORTFOLIO.md) and retained public evidence. Runtime uses DEX estimates of actual ERC20 units, checks advisory corporate-action pauses and keeps native ETH outside allocations for gas. WETH is excluded. Following user-issued recovery/relaunch, the app recorded completion at **2026-09-05T23:33:58.399Z** with fresh five-asset holdings within its drift threshold. The final swap receipt was checked through public RPC at block **55516741**; [receipt evidence](evidence/robinhood-app-gas-reference.json) retains that transaction. These observations supersede the earlier Apple-only stage without establishing light-client or L1-finality verification. No mock assets or alternative-chain fallback is used.
 
 ## Local verification
 
-Robinhood's documented [Nitro full node](https://docs.robinhood.com/chain/run-a-full-node/) has substantial hardware requirements. The reviewed [Helios documentation](https://github.com/a16z/helios/blob/master/README.md) does not establish Robinhood/Nitro support. Use a labelled Robinhood RPC mode first; keep local-node/light-client claims conditional on an actual compatible verification path. Record L1 anchoring/finality/bootstrap assumptions. Issuer, oracle and chain governance assumptions remain even with locally verified state.
+Robinhood's documented [Nitro full node](https://docs.robinhood.com/chain/run-a-full-node/) has substantial hardware requirements. The [September 6 light-client review](LIGHT_CLIENT_CHECK.md) covers Ethereum/EVM candidates and Union's actual Arbitrum/BoLD verifier. No ready Robinhood application RPC was established; Union's inspected assertion-existence check does not require confirmed settlement. The runtime still uses labelled RPC mode. Keep local-node/light-client claims conditional on an actual compatible verification path, recording L1 anchoring, freshness, finality and bootstrap assumptions. Issuer, oracle and chain governance assumptions remain even with locally verified state.
 
 ## Close before implementation claims
 
@@ -28,4 +28,4 @@ Robinhood's documented [Nitro full node](https://docs.robinhood.com/chain/run-a-
 - Preserve chain 4663 asset/router evidence; historical chain 46630 observations are not an active migration path or proof of testnet stock support.
 - Validate fresh DEX quotes of actual token units, advisory corporate-action pauses and ordinary slippage/expiry handling. Do not claim independent share-price, market-calendar or sequencer verification.
 - Validate the persisted one-hour cycle interval and ten-minute active window, then obtain a user-started mainnet receipt with explicit network and token provenance. Pending receipts must reconcile before the interval gate.
-- The manifest and live read-only evidence are recorded in `RWA_CHECK.md`; verification remains RPC mode. The application and local wallet now exist. A user-started Apple swap receipt was verified through read-only RPC on September 5. The full five-asset rebalance is incomplete; [recovery details](RECOVERY.md) distinguish that partial result from completion.
+- The manifest and live read-only evidence are recorded in `RWA_CHECK.md`; verification remains RPC mode. The application and funded local wallet exist. The earlier partial result is superseded by the completion evidence above; [recovery details](RECOVERY.md) preserve the intervening recovery stages. Privy/Ledger execution and independent light-client verification remain incomplete.
