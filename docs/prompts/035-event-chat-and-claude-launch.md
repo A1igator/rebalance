@@ -38,3 +38,10 @@ After verifying this task's actual UUID with the app tool and an empty retained 
 The test is queued behind the active conversation turn. Its later native arrival, acknowledgement and fallback removal remain separate verification steps; native acceptance alone does not prove processing or phone delivery. The five-minute heartbeat remains active until that arrival. A heartbeat reading the test from local storage must not acknowledge it as delivery evidence. The shared skill documents the required handoff without another user application command.
 
 Final code validation: **359/359 tests**, zero skipped, plus TypeScript and Git whitespace checks. The earlier sandboxed run could not open required local test sockets/watchers; the authorized isolated rerun with those capabilities passed. Tests use temporary storage/fake providers/disposable identities and do not submit live trades. Implementation/source disclosures and subsequent native delivery evidence are kept in `docs/AI_USAGE.md`.
+
+
+## Verified native handoff — 2026-09-06
+
+After the implementation response ended, the native queue delivered the exact retained `notification-test` prompt into this same existing conversation and triggered its next turn. Root reported the test ID, read local `events` and `status`, and verified it was a labelled connection test with trading still unarmed. Root acknowledged that exact ID through the CLI. The native automation tool then confirmed deletion of `rebalance-notifications`, removing the five-minute model-check fallback.
+
+This establishes application file event → native queue → existing conversation → explicit acknowledgement. It required no additional human application command, thread resume, second writer, daemon setup, financial action or hook/trust change. Codex's own ten-second shared-queue revision check remains a native implementation detail; the overall host path is not literally event-only. Phone delivery and a user-issued native Claude hook remain unverified. No runtime code changed during this verification; the preceding 359-test result still applies.
