@@ -1,0 +1,28 @@
+{
+  "date": "2026-09-07",
+  "behavior": "Exact automatic read/quote retries and successful recovery are local-only before both model transports",
+  "fullSuite": {
+    "passed": 547,
+    "failed": 0,
+    "skipped": 0,
+    "stage": "before final withdrawal-preparation correction"
+  },
+  "finalCodexNotificationRegression": {
+    "passed": 41,
+    "failed": 0
+  },
+  "typecheck": "passed",
+  "skillValidation": "passed",
+  "activation": {
+    "notificationWorkerReloaded": true,
+    "enabled": true,
+    "running": true,
+    "queued": 0,
+    "uncertain": 0,
+    "error": null,
+    "localTradingRecordsUnchanged": true,
+    "notificationDestinationAndPreferencePreserved": true
+  },
+  "liveQueueWithdrawalPerformed": false,
+  "phoneDeliveryClaimed": false
+}

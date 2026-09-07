@@ -164,44 +164,77 @@ test('a stalled stdio write ends the channel after its deadline and preserves un
   assert.deepEqual(JSON.parse(await readFile(join(data, 'events.json'), 'utf8')), queue);
 });
 
-test('Claude channel keeps brief read failures and automatic recovery quiet across reconnect', { timeout: 8_000 }, async t => {
-  const dataDir = await mkdtemp(join(tmpdir(), 'rebalance-channel-quiet-'));
-  t.after(() => rm(dataDir, { recursive: true, force: true }));
-  const at = Date.now();
-  const observation = (healthy: boolean, time: number) => ({ wallet: `0x${'a'.repeat(40)}`,
-    portfolio: { totalUsdE8: '100', positions: [{ id: 'USDG', balance: '100', priceUsdE8: '100000000', valueUsdE8: '100', weightBps: 10000, targetBps: 10000 }] },
-    updatedAt: new Date(time).toISOString(), error: healthy ? null : 'Read failed',
-    graph: healthy ? { node: 'wait', trace: ['config', 'observe', 'plan', 'wait'] } : { node: 'error', trace: ['config', 'observe', 'error'] },
+test('Claude channel never escalates automatic read/quote retries or recovery across process restarts', { timeout: 25_000 }, async t => {
+  const readMessage = 'Rebalance needs attention: Fresh portfolio holdings or prices could not be read. No completion is confirmed by this alert. Review the current agent status before recovery.';
+  const quoteMessage = 'Rebalance needs attention: A usable swap quote could not be obtained. No completion is confirmed by this alert. Review the current agent status before recovery.';
+  for (const fixture of ['missing-state', 'corrupt-state', 'legacy-eligible'] as const) await t.test(fixture, async t => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'rebalance-channel-quiet-'));
+    t.after(() => rm(dataDir, { recursive: true, force: true }));
+    const at = Date.now();
+    const old = '2020-01-01T00:00:00.000Z';
+    const current = new Date(at).toISOString();
+    const observation = (healthy: boolean) => ({ wallet: `0x${'a'.repeat(40)}`, armed: true,
+      portfolio: { totalUsdE8: '100', positions: [{ id: 'USDG', balance: '100', priceUsdE8: '100000000', valueUsdE8: '100', weightBps: 10000, targetBps: 10000 }] },
+      updatedAt: current, error: healthy ? null : 'Read failed',
+      graph: healthy ? { node: 'wait', trace: ['config', 'observe', 'plan', 'wait'] } : { node: 'error', trace: ['config', 'observe', 'error'] },
+    });
+    const legacyFiles = ['read-notification-state.json', 'quote-notification-state.json'];
+    const legacyBefore = new Map<string, string>();
+    if (fixture !== 'missing-state') {
+      await writeFile(join(dataDir, 'status.json'), fixture === 'corrupt-state' ? '{invalid' : JSON.stringify(observation(false)));
+      for (const [index, name] of legacyFiles.entries()) {
+        const content = fixture === 'corrupt-state' ? '{invalid' : JSON.stringify({ version: 1, clockAt: at,
+          incident: { wallet: `0x${'a'.repeat(40)}`, representativeId: index === 0 ? 'old-read' : 'old-quote',
+            firstFailureAt: Date.parse(old), latestFailureAt: at, eligible: true, healthySince: null, lastHealthyAt: null }, suppressed: [] });
+        legacyBefore.set(name, content);
+        await writeFile(join(dataDir, name), content);
+      }
+    }
+    const retry = (id: string, message: string, createdAt = current) => ({ id, type: 'rebalance-attention', createdAt, message });
+    const retained = [
+      retry('old-read', readMessage, old), retry('old-quote', quoteMessage, old),
+      retry('new-read', readMessage), retry('new-quote', quoteMessage),
+      { id: 'quiet-recovery', type: 'rebalance-recovered', createdAt: old, message: 'Automatic recovery confirmed.' },
+      { id: 'meaningful-completion', type: 'rebalance-completed', createdAt: current, message: 'A confirmed completion.' },
+      { id: 'meaningful-ledger', type: 'ledger-rebalance-needed', createdAt: current, message: 'Physical device confirmation is needed.' },
+      { id: 'meaningful-test', type: 'notification-test', createdAt: current, message: 'Requested connection test.' },
+      retry('meaningful-failure', 'A signing configuration needs attention.'),
+      { ...retry('transaction-bearing-read', readMessage), hash: `0x${'a'.repeat(64)}` },
+      retry('unrecognized-read', 'Fresh portfolio holdings or prices could not be read: unfamiliar cause.'),
+    ];
+    const expected = ['meaningful-completion', 'meaningful-ledger', 'meaningful-test', 'meaningful-failure', 'transaction-bearing-read', 'unrecognized-read'];
+    await atomicWriteJson(join(dataDir, 'events.json'), retained);
+    const session = await openSession(dataDir); t.after(() => session.client.close());
+    await waitFor(() => session.received.length >= expected.length, 'actionable and requested events must pass without status or filter-state prerequisites');
+    assert.deepEqual(session.received.map(eventId), expected);
+
+    // A later failing observation and another retry must not promote any old
+    // incident. A meaningful sentinel proves the changed queue was consumed.
+    await atomicWriteJson(join(dataDir, 'status.json'), observation(true));
+    await atomicWriteJson(join(dataDir, 'status.json'), observation(false));
+    retained.push(retry('flapping-read', readMessage), retry('flapping-quote', quoteMessage),
+      { id: 'latest-test', type: 'notification-test', createdAt: current, message: 'Requested subsequent connection test.' });
+    expected.push('latest-test');
+    await atomicWriteJson(join(dataDir, 'events.json'), retained);
+    await waitFor(() => session.received.length >= expected.length, 'the existing channel must consume the updated event queue');
+    assert.deepEqual(session.received.map(eventId), expected);
+    assert.deepEqual(session.errors, []); assert.equal(session.stderr(), '');
+    await session.client.close();
+
+    // Neither time-based eligibility from the old journal nor a process restart
+    // can make the same retained automatic event eligible for model context.
+    const reconnect = await openSession(dataDir); t.after(() => reconnect.client.close());
+    await waitFor(() => reconnect.received.length >= expected.length, 'unacknowledged meaningful events replay after restart');
+    assert.deepEqual(reconnect.received.map(eventId), expected);
+    assert.deepEqual(reconnect.errors, []); assert.equal(reconnect.stderr(), '');
+    await reconnect.client.close();
+    assert.deepEqual(JSON.parse(await readFile(join(dataDir, 'events.json'), 'utf8')), retained,
+      'local-only delivery filtering neither deletes nor acknowledges raw events');
+    for (const name of legacyFiles) {
+      if (legacyBefore.has(name)) assert.equal(await readFile(join(dataDir, name), 'utf8'), legacyBefore.get(name));
+      else await assert.rejects(readFile(join(dataDir, name), 'utf8'), { code: 'ENOENT' });
+    }
   });
-  const retained = [
-    { id: 'quiet-read', type: 'rebalance-attention', createdAt: new Date(at).toISOString(),
-      message: 'Rebalance needs attention: Fresh portfolio holdings or prices could not be read. No completion is confirmed by this alert. Review the current agent status before recovery.' },
-    { id: 'quiet-recovery', type: 'rebalance-recovered', createdAt: new Date(at).toISOString(), message: 'Automatic recovery confirmed.' },
-    { id: 'meaningful-completion', type: 'rebalance-completed', createdAt: new Date(at).toISOString(), message: 'A confirmed completion.' },
-  ];
-  await atomicWriteJson(join(dataDir, 'status.json'), observation(false, at - 1));
-  await atomicWriteJson(join(dataDir, 'events.json'), retained);
-  const session = await openSession(dataDir); t.after(() => session.client.close());
-  await waitFor(() => session.received.length > 0, 'completion must pass during read-alert grace');
-  assert.deepEqual(session.received.map(eventId), ['meaningful-completion']);
-  await atomicWriteJson(join(dataDir, 'status.json'), observation(true, Date.now()));
-  const deadline = Date.now() + 2_000;
-  let suppressed: string[] = [];
-  while (Date.now() < deadline) {
-    const saved = JSON.parse(await readFile(join(dataDir, 'read-notification-state.json'), 'utf8'));
-    suppressed = saved.suppressed.map((entry: { id: string }) => entry.id);
-    if (suppressed.includes('quiet-read')) break;
-    await delay(10);
-  }
-  assert.ok(suppressed.includes('quiet-read'), 'status replacement must suppress the resolved read event without a queue change');
-  assert.ok(suppressed.includes('quiet-recovery'));
-  assert.deepEqual(JSON.parse(await readFile(join(dataDir, 'events.json'), 'utf8')), retained, 'silence is not deletion or acknowledgement');
-  assert.deepEqual(session.received.map(eventId), ['meaningful-completion']);
-  await session.client.close();
-  const reconnect = await openSession(dataDir); t.after(() => reconnect.client.close());
-  await waitFor(() => reconnect.received.length > 0, 'unacknowledged completion replays');
-  assert.deepEqual(reconnect.received.map(eventId), ['meaningful-completion']);
-  await reconnect.client.close();
 });
 
 

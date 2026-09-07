@@ -1,0 +1,47 @@
+{
+  "date": "2026-09-07",
+  "portfolioMode": "privy",
+  "objective": "sharpe",
+  "otherPortfolioChanged": false,
+  "underlyingShareProxyAuthorized": true,
+  "cashWeightFixed": false,
+  "sources": {
+    "stocks": [
+      "https://query1.finance.yahoo.com/v8/finance/chart/AAPL?range=1y&interval=1d&events=div%2Csplits&includeAdjustedClose=true",
+      "https://query1.finance.yahoo.com/v8/finance/chart/NVDA?range=1y&interval=1d&events=div%2Csplits&includeAdjustedClose=true",
+      "https://query1.finance.yahoo.com/v8/finance/chart/MSFT?range=1y&interval=1d&events=div%2Csplits&includeAdjustedClose=true",
+      "https://query1.finance.yahoo.com/v8/finance/chart/AMD?range=1y&interval=1d&events=div%2Csplits&includeAdjustedClose=true"
+    ],
+    "stockAdjustment": "https://help.yahoo.com/kb/SLN28256.html",
+    "usdg": "https://api.kraken.com/0/public/OHLC?pair=USDGUSD&interval=1440",
+    "usdgDocumentation": "https://docs.kraken.com/api-reference/market-data/get-ohlc-data"
+  },
+  "observations": 251,
+  "window": {
+    "firstReturn": "2025-09-08",
+    "lastReturn": "2026-09-04"
+  },
+  "historySha256": "4e9347d37c34e5b64b1b2259192a92a5f2e05b1ded4befc51f003d23046efb70",
+  "assumptions": [
+    "underlying adjusted shares and Kraken USDG/USD exchange-price proxies",
+    "calendar-date alignment with differing US equity and UTC USDG close times",
+    "zero return benchmark",
+    "constant weights per observation; no execution costs",
+    "one-percentage-point grid, long-only 0\u2013100% bounds for every asset"
+  ],
+  "targetsBps": {
+    "AAPL": 1800,
+    "AMD": 1000,
+    "MSFT": 0,
+    "NVDA": 100,
+    "USDG": 7100
+  },
+  "dailySharpe": 0.14457986176270507,
+  "annualized": false,
+  "searchedCandidates": 4598127,
+  "independentRatioCheck": "passed",
+  "adoption": "saved through wallet-scoped allocation set; matches preview",
+  "rawHistoryPublished": false,
+  "tradingStarted": false,
+  "transactionsSubmitted": false
+}

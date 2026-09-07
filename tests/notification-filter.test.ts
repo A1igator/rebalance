@@ -1,279 +1,168 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import fs from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import type { RebalanceEvent } from '../src/events.js';
-import { createNotificationFilter, readSuppressedEventIds } from '../src/notification-filter.js';
-import { atomicWriteJson } from '../src/storage.js';
+import { createNotificationFilter, isLocalOnlyNotification, isRetryableAttention } from '../src/notification-filter.js';
 
 const epoch = Date.parse('2026-09-06T12:00:00Z');
-const wallet = `0x${'a'.repeat(40)}`;
-const message = 'Rebalance needs attention: Fresh portfolio holdings or prices could not be read. No completion is confirmed by this alert. Review the current agent status before recovery.';
 const iso = (at: number) => new Date(at).toISOString();
-const failure = (id: string, at = epoch): RebalanceEvent => ({ id, type: 'rebalance-attention', createdAt: iso(at), message });
-const critical = (id = 'critical'): RebalanceEvent => ({ id, type: 'rebalance-completed', createdAt: iso(epoch), message: 'Completion retained.' });
+const readMessage = 'Rebalance needs attention: Fresh portfolio holdings or prices could not be read. No completion is confirmed by this alert. Review the current agent status before recovery.';
+const quoteMessage = 'Rebalance needs attention: A usable swap quote could not be obtained. No completion is confirmed by this alert. Review the current agent status before recovery.';
+const transactionHash = `0x${'a'.repeat(64)}`;
+const event = (id: string, type: RebalanceEvent['type'], message: string, at = epoch): RebalanceEvent => ({
+  id, type, message, createdAt: iso(at),
+});
+const read = (id = 'read', at = epoch) => event(id, 'rebalance-attention', readMessage, at);
+const quote = (id = 'quote', at = epoch) => event(id, 'rebalance-attention', quoteMessage, at);
+const recovered = (id = 'recovered', at = epoch) => ({
+  ...event(id, 'rebalance-recovered', 'Automatic transaction recovery completed.', at), hash: transactionHash,
+});
+const completion = (id = 'completion', at = epoch) => ({
+  ...event(id, 'rebalance-completed', 'Rebalance completed after its verified receipt.', at), hash: transactionHash,
+});
 
 async function fixture(t: TestContext) {
-  const dataDir = await mkdtemp(join(tmpdir(), 'rebalance-notification-filter-'));
-  t.after(() => rm(dataDir, { recursive: true, force: true }));
-  let now = epoch;
-  const factory = (persist?: (path: string, value: unknown) => Promise<void>) => createNotificationFilter({ dataDir, now: () => now, statusModifiedAt: async () => now, persist });
-  const status = async (kind: 'failure' | 'healthy' | 'intermediate', at = now, otherWallet = wallet) => atomicWriteJson(join(dataDir, 'status.json'), {
-    wallet: otherWallet, error: kind === 'failure' ? 'Read unavailable.' : null,
-    portfolio: { totalUsdE8: '100', positions: [{ id: 'USDG', balance: '100', priceUsdE8: '1', valueUsdE8: '100', weightBps: 10_000, targetBps: 10_000 }] },
-    updatedAt: iso(at), graph: kind === 'failure' ? { node: 'error', trace: ['config', 'observe', 'error'] }
-      : kind === 'healthy' ? { node: 'wait', trace: ['config', 'observe', 'plan', 'wait'] }
-        : { node: 'observe', trace: ['config', 'observe'] },
+  const directory = await fs.mkdtemp(join(tmpdir(), 'rebalance-notification-classification-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  return directory;
+}
+
+test('exact read and quote retries plus all automatic recoveries are local-only', async () => {
+  const local = [read(), quote(), recovered(), { ...recovered('unhashed-recovery'), hash: undefined }];
+  assert.deepEqual(local.map(isRetryableAttention), [true, true, false, false]);
+  assert.ok(local.every(isLocalOnlyNotification));
+  assert.deepEqual(await createNotificationFilter().select(local), { events: [], nextAt: null });
+});
+
+test('unknown attention, transaction hashes, hardware attention, completions and connection tests remain immediate', async () => {
+  const phases = [
+    'The local configuration could not be loaded.',
+    'The previous transaction could not be reconciled.',
+    'Automatic transaction recovery could not proceed.',
+    'The rebalance plan could not be calculated.',
+    'The saved rebalance timing could not be read.',
+    'Transaction preparation or execution failed.',
+    'The local runtime state could not be saved.',
+    'A network or local runtime operation failed.',
+  ].map((message, index) => event(`phase-${index}`, 'rebalance-attention',
+    `Rebalance needs attention: ${message} No completion is confirmed by this alert. Review the current agent status before recovery.`));
+  const immediate = [
+    ...phases,
+    event('unresolved', 'rebalance-attention', 'A transaction has an unknown outcome; further trades are paused.'),
+    event('unknown', 'rebalance-attention', 'Unrecognized attention needs review.'),
+    { ...read('hashed-read'), hash: transactionHash },
+    { ...quote('hashed-quote'), hash: transactionHash },
+    event('hardware', 'ledger-rebalance-needed', 'Physical Ledger confirmation is required.'),
+    completion(), event('connection', 'notification-test', 'Notification connection test.'),
+  ];
+  assert.ok(immediate.every(item => !isRetryableAttention(item) && !isLocalOnlyNotification(item)));
+  assert.deepEqual(await createNotificationFilter().select([read(), ...immediate, quote(), recovered()]),
+    { events: immediate, nextAt: null });
+});
+
+test('local-only recognition requires the exact fixed attention text and event type', async () => {
+  const nearMatches = [
+    ...[readMessage, quoteMessage].flatMap((message, index) => [
+      event(`prefix-${index}`, 'rebalance-attention', ` ${message}`),
+      event(`suffix-${index}`, 'rebalance-attention', `${message} Additional operator action required.`),
+      event(`changed-${index}`, 'rebalance-attention', message.replace('could not', 'could never')),
+      event(`typed-${index}`, 'rebalance-completed', message),
+      event(`ledger-${index}`, 'ledger-rebalance-needed', message),
+      event(`test-${index}`, 'notification-test', message),
+    ]),
+  ];
+  assert.ok(nearMatches.every(item => !isLocalOnlyNotification(item)));
+  assert.deepEqual(await createNotificationFilter().select(nearMatches), { events: nearMatches, nextAt: null });
+});
+
+test('acknowledged events stay in history but are never selected again', async () => {
+  const entries = [read(), quote(), recovered(), completion(), event('test', 'notification-test', 'Connection test.')];
+  const acknowledged = entries.map(item => ({ ...item, acknowledgedAt: iso(epoch + 1000) }));
+  const before = structuredClone(acknowledged);
+  const pending = completion('new-completion', epoch + 2000);
+  assert.deepEqual(await createNotificationFilter().select([...acknowledged, pending]), { events: [pending], nextAt: null });
+  assert.deepEqual(acknowledged, before);
+  assert.equal(isLocalOnlyNotification(acknowledged[3]!), false, 'acknowledgement and event classification are separate decisions');
+});
+
+test('local retries never mature into alerts across long outages, clock changes or filter restarts', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: epoch });
+  const retained = [read(), quote(), recovered()];
+  const first = createNotificationFilter();
+  for (const at of [epoch, epoch + 120_000, epoch + 600_000, epoch + 365 * 86_400_000, epoch - 1000]) {
+    t.mock.timers.setTime(at);
+    const latest = [...retained, read(`retry-${at}`, at), quote(`quote-${at}`, at)];
+    for (const filter of [first, createNotificationFilter()]) {
+      assert.deepEqual(await filter.select(latest), { events: [], nextAt: null });
+    }
+  }
+  assert.ok(retained.every(item => item.acknowledgedAt === undefined));
+});
+
+test('status flaps and old missing or corrupt filter files cannot affect classification or mutate history', async t => {
+  const directory = await fixture(t);
+  const queue = [read(), quote(), completion(), recovered()];
+  const files: Record<string, string> = {
+    'events.json': JSON.stringify(queue),
+    'read-notification-state.json': '{corrupt legacy incident',
+    'quote-notification-state.json': JSON.stringify({ version: 1, clockAt: epoch,
+      incident: { representativeId: 'quote', eligible: true }, suppressed: [{ id: 'completion', reason: 'duplicate-quote' }] }),
+    'read-notifications.lock': '{corrupt abandoned lock',
+    'quote-notifications.lock': '{corrupt abandoned lock',
+  };
+  for (const [name, bytes] of Object.entries(files)) await fs.writeFile(join(directory, name), bytes);
+  const filter = createNotificationFilter();
+  for (const status of [null, '{corrupt status', JSON.stringify({ error: 'read failure', armed: true }),
+    JSON.stringify({ error: null, graph: { node: 'observe' } }),
+    JSON.stringify({ error: null, graph: { node: 'wait' }, updatedAt: iso(epoch + 30_000) }),
+    JSON.stringify({ error: 'quote failure', armed: false })]) {
+    if (status !== null) await fs.writeFile(join(directory, 'status.json'), status);
+    const before = new Map(await Promise.all((await fs.readdir(directory)).map(async name =>
+      [name, await fs.readFile(join(directory, name), 'utf8')] as const)));
+    for (const selected of [filter, createNotificationFilter()]) {
+      assert.deepEqual(await selected.select(queue), { events: [queue[2]], nextAt: null });
+    }
+    assert.deepEqual((await fs.readdir(directory)).sort(), [...before.keys()].sort());
+    for (const [name, bytes] of before) assert.equal(await fs.readFile(join(directory, name), 'utf8'), bytes);
+  }
+});
+
+test('classification performs no file reads, writes, lock operations or timer scheduling', async t => {
+  const calls: string[] = [];
+  const methods = ['readFile', 'writeFile', 'stat', 'open', 'mkdir', 'chmod', 'rename', 'unlink'] as const;
+  const mocks = methods.map(name => t.mock.method(fs, name, () => {
+    calls.push(name); throw new Error('Classification must not access files');
+  }));
+  const timer = t.mock.method(globalThis, 'setTimeout', () => {
+    calls.push('setTimeout'); throw new Error('Classification must not schedule timers');
   });
-  return { dataDir, factory, status, setTime: (at: number) => { now = at; },
-    suppressed: () => readSuppressedEventIds(dataDir),
-    saved: async () => JSON.parse(await readFile(join(dataDir, 'read-notification-state.json'), 'utf8')) };
-}
-
-test('persistent failure becomes eligible at exactly two minutes and survives filter restart', async t => {
-  const f = await fixture(t); await f.status('failure');
-  const queue = [failure('read-1')];
-  const initial = await f.factory().select(queue);
-  assert.deepEqual(initial.events, []); assert.equal(initial.nextAt, epoch + 120_000);
-  f.setTime(epoch + 119_999);
-  assert.deepEqual((await f.factory().select(queue)).events, []);
-  f.setTime(epoch + 120_000);
-  assert.deepEqual((await f.factory().select(queue)).events, queue);
-  assert.deepEqual((await f.factory().select(queue)).events, queue, 'same representative is retained for transport deduplication');
-  queue.push(failure('read-2', epoch + 120_000));
-  assert.deepEqual((await f.factory().select(queue)).events, [queue[0]]);
-  assert.ok((await f.suppressed()).has('read-2'));
-  assert.equal(queue[1].acknowledgedAt, undefined);
+  syncBuiltinESMExports();
+  try {
+    const direct = completion();
+    const filter = createNotificationFilter();
+    assert.deepEqual(await filter.select([read(), direct, quote(), recovered()]), { events: [direct], nextAt: null });
+    assert.deepEqual(await filter.select([]), { events: [], nextAt: null });
+    assert.deepEqual(calls, []);
+  } finally {
+    for (const mock of mocks) mock.mock.restore();
+    timer.mock.restore(); syncBuiltinESMExports();
+  }
 });
 
-test('a fresh brief success suppresses an unreported failure and restarts the next failure timer', async t => {
-  const f = await fixture(t); const first = failure('short-1');
-  await f.status('failure'); await f.factory().select([first]);
-  f.setTime(epoch + 30_000); await f.status('healthy', epoch + 30_000);
-  assert.deepEqual((await f.factory().select([first])).events, []);
-  assert.ok((await f.suppressed()).has(first.id));
-  f.setTime(epoch + 40_000); await f.status('failure', epoch + 30_000);
-  const second = failure('short-2', epoch + 40_000);
-  const pending = await f.factory().select([first, second]);
-  assert.equal(pending.nextAt, epoch + 160_000);
-  f.setTime(epoch + 159_999);
-  assert.deepEqual((await f.factory().select([first, second])).events, []);
-});
-
-test('a new failure UUID resets the unreported timer even if the brief successful status was missed', async t => {
-  const f = await fixture(t); const first = failure('missed-1');
-  await f.status('failure'); await f.factory().select([first]);
-  f.setTime(epoch + 110_000);
-  const result = await f.factory().select([first, failure('missed-2', epoch + 110_000)]);
-  assert.deepEqual(result.events, []); assert.equal(result.nextAt, epoch + 230_000);
-  assert.ok((await f.suppressed()).has(first.id));
-});
-
-test('intermediate and stale snapshots cannot clear an incident or manufacture recovery', async t => {
-  const f = await fixture(t); const queue = [failure('stale')];
-  await f.status('failure'); await f.factory().select(queue);
-  f.setTime(epoch + 10_000); await f.status('intermediate', epoch + 5_000);
-  await f.factory().select(queue); assert.notEqual((await f.saved()).incident, null);
-  await f.status('healthy', epoch); await f.factory().select(queue);
-  assert.notEqual((await f.saved()).incident, null, 'retained timestamp does not prove a successful read');
-  f.setTime(epoch + 120_000); await f.status('failure'); await f.factory().select(queue);
-  f.setTime(epoch + 130_000); await f.status('healthy'); await f.factory().select(queue);
-  f.setTime(epoch + 190_000); await f.factory().select(queue);
-  assert.notEqual((await f.saved()).incident, null, 'rereading one healthy snapshot after a minute is insufficient');
-  await f.status('healthy', epoch + 190_000);
-  assert.deepEqual((await f.factory().select(queue)).events, []);
-  assert.equal((await f.saved()).incident, null);
-  assert.ok((await f.suppressed()).has(queue[0].id));
-});
-
-test('reported incident survives short healthy gaps, then resets silently after advancing success for a minute', async t => {
-  const f = await fixture(t); const queue = [failure('reported')];
-  await f.status('failure'); await f.factory().select(queue);
-  f.setTime(epoch + 120_000); await f.factory().select(queue);
-  queue[0].acknowledgedAt = iso(epoch + 120_000);
-  f.setTime(epoch + 125_000); await f.status('healthy'); await f.factory().select(queue);
-  f.setTime(epoch + 150_000); await f.status('failure', epoch + 125_000);
-  queue.push(failure('same-incident', epoch + 150_000));
-  assert.deepEqual((await f.factory().select(queue)).events, []);
-  f.setTime(epoch + 155_000); await f.status('healthy'); await f.factory().select(queue);
-  f.setTime(epoch + 214_999); await f.status('healthy'); await f.factory().select(queue);
-  assert.notEqual((await f.saved()).incident, null);
-  f.setTime(epoch + 215_000); await f.status('healthy');
-  assert.deepEqual((await f.factory().select(queue)).events, []);
-  assert.equal((await f.saved()).incident, null, 'there is no synthetic recovery event');
-  f.setTime(epoch + 216_000); await f.status('failure', epoch + 215_000);
-  queue.push(failure('next-incident', epoch + 216_000));
-  assert.equal((await f.factory().select(queue)).nextAt, epoch + 336_000);
-});
-
-test('historical failures and deterministic transaction recoveries stay retained but quiet', async t => {
-  const f = await fixture(t); f.setTime(epoch + 200_000); await f.status('healthy');
-  const queue = [failure('historical'), { ...critical('automatic'), type: 'rebalance-recovered' as const }, critical()];
+test('selection preserves queue order, event identity and immutable raw data without transport deduplication', async () => {
+  const first = Object.freeze(completion('first', epoch + 10_000));
+  const second = Object.freeze(event('second', 'notification-test', 'Connection test.', epoch));
+  const queue = Object.freeze([Object.freeze(read()), first, Object.freeze(quote()), second, Object.freeze(recovered())]);
   const before = JSON.stringify(queue);
-  assert.deepEqual((await f.factory().select(queue)).events, [queue[2]]);
-  assert.deepEqual(await f.suppressed(), new Set(['automatic', 'historical']));
+  const filter = createNotificationFilter();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const selected = await filter.select(queue);
+    assert.deepEqual(selected, { events: [first, second], nextAt: null });
+    assert.equal(selected.events[0], first); assert.equal(selected.events[1], second);
+  }
   assert.equal(JSON.stringify(queue), before);
-  const noStatus = await fixture(t);
-  assert.deepEqual((await noStatus.factory().select([queue[1]])).events, []);
-  assert.ok((await noStatus.suppressed()).has('automatic'), 'automatic recovery needs no portfolio read to be suppressed');
-});
-
-test('critical events and nonmatching attention pass through corrupt or missing status/state', async t => {
-  const f = await fixture(t);
-  const direct = [critical(), { ...critical('ledger'), type: 'ledger-rebalance-needed' as const },
-    { ...failure('other-phase'), message: 'Rebalance needs attention: transaction outcome unknown.' },
-    { ...failure('hashed-attention'), hash: `0x${'a'.repeat(64)}` }];
-  assert.deepEqual((await f.factory().select(direct)).events, direct);
-  const queue = [failure('deferred'), ...direct];
-  for (const content of [null, '{corrupt', JSON.stringify({ wallet, error: null, updatedAt: null })]) {
-    if (content !== null) await writeFile(join(f.dataDir, 'status.json'), content);
-    const result = await f.factory().select(queue);
-    assert.deepEqual(result.events, direct); assert.equal(result.error, 'filter-unavailable');
-    assert.equal(result.nextAt, epoch + 30_000);
-  }
-  await f.status('failure'); await writeFile(join(f.dataDir, 'read-notification-state.json'), '{corrupt');
-  assert.deepEqual((await f.factory().select(queue)).events, direct);
-});
-
-test('save failure defers a matured read alert without losing critical alerts or claiming suppression', async t => {
-  const f = await fixture(t); await f.status('failure');
-  const queue = [failure('persist'), critical()]; await f.factory().select(queue);
-  const before = await readFile(join(f.dataDir, 'read-notification-state.json'), 'utf8');
-  f.setTime(epoch + 120_000);
-  const failed = await f.factory(async () => { throw new Error('fixture save failure'); }).select(queue);
-  assert.deepEqual(failed.events, [queue[1]]); assert.equal(failed.error, 'filter-unavailable');
-  assert.equal(await readFile(join(f.dataDir, 'read-notification-state.json'), 'utf8'), before);
-  assert.deepEqual((await f.factory().select(queue)).events, [queue[1], queue[0]]);
-});
-
-test('bootstrap never promotes old acknowledged history or failures predating a retained successful read', async t => {
-  const f = await fixture(t); f.setTime(epoch + 600_000);
-  await f.status('failure', epoch + 500_000);
-  const acknowledged = { ...failure('old-ack'), acknowledgedAt: iso(epoch + 10_000) };
-  const old = failure('old-unreported');
-  const history = await f.factory().select([acknowledged, old]);
-  assert.deepEqual(history.events, []); assert.equal(history.nextAt, null);
-  assert.equal((await f.saved()).incident, null);
-  assert.ok((await f.suppressed()).has(old.id));
-  const latest = failure('new-failure', epoch + 600_000);
-  const started = await f.factory().select([acknowledged, old, latest]);
-  assert.equal(started.nextAt, epoch + 720_000);
-  f.setTime(epoch + 720_000);
-  assert.deepEqual((await f.factory().select([acknowledged, old, latest])).events, [latest]);
-});
-
-test('a completed graph and advancing timestamps without portfolio data cannot prove successful reads', async t => {
-  const f = await fixture(t); const queue = [failure('missing-portfolio')];
-  await f.status('failure'); await f.factory().select(queue);
-  f.setTime(epoch + 30_000); await f.status('healthy');
-  const path = join(f.dataDir, 'status.json');
-  const saved = JSON.parse(await readFile(path, 'utf8'));
-  for (const portfolio of [null, {}, { totalUsdE8: '100', positions: [] }, { totalUsdE8: '100', positions: [{ id: 'USDG' }] }]) {
-    await atomicWriteJson(path, { ...saved, portfolio });
-    await f.factory().select(queue);
-    assert.notEqual((await f.saved()).incident, null);
-  }
-});
-
-test('future timestamps, clock rollback and a different wallet cannot establish recovery', async t => {
-  const f = await fixture(t); await f.status('failure');
-  assert.equal((await f.factory().select([failure('future', epoch + 1)])).error, 'filter-unavailable');
-  const queue = [failure('clock')]; await f.factory().select(queue);
-  f.setTime(epoch + 120_000); await f.factory().select(queue);
-  f.setTime(epoch + 119_999);
-  assert.equal((await f.factory().select(queue)).error, 'filter-unavailable');
-  f.setTime(epoch + 130_000); await f.status('healthy', epoch + 130_001);
-  assert.equal((await f.factory().select(queue)).error, 'filter-unavailable');
-  await f.status('healthy', epoch + 130_000, `0x${'b'.repeat(40)}`);
-  assert.deepEqual((await f.factory().select(queue)).events, []);
-  assert.ok((await f.suppressed()).has('clock'));
-  assert.equal((await f.saved()).suppressed.find((entry: { id: string }) => entry.id === 'clock').reason, 'previous-wallet');
-});
-
-const quoteMessage = 'Rebalance needs attention: A usable swap quote could not be obtained. No completion is confirmed by this alert. Review the current agent status before recovery.';
-const quoteFailure = (id: string, at = epoch): RebalanceEvent => ({ ...failure(id, at), message: quoteMessage });
-async function quoteStatus(f: Awaited<ReturnType<typeof fixture>>, at: number, kind: 'failure' | 'intermediate' | 'no-trade' | 'quoted') {
-  await f.status('healthy', at);
-  const path = join(f.dataDir, 'status.json');
-  const state = JSON.parse(await readFile(path, 'utf8'));
-  state.proposal = kind === 'no-trade' ? null : { fixture: 'trade' };
-  state.error = kind === 'failure' ? 'Quote unavailable.' : null;
-  state.graph = kind === 'failure' ? { node: 'error', trace: ['config','observe','plan','interval','quote','error'] }
-    : kind === 'intermediate' ? { node: 'quote', trace: ['config','observe','plan','interval','quote'] }
-    : kind === 'quoted' ? { node: 'receipt', trace: ['config','observe','plan','interval','quote','execute','receipt'] }
-    : { node: 'wait', trace: ['config','observe','plan','wait'] };
-  await atomicWriteJson(path, state);
-}
-
-test('historical quote failures stay quiet after a completed no-trade traversal', async t => {
-  const f=await fixture(t); f.setTime(epoch+200_000); await quoteStatus(f,epoch+200_000,'no-trade');
-  const q=quoteFailure('old-quote'); const before=JSON.stringify(q);
-  assert.deepEqual((await f.factory().select([q,critical()])).events,[critical()]);
-  assert.ok((await f.suppressed()).has(q.id)); assert.equal(JSON.stringify(q),before);
-});
-
-test('quote outage persists despite newer successful portfolio snapshots and deduplicates after eligibility', async t => {
-  const f=await fixture(t); const q=quoteFailure('persistent-quote');
-  await quoteStatus(f,epoch,'failure');
-  assert.equal((await f.factory().select([q])).nextAt,epoch+120_000);
-  f.setTime(epoch+120_000); await quoteStatus(f,epoch+119_000,'failure');
-  assert.deepEqual((await f.factory().select([q])).events,[q]);
-  assert.ok(!(await f.suppressed()).has(q.id),'a successful observation cannot clear a quote error');
-  f.setTime(epoch+130_000); await quoteStatus(f,epoch+130_000,'intermediate');
-  assert.deepEqual((await f.factory().select([q])).events,[]);
-  assert.ok(!(await f.suppressed()).has(q.id),'entering quote is not proof it succeeded');
-  f.setTime(epoch+140_000); await quoteStatus(f,epoch+140_000,'quoted');
-  await f.factory().select([q]);
-  f.setTime(epoch+200_000); await quoteStatus(f,epoch+200_000,'no-trade');
-  assert.deepEqual((await f.factory().select([q])).events,[]);
-  assert.ok((await f.suppressed()).has(q.id));
-});
-
-test('read and quote incidents have separate persistence and leave critical failures immediate', async t => {
-  const f=await fixture(t); const read=failure('read-scope'); const q=quoteFailure('quote-scope',epoch+30_000);
-  await f.status('failure'); await f.factory().select([read]);
-  f.setTime(epoch+30_000); await quoteStatus(f,epoch+29_000,'failure');
-  const unknown={...q,id:'unknown',message:'Unexpected failure'};
-  const hashed={...q,id:'hashed',hash:`0x${'a'.repeat(64)}`};
-  const result=await f.factory().select([read,q,unknown,hashed,critical()]);
-  assert.deepEqual(result.events,[unknown,hashed,critical()]);
-  assert.equal(result.nextAt,epoch+150_000);
-  f.setTime(epoch+150_000); await quoteStatus(f,epoch+149_000,'failure');
-  assert.deepEqual((await f.factory().select([read,q])).events,[q]);
-});
-
-
-test('an old unchanged error snapshot cannot newly wake a chat as a current persistent failure', async t => {
-  const f=await fixture(t); await f.status('failure');
-  const queue=[failure('offline-read')];
-  const filter=createNotificationFilter({dataDir:f.dataDir,now:()=>epoch+180_000,statusModifiedAt:async()=>epoch});
-  assert.deepEqual((await filter.select(queue)).events,[]);
-  assert.ok(!(await f.suppressed()).has(queue[0].id),'absence of fresh failure evidence does not claim recovery');
-  await quoteStatus(f,epoch,'failure');
-  const quote=quoteFailure('offline-quote');
-  assert.deepEqual((await filter.select([quote])).events,[]);
-});
-
-
-test('an old quote UUID cannot immediately mature a newly observed quote error before its new event is published', async t => {
-  const f=await fixture(t); f.setTime(epoch+600_000); await quoteStatus(f,epoch+599_000,'failure');
-  const old=quoteFailure('old-unreported-quote');
-  const initial=await f.factory().select([old]);
-  assert.deepEqual(initial.events,[]); assert.equal(initial.nextAt,epoch+720_000);
-  f.setTime(epoch+610_000); await quoteStatus(f,epoch+609_000,'failure');
-  const latest=quoteFailure('new-quote-event',epoch+610_000);
-  assert.equal((await f.factory().select([old,latest])).nextAt,epoch+730_000);
-  assert.ok((await f.suppressed()).has(old.id));
-});
-
-
-test('a stopped runner cannot revive a routine alert by rewriting an old error snapshot', async t => {
-  const f=await fixture(t); await f.status('failure'); const event=failure('stopped-read');
-  await f.factory().select([event]); f.setTime(epoch+120_000); await f.factory().select([event]);
-  const path=join(f.dataDir,'status.json');
-  const retained=JSON.parse(await readFile(path,'utf8'));
-  await atomicWriteJson(path,{...retained,armed:false});
-  assert.deepEqual((await f.factory().select([event,critical()])).events,[critical()]);
-  assert.ok(!(await f.suppressed()).has(event.id),'stopping is not evidence of recovery');
+  assert.ok(queue.every(item => item.acknowledgedAt === undefined));
 });
