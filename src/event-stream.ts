@@ -5,10 +5,12 @@ type Cancel = () => void;
 export type EventStreamFailure = 'read' | 'delivery' | 'watch';
 export type EventStream = { wake: Cancel; close: Cancel };
 export type EventStreamDependencies = {
+  now: () => number;
   watch: (directory: string, changed: (filename: string | null) => void, failed: Cancel) => Cancel;
   after: (delayMs: number, callback: Cancel) => Cancel;
 };
 const defaults: EventStreamDependencies = {
+  now: Date.now,
   watch: (directory, changed, failed) => {
     // Observe the directory: the queue is replaced by atomic rename.
     const watcher = watch(directory, (event, filename) => {
@@ -27,13 +29,16 @@ const defaults: EventStreamDependencies = {
 
 /** Push retained queue entries serially. Only explicit acknowledgement removes them.
  * Delivery success suppresses repeats in this stream; a new session gets a new stream.
- * There are no periodic reads. Timers exist only while recovering an actual failure.
+ * There are no periodic reads. Timers cover actual stream failures or an optional
+ * exact notification eligibility deadline; watched status files can cancel it.
  * A transport must settle delivery or close the stream; do not race a write with a
  * retry that could run concurrently with that same unresolved write.
  */
 export function createEventStream<T extends { id: string }>(
   options: {
     directory: string;
+    watchFiles?: readonly string[];
+    nextWakeAt?: () => number | null;
     read: () => Promise<readonly T[]>;
     deliver: (event: T) => Promise<void>;
     onError?: (phase: EventStreamFailure) => void;
@@ -52,6 +57,21 @@ export function createEventStream<T extends { id: string }>(
   let watchDelay = 1_000;
   let drainRetry: Cancel | undefined;
   let drainDelay = 1_000;
+  let deadline: Cancel | undefined;
+  let deadlineAt: number | null = null;
+
+  function scheduleDeadline() {
+    const at = options.nextWakeAt?.() ?? null;
+    if (at !== null && !Number.isFinite(at)) throw new Error('Invalid notification deadline');
+    if (at === deadlineAt) return;
+    deadline?.(); deadline = undefined; deadlineAt = at;
+    if (at !== null && !closed) {
+      deadline = deps.after(Math.max(0, Math.min(at - deps.now(), 2_147_483_647)), () => {
+        deadline = undefined; deadlineAt = null;
+        requestDrain();
+      });
+    }
+  }
 
   function report(phase: EventStreamFailure) {
     try { options.onError?.(phase); } catch { /* Diagnostic callbacks cannot discard queued events. */ }
@@ -87,9 +107,12 @@ export function createEventStream<T extends { id: string }>(
         }
         drainDelay = 1_000;
       }
+      phase = 'read';
+      if (!closed) scheduleDeadline();
     } catch {
       if (!closed) {
         dirty = true;
+        deadline?.(); deadline = undefined; deadlineAt = null;
         report(phase);
         if (closed) return;
         drainRetry = deps.after(drainDelay, () => {
@@ -125,7 +148,7 @@ export function createEventStream<T extends { id: string }>(
     try {
       const release = deps.watch(options.directory, filename => {
         if (closed || generation !== watchGeneration) return;
-        if (filename !== null && filename !== 'events.json') return;
+        if (filename !== null && !(options.watchFiles ?? ['events.json']).includes(filename)) return;
         watchDelay = 1_000;
         requestDrain();
       }, failed);
@@ -144,6 +167,7 @@ export function createEventStream<T extends { id: string }>(
     if (closed) return;
     closed = true;
     watchGeneration++;
+    deadline?.(); deadline = undefined; deadlineAt = null;
     watchRetry?.(); watchRetry = undefined;
     drainRetry?.(); drainRetry = undefined;
     unwatch?.(); unwatch = undefined;

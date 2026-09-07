@@ -63,6 +63,9 @@ An armed raw-key runner automatically handles stale sends after a 30-second rece
 
 The optional [notification channel](docs/NOTIFICATIONS.md) feeds retained events into the **same running Claude session**. With `/rc`, that session can be used from a phone. Ledger drift, runtime-attention, transaction-recovery and completed-rebalance alerts are distinct; completion requires a confirmed swap and a fresh portfolio within the drift threshold. Phone pushes are Claude-controlled and require user setup. The channel neither signs nor relays permissions. Trading remains independent of it.
 
+Chat delivery suppresses transient portfolio-read failures and successful automatic recovery. A continuing read failure becomes eligible after two minutes, with one alert per incident and a silent reset after one minute of advancing healthy observations. Raw events remain local history; completed rebalances, Ledger action and other actionable failures retain immediate delivery. This logic is deterministic and independent of the trading runner.
+
+
 For Codex, a file-driven notification worker queues retained events into the same loaded conversation through native shared queue storage without taking over its active writer. Use [native Remote](https://learn.chatgpt.com/docs/remote-connections) for phone access. A native notification test reached this conversation on September 6 and was acknowledged; the five-minute heartbeat was then removed. Codex's own ten-second revision check handles these cross-process additions, as explained in the [notification guide](docs/NOTIFICATIONS.md); no periodic model check is needed. Trading remained unarmed during validation. Phone delivery remains unverified.
 
 ## What the evidence establishes

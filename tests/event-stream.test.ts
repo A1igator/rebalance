@@ -29,8 +29,8 @@ class Clock {
   }
 }
 function fixture(options: { queue?: Item[]; read?: () => Promise<Item[]>; deliver?: (item: Item) => Promise<void>;
-  watch?: EventStreamDependencies['watch'] } = {}) {
-  const clock = new Clock();
+  watch?: EventStreamDependencies['watch']; watchFiles?: readonly string[]; nextWakeAt?: () => number | null; clock?: Clock } = {}) {
+  const clock = options.clock ?? new Clock();
   const queue = options.queue ?? [];
   const delivered: string[] = [];
   const errors: EventStreamFailure[] = [];
@@ -40,7 +40,9 @@ function fixture(options: { queue?: Item[]; read?: () => Promise<Item[]>; delive
     read: async () => { reads++; return options.read ? options.read() : [...queue]; },
     deliver: options.deliver ?? (async item => { delivered.push(item.id); }),
     onError: phase => { errors.push(phase); },
-  }, { after: clock.after, watch: options.watch ?? ((_directory, changed, failed) => {
+    ...(options.watchFiles ? { watchFiles: options.watchFiles } : {}),
+    ...(options.nextWakeAt ? { nextWakeAt: options.nextWakeAt } : {}),
+  }, { now: () => clock.now, after: clock.after, watch: options.watch ?? ((_directory, changed, failed) => {
     const watcher = { changed, failed, closed: 0 };
     watchers.push(watcher);
     return () => { watcher.closed++; watcher.failed(); };
@@ -68,6 +70,147 @@ test('startup and explicit reconnect replay unsent entries without healthy polli
   f.stream.wake(); await flush();
   assert.deepEqual(f.delivered, ['offline', 'online', 'missed-during-transport-reconnect']);
   assert.equal(f.clock.timers.size, 0);
+});
+
+test('opted-in status replacements re-evaluate the queue and coalesce with queue hints', async t => {
+  const f = fixture({ watchFiles: ['events.json', 'status.json'] }); t.after(f.stream.close);
+  await flush();
+  for (const name of ['status.lock', 'status.json.tmp', '../status.json', 'config.json']) f.watchers[0]!.changed(name);
+  await flush(); assert.equal(f.reads(), 1);
+  f.queue.push({ id: 'eligible-after-status-change' });
+  f.watchers[0]!.changed('status.json');
+  f.watchers[0]!.changed('status.json');
+  f.watchers[0]!.changed('events.json');
+  await flush();
+  assert.equal(f.reads(), 2);
+  assert.deepEqual(f.delivered, ['eligible-after-status-change']);
+  assert.equal(f.clock.timers.size, 0, 'watching status must not introduce healthy polling');
+  f.clock.advance(3_600_000); await flush();
+  assert.equal(f.reads(), 2);
+});
+
+test('an absolute eligibility deadline reads an unchanged queue exactly once when due', async t => {
+  const clock = new Clock();
+  const dueAt = 30_000;
+  const retained = [{ id: 'persistent-attention' }];
+  const f = fixture({ clock, queue: retained,
+    read: async () => clock.now >= dueAt ? retained : [],
+    nextWakeAt: () => clock.now < dueAt ? dueAt : null,
+  }); t.after(f.stream.close);
+  await flush();
+  assert.equal(f.reads(), 1);
+  assert.deepEqual(f.delivered, []);
+  assert.equal(clock.timers.size, 1);
+  clock.advance(dueAt - 1); await flush();
+  assert.equal(f.reads(), 1);
+  clock.advance(1); await flush();
+  assert.equal(f.reads(), 2);
+  assert.deepEqual(f.delivered, ['persistent-attention']);
+  assert.deepEqual(retained, [{ id: 'persistent-attention' }], 'deadline delivery does not require a queue rewrite');
+  assert.equal(clock.timers.size, 0);
+  clock.advance(3_600_000); await flush();
+  assert.equal(f.reads(), 2, 'a consumed deadline must not become a periodic sweep');
+});
+
+test('status changes reschedule an eligibility deadline and healthy recovery cancels it', async t => {
+  const clock = new Clock();
+  let dueAt: number | null = 30_000;
+  const f = fixture({ clock, watchFiles: ['events.json', 'status.json'],
+    nextWakeAt: () => dueAt !== null && clock.now < dueAt ? dueAt : null,
+  }); t.after(f.stream.close);
+  await flush();
+  clock.advance(10_000);
+  dueAt = 50_000;
+  f.watchers[0]!.changed('status.json'); await flush();
+  assert.equal(f.reads(), 2);
+  assert.equal(clock.timers.size, 1);
+  clock.advance(20_000); await flush();
+  assert.equal(f.reads(), 2, 'the replaced deadline must not fire');
+  clock.advance(19_999); await flush(); assert.equal(f.reads(), 2);
+  clock.advance(1); await flush(); assert.equal(f.reads(), 3);
+  assert.equal(clock.timers.size, 0);
+
+  dueAt = 80_000;
+  f.watchers[0]!.changed('status.json'); await flush();
+  assert.equal(clock.timers.size, 1);
+  clock.advance(10_000);
+  dueAt = null;
+  f.watchers[0]!.changed('status.json'); await flush();
+  const healthyReads = f.reads();
+  assert.equal(clock.timers.size, 0, 'recovery must clear the obsolete attention deadline');
+  clock.advance(3_600_000); await flush();
+  assert.equal(f.reads(), healthyReads);
+  assert.deepEqual(f.delivered, []);
+});
+
+test('repeated file hints do not postpone an absolute eligibility deadline', async t => {
+  const clock = new Clock();
+  const dueAt = 30_000;
+  const f = fixture({ clock, watchFiles: ['events.json', 'status.json'],
+    read: async () => clock.now >= dueAt ? [{ id: 'still-failed' }] : [],
+    nextWakeAt: () => clock.now < dueAt ? dueAt : null,
+  }); t.after(f.stream.close);
+  await flush();
+  for (const elapsed of [5_000, 5_000, 5_000, 5_000, 5_000, 4_999]) {
+    clock.advance(elapsed);
+    f.watchers[0]!.changed('status.json');
+    f.watchers[0]!.changed('events.json');
+    await flush();
+    assert.deepEqual(f.delivered, []);
+    assert.equal(clock.timers.size, 1);
+  }
+  const beforeDeadline = f.reads();
+  clock.advance(1); await flush();
+  assert.equal(clock.now, dueAt);
+  assert.equal(f.reads(), beforeDeadline + 1);
+  assert.deepEqual(f.delivered, ['still-failed']);
+  assert.equal(clock.timers.size, 0);
+});
+
+test('closing a stream cancels its eligibility deadline', async () => {
+  const clock = new Clock();
+  const f = fixture({ clock, nextWakeAt: () => 30_000 });
+  await flush();
+  assert.equal(clock.timers.size, 1);
+  f.stream.close(); f.stream.close();
+  assert.equal(clock.timers.size, 0);
+  clock.advance(3_600_000); await flush();
+  assert.equal(f.reads(), 1);
+  assert.deepEqual(f.delivered, []);
+});
+
+test('deadline and status wakeups wait for an active delivery and drain serially', async t => {
+  const clock = new Clock();
+  const dueAt = 30_000;
+  let release!: () => void;
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  const available: Item[] = [];
+  const delivered: string[] = [];
+  let active = 0; let maximum = 0;
+  const f = fixture({ clock, watchFiles: ['events.json', 'status.json'],
+    nextWakeAt: () => clock.now < dueAt ? dueAt : null,
+    read: async () => clock.now >= dueAt ? [...available, { id: 'became-due' }] : [...available],
+    deliver: async item => {
+      active++; maximum = Math.max(maximum, active);
+      if (item.id === 'first') await blocked;
+      delivered.push(item.id); active--;
+    },
+  }); t.after(f.stream.close);
+  await flush();
+  available.push({ id: 'first' });
+  f.watchers[0]!.changed('events.json'); await flush();
+  assert.equal(f.reads(), 2);
+  assert.equal(active, 1);
+  clock.advance(dueAt); await flush();
+  for (let i = 0; i < 20; i++) f.watchers[0]!.changed('status.json');
+  await flush();
+  assert.equal(f.reads(), 2, 'neither the deadline nor hints may start a concurrent drain');
+  assert.equal(active, 1);
+  release(); await flush();
+  assert.equal(maximum, 1);
+  assert.equal(f.reads(), 3);
+  assert.deepEqual(delivered, ['first', 'became-due']);
+  assert.equal(clock.timers.size, 0);
 });
 
 test('queue changes during a slow delivery are drained serially and coalesced', async t => {

@@ -27,11 +27,13 @@ async function fixture(t: TestContext) {
   let controlChanged: (() => void) | undefined;
   let controlFailed: (() => void) | undefined;
   let reads = 0;
+  let now = Date.parse('2026-09-06T03:00:00Z');
   let execute: CodexNotificationDependencies['execute'] = async () => ({ stdout: `Queued message queue-1 for thread ${threadId}\n` });
   const deps: Partial<CodexNotificationDependencies> = {
-    dataDir: directory, projectDir: '/fixture/rebalance', now: () => Date.parse('2026-09-06T03:00:00Z'),
+    dataDir: directory, projectDir: '/fixture/rebalance', now: () => now,
     execute: async (command, args) => { calls.push({ command, args }); return execute(command, args); },
     stream: options => createEventStream({ ...options, read: async () => { reads++; return options.read(); } }, {
+      now: () => now,
       watch: (_directory, changed) => { queueChanged = changed; return () => { queueChanged = undefined; }; },
       after: (ms, callback) => {
         const timer = { ms, callback, cancelled: false }; timers.push(timer);
@@ -57,6 +59,8 @@ async function fixture(t: TestContext) {
     status: () => codexNotificationStatus(deps),
     writeEvents: async (value: unknown[]) => { await atomicWriteJson(join(directory, 'events.json'), value); queueChanged?.('events.json'); },
     wake: () => queueChanged?.('events.json'),
+    setTime: (value: number) => { now = value; },
+    writeStatus: async (value: unknown) => { await atomicWriteJson(join(directory, 'status.json'), value); queueChanged?.('status.json'); },
     controlChanged: () => controlChanged?.(), controlFailed: () => controlFailed?.(),
     start: async (token?: string) => {
       const controller = new AbortController(); controllers.push(controller);
@@ -336,4 +340,58 @@ test('native executable fixture receives only queue append arguments without a r
   assert.deepEqual(records[0].args.slice(0, 4), ['queue', '--thread', threadId, '--message']);
   assert.equal(records[0].args.length, 5);
   assert.ok(!records[0].args.some((arg: string) => ['--remote', 'resume', 'app-server', 'thread/start', 'thread/resume'].includes(arg)));
+});
+
+const readFailureMessage = 'Rebalance needs attention: Fresh portfolio holdings or prices could not be read. No completion is confirmed by this alert. Review the current agent status before recovery.';
+const quietEpoch = Date.parse('2026-09-06T03:00:00Z');
+const readFailure = (id: string, at = quietEpoch) => ({ ...event(id), type: 'rebalance-attention', message: readFailureMessage, createdAt: new Date(at).toISOString() });
+const readStatus = (failed: boolean, at: number) => ({ wallet: `0x${'a'.repeat(40)}`,
+  portfolio: { totalUsdE8: '100', positions: [{ id: 'USDG', balance: '100', priceUsdE8: '100000000', valueUsdE8: '100', weightBps: 10000, targetBps: 10000 }] },
+  updatedAt: new Date(at).toISOString(), error: failed ? 'Read failed' : null,
+  graph: failed ? { node: 'error', trace: ['config', 'observe', 'error'] }
+    : { node: 'wait', trace: ['config', 'observe', 'plan', 'wait'] },
+});
+
+test('Codex read failure waits for its exact deadline, deduplicates restarts, and recovers silently', async t => {
+  const f = await fixture(t); await f.configure();
+  await f.writeStatus(readStatus(true, quietEpoch - 1));
+  await f.writeEvents([readFailure('quiet-read')]);
+  const worker = await f.start();
+  await until(() => f.timers.some(timer => !timer.cancelled));
+  assert.equal(f.calls.length, 0);
+  const deadline = f.timers.find(timer => !timer.cancelled)!;
+  assert.equal(deadline.ms, 120_000);
+  f.setTime(quietEpoch + 120_000); deadline.callback();
+  await until(async () => (await f.status()).acceptedCount === 1);
+  assert.equal(f.calls.length, 1);
+  assert.doesNotMatch(f.calls[0].args[4], /completion, recovery/);
+  await worker.stop(); const again = await f.start();
+  const completedRead = f.reads(); f.wake(); await until(() => f.reads() > completedRead);
+  assert.equal(f.calls.length, 1);
+  f.setTime(quietEpoch + 125_000); await f.writeStatus(readStatus(false, quietEpoch + 125_000));
+  await until(() => f.timers.some(timer => !timer.cancelled && timer.ms === 60_000));
+  f.setTime(quietEpoch + 185_000); await f.writeStatus(readStatus(false, quietEpoch + 185_000));
+  await until(async () => (await readJson<{incident: unknown}>(join(f.directory, 'read-notification-state.json')))?.incident === null);
+  assert.equal(f.calls.length, 1, 'stable recovery never wakes the chat');
+  assert.equal((await f.status()).acceptedCount, 1, 'suppression does not erase native acceptance before acknowledgement');
+  assert.equal((await readJson<{acknowledgedAt?: string}[]>(join(f.directory, 'events.json')))![0].acknowledgedAt, undefined);
+  await again.stop();
+});
+
+test('Codex suppresses transient reads and automatic recoveries without delaying completion or hiding filter failures', async t => {
+  const f = await fixture(t); await f.configure();
+  await f.writeStatus(readStatus(true, quietEpoch - 1));
+  await f.writeEvents([readFailure('brief')]);
+  const worker = await f.start(); await until(() => f.timers.some(timer => !timer.cancelled));
+  f.setTime(quietEpoch + 10_000); await f.writeStatus(readStatus(false, quietEpoch + 10_000));
+  await until(async () => (await readJson<{incident: unknown}>(join(f.directory, 'read-notification-state.json')))?.incident === null);
+  await f.writeEvents([readFailure('brief'), { ...event('auto-recovery'), type: 'rebalance-recovered' }, event('completed')]);
+  await until(async () => (await f.status()).acceptedCount === 1);
+  assert.equal(f.calls.length, 1); assert.match(f.calls[0].args[4], /Retained event ID: completed;/);
+  await writeFile(join(f.directory, 'read-notification-state.json'), '{invalid');
+  await f.writeEvents([readFailure('brief'), event('completed'), event('critical-through-error')]);
+  await until(async () => (await f.status()).acceptedCount === 2);
+  assert.equal((await f.status()).error, 'read-unavailable');
+  assert.equal(f.calls.length, 2);
+  await worker.stop();
 });

@@ -1,0 +1,31 @@
+{
+  "observedAt": "2026-09-07T01:15:39.230494+00:00",
+  "scope": "Notification-only reload; no funded runner lifecycle or transaction action.",
+  "tests": {
+    "passed": 379,
+    "failed": 0,
+    "skipped": 0,
+    "typecheck": "passed",
+    "gitWhitespace": "passed"
+  },
+  "runnerPid": 56245,
+  "notifierPid": 47156,
+  "protectedFinancialRecordsUnchanged": true,
+  "protectedRecordNames": [
+    "run.lock",
+    "cycle.json",
+    "pending.json",
+    "recovery.json",
+    "stop.json"
+  ],
+  "suppressedByReason": {
+    "automatic-recovery": 4
+  },
+  "rawEventsRetained": 252,
+  "incidentActive": false,
+  "limits": [
+    "The start caller returned a generic error after spawning; a subsequent CLI status verified enabled/running with zero uncertain/accepted pending events and no error. No second worker was started.",
+    "Transient read filtering, deadlines, restart behavior and Claude transport were tested in isolated fixtures; no new live failure was deliberately injected.",
+    "Existing Claude sessions load new channel code on reconnect; no live Claude session or phone delivery was verified."
+  ]
+}

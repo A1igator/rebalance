@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { Notification } from '@modelcontextprotocol/sdk/types.js';
+import { atomicWriteJson } from '../src/storage.js';
 
 const directory = await mkdtemp(join(tmpdir(), 'rebalance-channel-test-'));
 const previousDirectory = process.env.REBALANCE_DATA_DIR;
@@ -29,7 +30,7 @@ async function waitFor(condition: () => boolean, message: string): Promise<void>
   assert.ok(condition(), message);
 }
 
-async function openSession() {
+async function openSession(dataDir = directory) {
   const received: Notification[] = [];
   const errors: Error[] = [];
   const client = new Client({ name: 'rebalance-channel-test', version: '1.0.0' }, { capabilities: {} });
@@ -40,7 +41,7 @@ async function openSession() {
     command: process.execPath,
     args: ['--import', 'tsx', fileURLToPath(new URL('../src/channel.ts', import.meta.url))],
     cwd: fileURLToPath(new URL('..', import.meta.url)),
-    env: { REBALANCE_DATA_DIR: directory },
+    env: { REBALANCE_DATA_DIR: dataDir },
     stderr: 'pipe',
   });
   let stderr = '';
@@ -160,4 +161,44 @@ test('a stalled stdio write ends the channel after its deadline and preserves un
   assert.equal(await exited, 1);
   assert.equal(stderr, 'Rebalance notification transport timed out; queued events retained.\n');
   assert.deepEqual(JSON.parse(await readFile(join(data, 'events.json'), 'utf8')), queue);
+});
+
+test('Claude channel keeps brief read failures and automatic recovery quiet across reconnect', { timeout: 8_000 }, async t => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'rebalance-channel-quiet-'));
+  t.after(() => rm(dataDir, { recursive: true, force: true }));
+  const at = Date.now();
+  const observation = (healthy: boolean, time: number) => ({ wallet: `0x${'a'.repeat(40)}`,
+    portfolio: { totalUsdE8: '100', positions: [{ id: 'USDG', balance: '100', priceUsdE8: '100000000', valueUsdE8: '100', weightBps: 10000, targetBps: 10000 }] },
+    updatedAt: new Date(time).toISOString(), error: healthy ? null : 'Read failed',
+    graph: healthy ? { node: 'wait', trace: ['config', 'observe', 'plan', 'wait'] } : { node: 'error', trace: ['config', 'observe', 'error'] },
+  });
+  const retained = [
+    { id: 'quiet-read', type: 'rebalance-attention', createdAt: new Date(at).toISOString(),
+      message: 'Rebalance needs attention: Fresh portfolio holdings or prices could not be read. No completion is confirmed by this alert. Review the current agent status before recovery.' },
+    { id: 'quiet-recovery', type: 'rebalance-recovered', createdAt: new Date(at).toISOString(), message: 'Automatic recovery confirmed.' },
+    { id: 'meaningful-completion', type: 'rebalance-completed', createdAt: new Date(at).toISOString(), message: 'A confirmed completion.' },
+  ];
+  await atomicWriteJson(join(dataDir, 'status.json'), observation(false, at - 1));
+  await atomicWriteJson(join(dataDir, 'events.json'), retained);
+  const session = await openSession(dataDir); t.after(() => session.client.close());
+  await waitFor(() => session.received.length > 0, 'completion must pass during read-alert grace');
+  assert.deepEqual(session.received.map(eventId), ['meaningful-completion']);
+  await atomicWriteJson(join(dataDir, 'status.json'), observation(true, Date.now()));
+  const deadline = Date.now() + 2_000;
+  let suppressed: string[] = [];
+  while (Date.now() < deadline) {
+    const saved = JSON.parse(await readFile(join(dataDir, 'read-notification-state.json'), 'utf8'));
+    suppressed = saved.suppressed.map((entry: { id: string }) => entry.id);
+    if (suppressed.includes('quiet-read')) break;
+    await delay(10);
+  }
+  assert.ok(suppressed.includes('quiet-read'), 'status replacement must suppress the resolved read event without a queue change');
+  assert.ok(suppressed.includes('quiet-recovery'));
+  assert.deepEqual(JSON.parse(await readFile(join(dataDir, 'events.json'), 'utf8')), retained, 'silence is not deletion or acknowledgement');
+  assert.deepEqual(session.received.map(eventId), ['meaningful-completion']);
+  await session.client.close();
+  const reconnect = await openSession(dataDir); t.after(() => reconnect.client.close());
+  await waitFor(() => reconnect.received.length > 0, 'unacknowledged completion replays');
+  assert.deepEqual(reconnect.received.map(eventId), ['meaningful-completion']);
+  await reconnect.client.close();
 });

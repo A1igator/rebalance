@@ -31,8 +31,11 @@ async function edit<T>(action: () => Promise<T>): Promise<T> {
   const release = await acquireLock(DATA, 'events.lock');
   try { return await action(); } finally { await release(); }
 }
+export async function eventHistory(): Promise<RebalanceEvent[]> {
+  return await readJson<RebalanceEvent[]>(EVENTS_PATH) ?? [];
+}
 export async function events(): Promise<RebalanceEvent[]> {
-  return (await readJson<RebalanceEvent[]>(EVENTS_PATH) ?? []).filter(event => !event.acknowledgedAt);
+  return (await eventHistory()).filter(event => !event.acknowledgedAt);
 }
 export async function publishEvent(event: RebalanceEvent): Promise<void> {
   await edit(async () => {

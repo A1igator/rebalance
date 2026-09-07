@@ -9,3 +9,7 @@ The human asked “fix the spam then” after repeated transient holdings/price-
 - Use status/queue file events and exact incident deadlines, not a periodic model check. Preserve accepted/uncertain native delivery deduplication and explicitly paused notification preferences.
 - Activate the fix by reloading only the notification worker; do not restart/arm/stop the funded runner, touch keys, change allocation/cadence, or submit transactions. Existing raw events remain durable; suppressing notification noise is distinct from a human acknowledgement.
 - Test transient failures, persistent failures, intermittent recovery, stale/intermediate snapshots, restarts, deadlines, critical events and storage errors in isolated local fixtures. Record actual validation and deployment evidence.
+
+## Human clarification during implementation
+
+“If recovery is already handled/can be handled deterministically, no need to alert the chat too.” Automatic read recovery and successful transaction recovery stay in local history without a chat wakeup. Stable fresh observations reset the read incident quietly; remove the planned recovery notice. Completed rebalances, Ledger action, and persistent/actionable failures remain eligible.

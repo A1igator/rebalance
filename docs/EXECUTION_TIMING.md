@@ -35,3 +35,7 @@ The chart's separate `/api/gas` display endpoint caches/coalesces public Robinho
 The same response includes historical application gas references and a bounded fixed-price projection of remaining swaps from copied public holdings/configuration. The pure planner is reused for arithmetic only, with a 16-leg bound and fresh wallet/target/balance identity checks. Projected approval costs span zero to one per swap. Neither projection nor quote refresh triggers observation, recovery, scheduling, signing or changes to saved execution state.
 
 Already running Node processes retain their loaded code. A later permitted start loads the current runner code; a completed recovery journal does not reload it. Pending state carried into a full raw-key launch is handled by automatic recovery without a separate user command. The read-only chart server can be reloaded separately to serve SSE; until then the new browser script can use its polling fallback. Neither process reload clears saved cadence, pending transactions or recovery history.
+
+### Quiet notification incidents
+
+The [read-alert filter](prompts/036-quiet-read-notifications.md) watches queue and public status replacements, allowing two minutes for transient observation failures to resolve before a chat alert. Advancing healthy snapshots spanning one minute reset a reported incident quietly. These are notification deadlines only; trading cadence, RPC retries, receipts and automatic recovery remain unchanged. Successful automatic recovery stays in local history without waking the agent.
