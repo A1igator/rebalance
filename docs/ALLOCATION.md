@@ -2,6 +2,10 @@
 
 A wallet can keep manual target percentages or derive them from an explicit allocation policy. The agent captures the user's beliefs and intent; local code calculates and saves targets. The existing deterministic runner maintains those targets without an agent connection. The chart remains view-only, including its target ring.
 
+## Reading the chart
+
+One read-only caption above gas describes the saved **target allocation** model. User-risk mode shows the weighted risk on the 0–100 scale, the custom return/risk ratio and the user horizon. The ratio uses expected horizon excess return in basis points per subjective risk point; it is not standard Sharpe or a percentage. Historical Sharpe mode shows the observation period instead. Accessible chart details retain the units, assumptions and historical basis. A manual portfolio shows “Target risk · not set”; unavailable or disconnected data is labelled explicitly. No risk is inferred from current holdings, and chart rendering never recalculates or changes targets.
+
 ## Risk means what the user says it means
 
 The main objective is `user-risk`. Each asset has a user-selected risk score from 0 to 100 over a stated horizon, and a user-supplied expected return for that same horizon. These scores are relative judgments, not probabilities of loss or calibrated market statistics. A user can judge a volatile asset to have little long-term risk. Code does not replace that judgment with observed volatility, downside moves or drawdown.

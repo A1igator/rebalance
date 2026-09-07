@@ -21,7 +21,7 @@ type DisplayNode = { tag: string; textContent: string; attrs: Record<string, str
 type Response = { ok: boolean; json: () => Promise<unknown> };
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
-async function browser(options: { gas?: () => Promise<Response> } = {}) {
+async function browser(options: { gas?: () => Promise<Response>; status?: () => Promise<Response> } = {}) {
   const script = await readFile(new URL('../ui/app.js', import.meta.url), 'utf8');
   const elements = new Map<string, DisplayNode>();
   const lifecycle = new Map<string, () => void>();
@@ -29,6 +29,7 @@ async function browser(options: { gas?: () => Promise<Response> } = {}) {
   const calls: { url: string; at: number; signal: AbortSignal }[] = [];
   let now = initialTime, nextTimer = 0, pieRenders = 0;
   let getGas = options.gas || (async () => ({ ok: true, json: async () => quote }));
+  const getStatus = options.status || (async () => ({ ok: true, json: async () => current }));
   function node(tag: string, id?: string): DisplayNode {
     const item: DisplayNode = { tag, textContent: '', attrs: {}, children: [], replaceChildren: () => { item.children = []; if (id === 'segments') pieRenders++; }, append: child => item.children.push(child), setAttribute: (key, value) => { item.attrs[key] = value; } };
     return item;
@@ -53,7 +54,7 @@ async function browser(options: { gas?: () => Promise<Response> } = {}) {
     clearTimeout: (id: number) => timers.delete(id),
     fetch: async (url: string, request: { signal: AbortSignal }) => {
       calls.push({ url, at: now, signal: request.signal });
-      return url === '/api/gas' ? getGas() : { ok: true, json: async () => current };
+      return url === '/api/gas' ? getGas() : getStatus();
     },
     window: { addEventListener: (name: string, handler: () => void) => lifecycle.set(name, handler) },
     document: {
@@ -406,5 +407,146 @@ test('new transaction or recovery states invalidate an old on-target projection 
   page.source.send({ ...current, operation: { status: 'cancelled' } });
   assert.equal(page.element('gas-rebalance').textContent, 'Rebalance · $0 (on target)', 'a settled operation with the same basis remains usable');
   assert.equal(page.calls.filter(call => call.url === '/api/gas').length, 1, 'status events invalidate display without extra quote fetches');
+  page.hide();
+});
+
+const subjectiveAllocation = {
+  objective: 'user-risk', horizonMonths: 60, policyHash: 'a'.repeat(64), computedAt: observed,
+  score: 32.4, stepBps: 500, subjectiveRiskScore: 38.1,
+  expectedReturnBps: 1434.44, benchmarkReturnBps: 200, returnBasis: 'user-horizon',
+};
+const managedSnapshot = (summary: unknown = subjectiveAllocation) => ({
+  ...current, config: { targets: allocation, allocation: summary },
+});
+
+test('risk caption distinguishes unset manual inputs from unavailable configuration without inventing scores', async () => {
+  const page = await browser();
+  assert.equal(page.element('risk-model').textContent, 'Target risk · not set');
+  assert.doesNotMatch(page.element('risk-model').textContent, /0\/100|Sharpe|Return\/risk/);
+  page.source.send({ ...current, config: null });
+  assert.equal(page.element('risk-model').textContent, 'Target risk · unavailable');
+  page.source.send(current);
+  assert.equal(page.element('risk-model').textContent, 'Target risk · not set');
+  page.hide();
+});
+
+test('subjective target risk has an explicit custom ratio, horizon and accessible units', async () => {
+  const page = await browser();
+  page.source.send(managedSnapshot());
+  const caption = page.element('risk-model');
+  assert.equal(caption.textContent, 'Target risk 38.1/100 · Return/risk 32.4 · 5 yr');
+  assert.doesNotMatch(caption.textContent, /Sharpe/);
+  const details = caption.attrs['aria-label']!;
+  assert.match(details, /target/i);
+  assert.match(details, /14\.34/);
+  assert.match(details, /benchmark.*2%/i);
+  assert.match(details, /basis points|bps/i);
+  assert.match(details, /risk point/i);
+  assert.match(details, /not (?:a |standard )?Sharpe/i);
+  assert.equal(page.element('risk-model-title').textContent, details);
+  assert.ok(page.element('chart-description').textContent.includes(details));
+  for (const score of [0, -4]) {
+    page.source.send(managedSnapshot({ ...subjectiveAllocation, score,
+      expectedReturnBps: 200 + score * subjectiveAllocation.subjectiveRiskScore }));
+    assert.equal(page.element('risk-model').textContent, `Target risk 38.1/100 · Return/risk ${score} · 5 yr`);
+  }
+  page.hide();
+});
+
+test('small positive subjective risk and signed nonzero ratios never render as zero', async () => {
+  const page = await browser();
+  page.source.send(managedSnapshot({ ...subjectiveAllocation, subjectiveRiskScore: 0.01,
+    expectedReturnBps: 200.324 }));
+  assert.equal(page.element('risk-model').textContent, 'Target risk <0.1/100 · Return/risk 32.4 · 5 yr');
+  assert.match(page.element('risk-model').attrs['aria-label']!, /0\.01/);
+  for (const score of [0.001, -0.001]) {
+    page.source.send(managedSnapshot({ ...subjectiveAllocation, score,
+      expectedReturnBps: 200 + score * subjectiveAllocation.subjectiveRiskScore }));
+    assert.equal(page.element('risk-model').textContent,
+      `Target risk 38.1/100 · Return/risk ${score.toPrecision(2)} · 5 yr`);
+  }
+  page.hide();
+});
+
+test('Sharpe caption uses its historical observation period and clears earlier subjective values', async () => {
+  const page = await browser(); page.source.send(managedSnapshot());
+  const historical = { ...subjectiveAllocation, objective: 'sharpe', score: 1.24,
+    subjectiveRiskScore: null, expectedReturnBps: 25, returnBasis: 'history-period',
+    history: { interval: 'daily', basis: 'underlying-proxy', asOf: observed, quoteCurrency: 'USDG' } };
+  page.source.send(managedSnapshot(historical));
+  assert.equal(page.element('risk-model').textContent, 'Target Sharpe 1.24 · daily observations');
+  assert.doesNotMatch(page.element('risk-model').textContent, /38\.1|Return\/risk|5 yr/);
+  const details = page.element('risk-model').attrs['aria-label']!;
+  assert.match(details, /histor/i); assert.match(details, /daily/i); assert.match(details, /proxy/i);
+  assert.match(details, /USDG/);
+  page.source.send(managedSnapshot({ ...historical, score: -1.24,
+    history: { ...historical.history, interval: 'monthly' } }));
+  assert.equal(page.element('risk-model').textContent, 'Target Sharpe -1.24 · monthly observations');
+  page.source.send(current);
+  assert.equal(page.element('risk-model').textContent, 'Target risk · not set');
+  assert.doesNotMatch(page.element('chart-description').textContent, /1\.24|38\.1\/100|Return\/risk 32\.4/);
+  page.hide();
+});
+
+test('malformed allocation summaries clear saved numbers instead of displaying stale or fabricated scores', async () => {
+  const page = await browser();
+  for (const [index, summary] of [
+    { ...subjectiveAllocation, objective: 'unknown' },
+    { ...subjectiveAllocation, score: null },
+    { ...subjectiveAllocation, score: Number.NaN },
+    { ...subjectiveAllocation, subjectiveRiskScore: undefined },
+    { ...subjectiveAllocation, subjectiveRiskScore: -1 },
+    { ...subjectiveAllocation, subjectiveRiskScore: 101 },
+    { ...subjectiveAllocation, expectedReturnBps: undefined },
+    { ...subjectiveAllocation, benchmarkReturnBps: null },
+    { ...subjectiveAllocation, horizonMonths: 0 },
+    { ...subjectiveAllocation, computedAt: 'invalid' },
+    { ...subjectiveAllocation, policyHash: 'invalid' },
+    { ...subjectiveAllocation, stepBps: 0 },
+    { ...subjectiveAllocation, returnBasis: 'history-period' },
+    { ...subjectiveAllocation, objective: 'sharpe', returnBasis: 'history-period' },
+  ].entries()) {
+    page.source.send(managedSnapshot());
+    page.source.send(managedSnapshot(summary));
+    assert.equal(page.element('risk-model').textContent, 'Target risk · unavailable', `invalid summary ${index}`);
+    assert.doesNotMatch(page.element('risk-model').attrs['aria-label']!, /38\.1|32\.4|NaN|Infinity/);
+  }
+  page.source.send(managedSnapshot());
+  page.source.send({ ...current, wallet: '0x2222222222222222222222222222222222222222' });
+  assert.equal(page.element('risk-model').textContent, 'Target risk · not set', 'a new manual wallet cannot retain the prior wallet score');
+  page.hide();
+});
+
+test('disconnected risk caption identifies the last saved policy and clears the prefix on reconnection', async () => {
+  const page = await browser({ status: async () => { throw new Error('Isolated status read unavailable'); } });
+  page.source.send(managedSnapshot());
+  page.source.onerror!(); await flush();
+  assert.equal(page.element('risk-model').textContent, 'Last saved · Target risk 38.1/100 · Return/risk 32.4 · 5 yr');
+  assert.match(page.element('risk-model').attrs['aria-label']!, /last saved/i);
+  page.source.send(managedSnapshot());
+  assert.equal(page.element('risk-model').textContent, 'Target risk 38.1/100 · Return/risk 32.4 · 5 yr');
+  page.hide();
+});
+
+test('risk display adds no requests or timers and gas refresh preserves its caption and accessible description', async () => {
+  const page = await browser();
+  const deadlines = [...page.timers.values()].map(timer => timer.at).sort((a, b) => a - b);
+  const requests = page.calls.length;
+  page.source.send(managedSnapshot());
+  assert.equal(page.calls.length, requests);
+  assert.deepEqual([...page.timers.values()].map(timer => timer.at).sort((a, b) => a - b), deadlines);
+  const caption = page.element('risk-model').textContent;
+  const details = page.element('risk-model').attrs['aria-label']!;
+  const renders = page.renders;
+  await page.advance(30_000);
+  assert.equal(page.calls.length, requests + 1);
+  assert.ok(page.calls.every(call => call.url === '/api/gas'));
+  assert.equal(page.renders, renders, 'gas quotes do not redraw the portfolio or risk model');
+  assert.equal(page.element('risk-model').textContent, caption);
+  assert.equal(page.element('risk-model').attrs['aria-label'], details);
+  assert.ok(page.element('chart-description').textContent.includes(details));
+  await page.advance(60_000);
+  assert.equal(page.element('risk-model').textContent, caption, 'saved user assumptions do not expire with ninety-second gas quotes');
+  assert.ok(page.element('chart-description').textContent.includes(details));
   page.hide();
 });

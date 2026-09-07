@@ -97,7 +97,13 @@ export async function readAllocationInput(path: string): Promise<unknown> {
 /** Small public status projection; full assumptions remain available through allocation status. */
 export function allocationSummary(config: Config) {
   const managed = config.allocation;
+  const history = managed?.result.diagnostics.history;
   return managed ? { objective: managed.policy.objective, horizonMonths: managed.policy.horizonMonths,
     policyHash: managed.policyHash, computedAt: managed.computedAt, score: managed.result.score,
-    stepBps: managed.policy.stepBps } : undefined;
+    stepBps: managed.policy.stepBps, subjectiveRiskScore: managed.result.subjectiveRiskScore,
+    expectedReturnBps: managed.result.expectedReturnBps, returnBasis: managed.result.returnBasis,
+    // The policy benchmark shares the user's horizon, never a historical period.
+    benchmarkReturnBps: managed.result.returnBasis === 'user-horizon' ? managed.policy.benchmarkReturnBps : null,
+    ...(history ? { history: { interval: history.interval, basis: history.basis,
+      asOf: history.asOf, quoteCurrency: history.quoteCurrency } } : {}) } : undefined;
 }

@@ -1,0 +1,30 @@
+{
+  "date": "2026-09-07",
+  "feature": "Read-only target risk-model chart caption",
+  "tests": {
+    "passed": 82,
+    "failed": 0,
+    "skipped": 0,
+    "scope": [
+      "ui-display",
+      "allocation-management",
+      "server",
+      "runtime"
+    ],
+    "typecheck": "passed",
+    "whitespace": "passed"
+  },
+  "visualValidation": {
+    "nativeBrowser": true,
+    "liveManualUnsetCaption": "verified",
+    "isolatedSyntheticUserRiskCaption": "verified",
+    "layout": "no overlap observed",
+    "temporaryPreviewStopped": true
+  },
+  "activation": {
+    "readOnlyChartReloaded": true,
+    "tradingRecordsUnchanged": true,
+    "liveRiskPolicyApplied": false,
+    "tradingRunnerRestarted": false
+  }
+}

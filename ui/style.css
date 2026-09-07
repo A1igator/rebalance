@@ -12,3 +12,5 @@ text { text-anchor: middle; fill: #eef3ef; }
 .target-weight { font-size: 10px; fill: #8f9e94; }
 .gas { text-anchor: start; font-size: 11px; font-variant-numeric: tabular-nums; fill: #a3afa6; }
 .gas-price { font-size: 10px; fill: #8f9e94; }
+
+.risk-model { font-size: 11px; fill: #c0ccc3; }

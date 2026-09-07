@@ -461,3 +461,12 @@ The main objective uses explicit horizon return assumptions and user risk scores
 No live risk policy, target allocation or funded process was changed or started. No key/credential content, live signature, transaction submission, financial recovery or native hook activation was used. The project-local Codex and Claude skill links already point at the canonical source, so updating the skill applies without a separate installation. Final aggregate validation is recorded in [allocation evidence](evidence/user-risk-allocation.json).
 
 Final verification: 545/545 tests passed with zero failures or skips. After the final empty-target input correction, all six CLI integration tests passed again. TypeScript, skill validation, local documentation links and Git whitespace checks passed. A read-only check confirmed that the existing portfolio remains in manual allocation mode with its prior demo targets. Independent review confirmed risk/metric separation and wallet isolation, and the guide now states the negative-excess-return ratio limitation.
+
+
+## Risk model in the chart — 2026-09-07
+
+The human requested UI visibility and clarified their understanding of Sharpe as maximizing return against manually chosen risk. [Prompt 041](prompts/041-risk-model-chart-caption.md) was committed before implementation. The UI keeps the user's custom return/risk objective distinct from standard historical Sharpe, with a compact target-model caption above the existing gas labels. Manual targets show unset inputs rather than invented scores.
+
+Root implemented and visually checked the caption in the native browser. One agent extended the compact saved-result projection; another added renderer regressions. The display has no new request, timer, policy write or optimizer call. Tests cover missing/malformed summaries, custom ratio units and precision, historical periods, wallet/state transitions, disconnection and accessible descriptions surviving gas refreshes. Populated visual validation used a separate synthetic temporary server, subsequently stopped.
+
+Final verification: 82 focused renderer, projection, server and runtime tests passed, plus TypeScript and whitespace checks. Only the read-only chart was reloaded to import the new projection. The selected portfolio's configuration, runner lock, cycle, pending/recovery and stop records remained byte-identical. No live policy, target, funded runner, credential or transaction was changed by this work. [Aggregate evidence](evidence/risk-model-chart.json) contains no live wallet or runtime identifiers.

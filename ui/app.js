@@ -182,6 +182,55 @@
     });
   }
 
+  const modelNumber = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
+  const riskNumber = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
+  const compactNumber = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 2 });
+  const displayModelNumber = (value) => Math.abs(value) >= 10000 ? compactNumber.format(value)
+    : value !== 0 && Math.abs(value) < 0.01 ? value.toPrecision(2) : modelNumber.format(value);
+
+  function renderRisk(snapshot, disconnected) {
+    const summary = snapshot?.config?.allocation;
+    const hasTargets = snapshot?.config?.targets && Object.keys(snapshot.config.targets).length > 0;
+    let label = hasTargets && summary === undefined ? "Target risk · not set" : "Target risk · unavailable";
+    let detail = hasTargets && summary === undefined
+      ? "Manual target allocation. User risk inputs are not set. Configure risk through your agent."
+      : "The saved target risk model is unavailable. No risk score is inferred from holdings or price movements.";
+    const finite = (value) => typeof value === "number" && Number.isFinite(value);
+    const date = (value) => typeof value === "string" && Number.isFinite(Date.parse(value)) && Date.parse(value) <= Date.now();
+    const metadata = summary && typeof summary === "object" && !Array.isArray(summary) &&
+      typeof summary.policyHash === "string" && /^[a-f0-9]{64}$/.test(summary.policyHash) &&
+      date(summary.computedAt) && Number.isInteger(summary.horizonMonths) && summary.horizonMonths > 0 && summary.horizonMonths <= 1200 &&
+      Number.isInteger(summary.stepBps) && summary.stepBps >= 100 && summary.stepBps <= 1000 && 10000 % summary.stepBps === 0 &&
+      finite(summary.score) && finite(summary.expectedReturnBps);
+    if (metadata && summary.objective === "user-risk" && summary.returnBasis === "user-horizon" &&
+        finite(summary.subjectiveRiskScore) && summary.subjectiveRiskScore > 0 && summary.subjectiveRiskScore <= 100 &&
+        finite(summary.benchmarkReturnBps)) {
+      const months = summary.horizonMonths;
+      const horizon = months % 12 === 0 ? `${months / 12} yr` : `${months} mo`;
+      label = `Target risk ${summary.subjectiveRiskScore < 0.1 ? "<0.1" : riskNumber.format(summary.subjectiveRiskScore)}/100 · Return/risk ${displayModelNumber(summary.score)} · ${horizon}`;
+      detail = `Saved target allocation model, calculated ${summary.computedAt}. User-selected target risk ${summary.subjectiveRiskScore} points on a 0 to 100 scale over ${months} months, not a probability of loss. ` +
+        `Expected total return assumption ${modelNumber.format(summary.expectedReturnBps / 100)}%, benchmark ${modelNumber.format(summary.benchmarkReturnBps / 100)}% over that same horizon. ` +
+        `Return/risk ${summary.score}: expected horizon excess return in basis points per user risk point. This custom ratio is not standard Sharpe. These describe target weights, not the current holdings or a realized return.`;
+    } else if (metadata && summary.objective === "sharpe" && summary.returnBasis === "history-period" &&
+        ["daily", "weekly", "monthly"].includes(summary.history?.interval) &&
+        ["tradable-token", "underlying-proxy"].includes(summary.history?.basis) && date(summary.history?.asOf) &&
+        typeof summary.history?.quoteCurrency === "string" && /^[A-Z][A-Z0-9_-]{0,15}$/.test(summary.history.quoteCurrency)) {
+      label = `Target Sharpe ${displayModelNumber(summary.score)} · ${summary.history.interval} observations`;
+      detail = `Saved target allocation model, calculated ${summary.computedAt}. Historical Sharpe ${summary.score}, using ${summary.history.interval} differential returns; not annualized. ` +
+        `Historical data as of ${summary.history.asOf}, ${summary.history.basis === "underlying-proxy" ? "underlying-asset proxy" : "tradable-token"} basis in ${summary.history.quoteCurrency}. ` +
+        `Historical mean return ${modelNumber.format(summary.expectedReturnBps / 100)}% per observation. Standard Sharpe divides historical mean excess return by its sample standard deviation. ` +
+        "These describe target weights with constant weights per observation and no execution costs, not current holdings or a future return guarantee.";
+    }
+    if (disconnected) {
+      label = `Last saved · ${label}`;
+      detail = `Connection unavailable. Last saved model only. ${detail}`;
+    }
+    byId("risk-model").textContent = label;
+    byId("risk-model").setAttribute("aria-label", detail);
+    byId("risk-model-title").textContent = detail;
+    return detail;
+  }
+
   function render(snapshot, disconnected = false) {
     const portfolio = snapshot?.portfolio;
     const positions = Array.isArray(portfolio?.positions) ? portfolio.positions : [];
@@ -208,6 +257,7 @@
     byId("comparison").textContent = funded && targets.length ? "Outer actual · Inner target" : "";
     byId("chart-title").textContent = state;
     allocationDescription = `${state}. ${note}. ${funded ? "Outer ring, actual holdings" : "Targets only"}: ${entries.map((r) => `${r.id} ${percent.format(r.weight / 100)}%`).join(", ")}.${funded && targets.length ? ` Inner ring, targets: ${targets.map((r) => `${r.id} ${percent.format(r.weight / 100)}%`).join(", ")}.` : ""}`;
+    allocationDescription += ` ${renderRisk(snapshot, disconnected)}`;
     statusDisconnected = disconnected;
     renderGas();
     const labels = byId("labels");

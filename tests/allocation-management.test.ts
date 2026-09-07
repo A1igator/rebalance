@@ -180,7 +180,49 @@ test('status projections do not inspect inputs or recalculate an allocation', ()
   assert.equal(status.mode, 'managed'); assert.equal(status.allocation, saved);
   assert.equal(status.targets, config.targets);
   assert.deepEqual(allocationSummary(config), { objective: 'user-risk', horizonMonths: 60,
-    policyHash: saved.policyHash, computedAt: at.toISOString(), score, stepBps: 500 });
+    policyHash: saved.policyHash, computedAt: at.toISOString(), score, stepBps: 500,
+    subjectiveRiskScore: saved.result.subjectiveRiskScore, expectedReturnBps: saved.result.expectedReturnBps,
+    returnBasis: 'user-horizon', benchmarkReturnBps: 0 });
+});
+
+test('compact target-model metrics keep the user horizon separate from optional historical diagnostics', () => {
+  const input = policy(); input.benchmarkReturnBps = 250;
+  input.riskDefinition = 'Private subjective risk definition';
+  input.assets.AAPL.rationale = 'Private company rationale';
+  input.history = history();
+  const config = managed(input);
+  const summary = allocationSummary(config)!;
+  const expectedRisk = Object.entries(config.targets).reduce((sum, [id, weight]) => sum + weight * input.assets[id]!.riskScore!, 0) / 10000;
+  const expectedReturn = Object.entries(config.targets).reduce((sum, [id, weight]) => sum + weight * input.assets[id]!.expectedReturnBps!, 0) / 10000;
+  assert.equal(summary.subjectiveRiskScore, expectedRisk);
+  assert.equal(summary.expectedReturnBps, expectedReturn);
+  assert.equal(summary.score, (expectedReturn - 250) / expectedRisk);
+  assert.equal(summary.returnBasis, 'user-horizon'); assert.equal(summary.horizonMonths, 60);
+  assert.equal(summary.benchmarkReturnBps, 250);
+  assert.deepEqual(summary.history, { interval: 'daily', basis: 'underlying-proxy',
+    asOf: '2026-09-06T00:00:00.000Z', quoteCurrency: 'USDG' });
+  assert.doesNotMatch(JSON.stringify(summary), /observations|covariance|rationale|riskDefinition|source|Private|Explicit isolated/);
+  assert.notEqual(summary.history, config.allocation.result.diagnostics.history);
+});
+
+test('Sharpe projection reports period returns and omits the unrelated horizon benchmark', () => {
+  const input = policy(); input.objective = 'sharpe'; input.history = history();
+  input.horizonMonths = 120; input.benchmarkReturnBps = 9000;
+  for (const asset of Object.values(input.assets)) { delete asset.riskScore; delete asset.expectedReturnBps; }
+  const config = managed(input);
+  const metrics = config.allocation.result.diagnostics.history!;
+  // The projection may read compact saved metrics, never the historical panel.
+  Object.defineProperty(config.allocation.policy, 'history', { get() { throw new Error('summary inspected historical observations'); } });
+  Object.defineProperty(config.allocation.policy, 'assets', { get() { throw new Error('summary recalculated allocation'); } });
+  const summary = allocationSummary(config)!;
+  assert.equal(summary.objective, 'sharpe'); assert.equal(summary.returnBasis, 'history-period');
+  assert.equal(summary.subjectiveRiskScore, null); assert.equal(summary.benchmarkReturnBps, null);
+  assert.equal(summary.expectedReturnBps, config.allocation.result.expectedReturnBps);
+  assert.ok(Math.abs(summary.expectedReturnBps - metrics.arithmeticMeanReturn * 10000) < 1e-12);
+  assert.equal(summary.score, config.allocation.result.score); assert.equal(summary.horizonMonths, 120);
+  assert.deepEqual(summary.history, { interval: 'daily', basis: 'underlying-proxy',
+    asOf: '2026-09-06T00:00:00.000Z', quoteCurrency: 'USDG' });
+  assert.doesNotMatch(JSON.stringify(summary), /9000|observations|covariance|source|arithmeticMeanReturn/);
 });
 
 test('manual mode removes only saved management provenance and preserves adopted targets', () => {
