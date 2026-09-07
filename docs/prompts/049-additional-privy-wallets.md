@@ -22,3 +22,7 @@ Sources (official documentation, checked September 7):
 5. Add focused API, retry, binding and UI regressions, then run TypeScript and the full suite. Update provenance and setup instructions. Reload only verified read-only chart processes if needed; preserve running trading state. Commit locally; no push pending destination authorization.
 
 No new dependency is planned. Real app creation/login/credentials and live provider integration are not inferred from fixture tests. If app credentials are unavailable, complete the wiring and clearly identify that remaining setup step; do not claim a new remote wallet exists.
+
+## Validation follow-up, before the corrective edit
+
+The full suite exposed an existing setup-channel race: a request is atomically published before its producer releases the request lock. A watcher can observe that valid pending record and interpret ordinary live-lock contention as a delivery failure. A deterministic isolated reproduction retained the request and delivered once after release, but emitted an unnecessary diagnostic. Correct only this expected-busy classification in the existing delivery path, preserving pending state, file-event wakeup and all actual I/O/corruption errors. Add the reproduction as a regression. No live notification worker or trading process is restarted for this correction. Separate CLI notification fixture timing failures are being investigated rather than assumed to be financial/runtime regressions.
