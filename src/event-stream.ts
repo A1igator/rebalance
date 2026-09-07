@@ -43,7 +43,7 @@ export function createEventStream<T extends { id: string }>(
     nextWakeAt?: () => number | null;
     read: () => Promise<readonly T[]>;
     deliver: (event: T) => Promise<void | boolean>;
-    onError?: (phase: EventStreamFailure) => void;
+    onError?: (phase: EventStreamFailure, error?: unknown) => void;
   },
   overrides: Partial<EventStreamDependencies> = {},
 ): EventStream {
@@ -75,8 +75,8 @@ export function createEventStream<T extends { id: string }>(
     }
   }
 
-  function report(phase: EventStreamFailure) {
-    try { options.onError?.(phase); } catch { /* Diagnostic callbacks cannot discard queued events. */ }
+  function report(phase: EventStreamFailure, error?: unknown) {
+    try { options.onError?.(phase, error); } catch { /* Diagnostic callbacks cannot discard queued events. */ }
   }
 
   function requestDrain() {
@@ -111,11 +111,11 @@ export function createEventStream<T extends { id: string }>(
       }
       phase = 'read';
       if (!closed) scheduleDeadline();
-    } catch {
+    } catch (error) {
       if (!closed) {
         dirty = true;
         deadline?.(); deadline = undefined; deadlineAt = null;
-        report(phase);
+        report(phase, error);
         if (closed) return;
         drainRetry = deps.after(drainDelay, () => {
           drainRetry = undefined;

@@ -7,6 +7,7 @@ import { watch } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { portfolioRoot, resolveProfile, sessionIdentity } from '../scripts/profile-routing.mjs';
 import { createEventStream, type EventStream } from './event-stream.js';
+import { isLiveLockContention } from './storage.js';
 
 // Freeze the selected portfolio before importing modules that capture DATA.
 // A later wallet connection changes only new sessions; acknowledgements in this
@@ -86,6 +87,7 @@ let stopped = false;
 let setupStream: EventStream | undefined;
 let setupSession: string | undefined;
 let setupGeneration = 0;
+class SetupPublicationBusy extends Error {}
 async function connectSetup(currentSession: string) {
   if (!currentSession.startsWith('claude:') || stopped) return;
   if (setupSession === currentSession && setupStream) { setupStream.wake(); return; }
@@ -100,7 +102,14 @@ async function connectSetup(currentSession: string) {
     read: () => pendingViewRequests(rootDir, currentSession),
     deliver: async event => {
       if (stopped || generation !== setupGeneration) return false;
-      const prepared = await beginViewRequestDelivery(rootDir, currentSession, event.id);
+      let prepared;
+      try { prepared = await beginViewRequestDelivery(rootDir, currentSession, event.id); }
+      catch (error) {
+        // A newly published request is visible before its creator releases the
+        // lock. Keep the stream's bounded retry without a failure diagnostic.
+        if (isLiveLockContention(error)) throw new SetupPublicationBusy();
+        throw error;
+      }
       if (!prepared) return false;
       if (stopped || generation !== setupGeneration) { await completeViewRequestDelivery(rootDir, currentSession, event.id, false); return false; }
       const deadline = setTimeout(() => { void stop().finally(() => process.exit(1)); }, 10_000);
@@ -112,7 +121,10 @@ async function connectSetup(currentSession: string) {
       } catch { await completeViewRequestDelivery(rootDir, currentSession, event.id, false); throw new Error('Setup delivery uncertain.'); }
       finally { clearTimeout(deadline); }
     },
-    onError: () => { process.stderr.write('Rebalance setup channel unavailable; requests retained.\n'); },
+    onError: (phase, error) => {
+      if (phase === 'delivery' && error instanceof SetupPublicationBusy) return;
+      process.stderr.write('Rebalance setup channel unavailable; requests retained.\n');
+    },
   }, { watch: (path, changed, failed) => {
     const watcher = watch(path, () => changed(null));
     watcher.on('error', failed); watcher.on('close', failed);

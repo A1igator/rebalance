@@ -119,7 +119,16 @@ async function journal(deps: CodexNotificationDependencies): Promise<Delivery[]>
 }
 
 async function running(deps: CodexNotificationDependencies): Promise<boolean> {
-  const lock = await readJson<{ pid: number }>(pathFor(deps, CODEX_NOTIFICATION_LOCK));
+  let lock: { pid: number } | null;
+  for (let attempt = 0; ; attempt++) {
+    try { lock = await readJson<{ pid: number }>(pathFor(deps, CODEX_NOTIFICATION_LOCK)); break; }
+    catch (error) {
+      // Exclusive lock creation exposes the file before its first JSON write.
+      // Wait briefly for that write; persistent corruption must still fail.
+      if (!(error instanceof SyntaxError) || attempt >= 10) throw error;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+  }
   if (!lock) return false;
   if (!Number.isSafeInteger(lock.pid) || lock.pid <= 0 || lock.pid > 2_147_483_647) throw new Error('Notification runner lock is invalid');
   try { process.kill(lock.pid, 0); return true; }

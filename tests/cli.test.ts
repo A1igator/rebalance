@@ -21,7 +21,19 @@ const config = { version: 1, chainId: 4663, wallet: '0x0000000000000000000000000
 
 async function fixture(t: TestContext) {
   const directory = await mkdtemp(join(tmpdir(), 'rebalance-cli-test-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  t.after(async () => {
+    // A failed startup/readiness assertion must not leave its detached fixture
+    // worker alive while its directory is removed.
+    const worker = await readJson<{ pid?: number }>(join(directory, 'codex-notifications-process.json')).catch(() => null);
+    if (Number.isSafeInteger(worker?.pid) && worker!.pid! > 0 && worker!.pid !== process.pid) {
+      try { process.kill(worker!.pid!, 'SIGKILL'); } catch {}
+      await until(() => {
+        try { process.kill(worker!.pid!, 0); return false; }
+        catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; }
+      }, 'fixture notification worker must exit before its directory is removed');
+    }
+    await rm(directory, { recursive: true, force: true });
+  });
   await atomicWriteJson(join(directory, 'config.json'), config);
   const preload = join(directory, 'fixture.mjs');
   await writeFile(preload, `
@@ -218,8 +230,10 @@ test('notification background start reuses one worker and stop pauses only notif
   await atomicWriteJson(join(directory, 'stop.json'), stop);
   await configureNotifications(command);
   const first = JSON.parse((await command(['notifications', 'start', '--background'])).stdout);
-  assert.equal(first.state, 'running'); assert.equal(first.running, true);
   t.after(() => { try { process.kill(first.pid, 'SIGKILL'); } catch {} });
+  assert.ok(['running', 'starting'].includes(first.state));
+  await until(async () => JSON.parse((await command(['notifications', 'status'])).stdout).running === true,
+    'notification listener must reach verified running state');
   const record = await readFile(join(directory, 'codex-notifications-process.json'), 'utf8');
   const second = JSON.parse((await command(['notifications', 'start', '--background'])).stdout);
   assert.equal(second.running, true);
@@ -290,8 +304,10 @@ test('notification test requires an enabled worker and publishes only a retained
   await assert.rejects(command(['notifications', 'test']));
   assert.equal(existsSync(join(directory, 'events.json')), false);
   const worker = JSON.parse((await command(['notifications', 'start', '--background'])).stdout);
-  assert.equal(worker.running, true);
   t.after(() => { try { process.kill(worker.pid, 'SIGKILL'); } catch {} });
+  assert.ok(['running', 'starting'].includes(worker.state));
+  await until(async () => JSON.parse((await command(['notifications', 'status'])).stdout).running === true,
+    'notification test must wait for its listener to reach verified running state');
   const published = JSON.parse((await command(['notifications', 'test'])).stdout);
   assert.equal(published.status, 'published');
   assert.match(published.eventId, /^notification-test-[0-9a-f-]{36}$/);

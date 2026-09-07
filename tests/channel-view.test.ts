@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { Notification } from '@modelcontextprotocol/sdk/types.js';
-import { atomicWriteJson } from '../src/storage.js';
+import { acquireLock, atomicWriteJson, isLiveLockContention } from '../src/storage.js';
 import { issueView, pendingViewRequests, requestWalletSetup, type SetupMode } from '../src/view-session.js';
 
 const repository = fileURLToPath(new URL('..', import.meta.url));
@@ -38,7 +38,15 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
   const preload = join(root, 'no-network.mjs');
   await writeFile(preload, `import { writeFileSync } from 'node:fs';
     globalThis.fetch = async () => { writeFileSync(${JSON.stringify(networkMarker)}, 'blocked');
-      throw new Error('Isolated channel fixture network disabled'); };`);
+      throw new Error('Isolated channel fixture network disabled'); };
+    const kill=process.kill;
+    process.kill=function(pid,signal) {
+      const result=kill.call(process,pid,signal);
+      if (signal===0 && String(pid)===process.env.REBALANCE_FIXTURE_PRODUCER_PID && process.env.REBALANCE_FIXTURE_BUSY_MARKER) {
+        writeFileSync(process.env.REBALANCE_FIXTURE_BUSY_MARKER,'live producer lock observed');
+      }
+      return result;
+    };`);
   async function open(nativeSession?: string, env: Record<string, string> = {}) {
     const received: Notification[] = [];
     const errors: Error[] = [];
@@ -172,6 +180,39 @@ test('native Claude channels reject other sessions but accept rotating tokens fo
   assert.equal((await fresh.client.callTool({ name: 'acknowledge_setup_request', arguments: { id: oldPending.id } })).isError, true);
   assert.deepEqual(fresh.errors, []); assert.equal(fresh.stderr(), '');
   assert.equal(existsSync(join(f.root, 'config.json')), false); f.noTradingChanges();
+});
+
+test('a newly published request retries quietly while its creator still holds the live lock', { timeout: 15_000 }, async t => {
+  const f = await fixture(t), view = await issueView(f.root, sessionA, { kind: 'claude' });
+  const initial = await f.setup(view.token, 'ledger');
+  const marker = join(f.root, 'busy-observed');
+  const channel = await f.open(nativeA, { REBALANCE_FIXTURE_PRODUCER_PID: String(process.pid), REBALANCE_FIXTURE_BUSY_MARKER: marker });
+  await waitFor(() => channel.received.length === 1, 'initial request establishes the active setup watcher');
+  await f.accepted(initial.id);
+  let releasePublication!: () => void, published!: () => void;
+  const publicationGate = new Promise<void>(resolve => { releasePublication = resolve; });
+  const publicationSeen = new Promise<void>(resolve => { published = resolve; });
+  const requestId = randomUUID(), id = setupId(view.token, requestId);
+  const producer = requestWalletSetup(f.root, view.token, 'privy', requestId, {
+    persist: async (path, value) => { await atomicWriteJson(path, value); published(); await publicationGate; },
+    execute: async () => assert.fail('Fixture setup cannot invoke an external transport'),
+  });
+  try {
+    await publicationSeen;
+    await assert.rejects(acquireLock(join(f.root, 'ui-requests'), `${id}.lock`), error =>
+      isLiveLockContention(error) && error.constructor === Error);
+    await waitFor(() => existsSync(marker), 'channel must encounter the producer lock before it is released');
+    assert.equal((await f.record(id)).state, 'pending');
+    assert.deepEqual(ids(channel.received), [initial.id]);
+  } finally { releasePublication(); await producer; }
+  await waitFor(() => channel.received.length === 2, 'bounded retry should deliver after publication finishes');
+  await f.accepted(id);
+  const sentinel = await f.setup(view.token, 'ledger');
+  await waitFor(() => channel.received.length === 3, 'later changes must not resend the accepted request');
+  await f.accepted(sentinel.id);
+  assert.deepEqual(ids(channel.received), [initial.id, id, sentinel.id]);
+  assert.deepEqual(channel.errors, []); assert.equal(channel.stderr(), '');
+  f.noTradingChanges();
 });
 
 test('a channel without a native startup ID binds once and rejects another session thereafter', { timeout: 15_000 }, async t => {
