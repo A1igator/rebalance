@@ -22,6 +22,7 @@ const assets = {
   '/selector.js': ['selector.js', 'text/javascript; charset=utf-8'],
   '/selector.css': ['selector.css', 'text/css; charset=utf-8'],
   '/view-client.js': ['view-client.js', 'text/javascript; charset=utf-8'],
+  '/allocation-ring.js': ['allocation-ring.js', 'text/javascript; charset=utf-8'],
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
   '/style.css': ['style.css', 'text/css; charset=utf-8'],
 } as const;

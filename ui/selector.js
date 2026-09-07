@@ -3,8 +3,8 @@
   const byId = (id) => document.getElementById(id);
   const token = /^#view=([a-f0-9]{64})$/i.exec(window.location.hash)?.[1] || null;
   const fragment = token ? `#view=${token}` : "";
-  const colors = { USDG: "#b4cbb8", AAPL: "#8dbafa", NVDA: "#bad776", MSFT: "#b5a1df", AMD: "#e3a37c" };
-  const assetOrder = Object.keys(colors);
+  const { assetOrder, drawRing } = window.rebalanceRing;
+  const ns = "http://www.w3.org/2000/svg";
   const modes = { "private-key": "Local key", privy: "Privy", ledger: "Ledger" };
   const percent = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
   let portfolios = [], authorized = false, canSetup = false, connectedWallet = null;
@@ -13,6 +13,12 @@
   function element(tag, className, text) {
     const node = document.createElement(tag);
     if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+  function svgElement(tag, attrs, text) {
+    const node = document.createElementNS(ns, tag);
+    for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
     if (text !== undefined) node.textContent = text;
     return node;
   }
@@ -82,23 +88,31 @@
       const top = element("span", "card-top");
       top.append(element("span", "signer", modes[portfolio.mode] || "Signer unavailable"));
       top.append(element("span", `running${portfolio.running === true ? " is-running" : ""}`, portfolio.running === true ? "Running" : portfolio.running === false ? "Stopped" : "Status unavailable"));
-      card.append(top, element("span", "wallet", `${portfolio.wallet.slice(0, 6)}…${portfolio.wallet.slice(-4)}`));
       const chain = portfolio.chainId === 4663 ? "Robinhood" : `Chain ${portfolio.chainId}`;
       const linked = authorized && connectedWallet?.toLowerCase() === portfolio.wallet.toLowerCase();
-      card.append(element("span", "wallet-meta", `${chain}${linked ? " · This chat" : ""}`));
+      if (linked) card.className += " is-connected";
       const entries = targetRows(portfolio.targets);
-      card.append(element("span", "target-label", entries.length ? (portfolio.allocationObjective === "user-risk" ? "Targets · User risk" : portfolio.allocationObjective === "sharpe" ? "Targets · Sharpe" : "Target allocation") : "Targets unavailable"));
-      if (entries.length) {
-        const bar = element("span", "target-bar"), labels = element("span", "targets");
-        bar.setAttribute("aria-hidden", "true");
-        for (const [id, weight] of entries) {
-          const segment = element("span");
-          segment.style.flexGrow = String(weight); segment.style.backgroundColor = colors[id] || "#8f9e94";
-          bar.append(segment); labels.append(element("span", "", `${id} ${percent.format(weight / 100)}%`));
-        }
-        card.append(bar, labels);
-      }
-      if (portfolio.error) card.append(element("span", "card-error", "Configuration needs attention · open your agent"));
+      const preview = element("span", "portfolio-preview");
+      const svg = svgElement("svg", { viewBox: "0 0 220 220", "aria-hidden": "true", focusable: "false" });
+      const maskId = `preview-mask-${portfolio.wallet.toLowerCase()}`;
+      const defs = svgElement("defs", {});
+      const mask = svgElement("mask", { id: maskId, maskUnits: "userSpaceOnUse", maskContentUnits: "userSpaceOnUse", x: 0, y: 0, width: 220, height: 220 });
+      const dividers = svgElement("g", {}), segments = svgElement("g", {});
+      mask.append(svgElement("rect", { x: 0, y: 0, width: 220, height: 220, fill: "white" }), dividers);
+      defs.append(mask); svg.append(defs);
+      const ring = svgElement("g", { transform: "rotate(-90 110 110)", mask: `url(#${maskId})` });
+      ring.append(svgElement("circle", { cx: 110, cy: 110, r: 80, fill: "none", stroke: "#26312a", "stroke-width": 38 }), segments);
+      drawRing(segments, dividers, entries.map(([id, weight]) => ({ id, weight })), 80, 38, 110, 110);
+      svg.append(ring,
+        svgElement("text", { x: 110, y: 109, class: "wallet", "text-anchor": "middle" }, `${portfolio.wallet.slice(0, 6)}…${portfolio.wallet.slice(-4)}`),
+        svgElement("text", { x: 110, y: 127, class: "preview-caption", "text-anchor": "middle" }, entries.length ? "Targets" : "Unavailable"));
+      preview.append(svg);
+      const footer = element("span", "card-footer");
+      footer.append(element("span", "target-label", entries.length ? (portfolio.allocationObjective === "user-risk" ? "Targets · User risk" : portfolio.allocationObjective === "sharpe" ? "Targets · Sharpe" : "Target allocation") : "Targets unavailable"));
+      footer.append(element("span", "wallet-meta", portfolio.error ? "Needs attention · open your agent" : `${chain}${linked ? " · This chat" : ""}`));
+      const details = entries.map(([id, weight]) => `${id} ${percent.format(weight / 100)}%`).join(", ");
+      card.setAttribute("title", `${portfolio.wallet}\n${entries.length ? `Saved targets: ${details}` : "Targets unavailable"}`);
+      card.append(top, preview, footer, element("span", "sr-only", details));
       card.setAttribute("aria-label", `View portfolio ${portfolio.wallet}. ${modes[portfolio.mode] || "Signer unavailable"}, ${chain}. ${portfolio.running === true ? "Running" : portfolio.running === false ? "Stopped" : "Status unavailable"}. ${entries.length ? `Saved target allocation: ${entries.map(([id, weight]) => `${id} ${percent.format(weight / 100)}%`).join(", ")}.` : "Targets unavailable."}${linked ? " Connected to this chat." : ""}${portfolio.error ? " Configuration needs attention." : ""}`);
       card.addEventListener("click", () => { void choose(portfolio); });
       grid.append(card);

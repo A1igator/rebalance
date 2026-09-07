@@ -6,8 +6,7 @@
   byId("portfolios-back")?.setAttribute("href", viewToken ? `/#view=${viewToken}` : "/");
   const percent = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
   const time = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
-  const colors = { USDG: "#b4cbb8", AAPL: "#8dbafa", NVDA: "#bad776", MSFT: "#b5a1df", AMD: "#e3a37c" };
-  const assetOrder = Object.keys(colors);
+  const { assetOrder, drawRing } = window.rebalanceRing;
   // Match the display-only projection gate in src/fee-projection.ts when a newer status event arrives.
   const projectionNodes = new Set(["intent", "config", "observe", "plan", "interval", "quote", "wait"]);
   const projectionOperations = new Set(["confirmed", "cancelled", "recovered-revert", "needs-rebalance", "cooling-down", "waiting-ledger", "waiting-privy", "stopping"]);
@@ -143,45 +142,11 @@
       return (left < 0 ? assetOrder.length : left) - (right < 0 ? assetOrder.length : right);
     });
   }
-  function color(id) {
-    let hash = 0;
-    for (const letter of id) hash = (Math.imul(hash, 31) + letter.charCodeAt(0)) | 0;
-    return colors[id] || `hsl(${(hash >>> 0) % 360} 55% 70%)`;
-  }
   function svgElement(tag, attrs, content) {
     const element = document.createElementNS(ns, tag);
     for (const [key, value] of Object.entries(attrs)) element.setAttribute(key, String(value));
     if (content !== undefined) element.textContent = content;
     return element;
-  }
-
-  function drawRing(entries, segmentsId, dividersId, radius, width) {
-    const segments = byId(segmentsId), dividers = byId(dividersId);
-    segments.replaceChildren(); dividers.replaceChildren();
-    const total = entries.reduce((sum, entry) => sum + entry.weight, 0);
-    const innerRadius = radius - width / 2, outerRadius = radius + width / 2;
-    let offset = 0;
-    entries.forEach((entry, index) => {
-      const share = entry.weight / total * 100;
-      segments.append(svgElement("circle", {
-        cx: 270, cy: 270, r: radius, fill: "none", "stroke-width": width, pathLength: 100,
-        stroke: color(entry.id), "stroke-dasharray": `${share} ${100 - share}`, "stroke-dashoffset": -offset,
-      }));
-      if (entries.length > 1) {
-        const previousShare = entries[(index + entries.length - 1) % entries.length].weight / total * 100;
-        // A straight masked stroke has parallel edges. Limit its width so the
-        // two neighboring cuts together remove at most half of a tiny slice.
-        const gap = Math.min(4, 2 * innerRadius * Math.sin(Math.min(previousShare, share) * Math.PI / 200));
-        const angle = offset / 100 * Math.PI * 2;
-        const cos = Math.cos(angle), sin = Math.sin(angle);
-        dividers.append(svgElement("line", {
-          x1: 270 + cos * (innerRadius - 2), y1: 270 + sin * (innerRadius - 2),
-          x2: 270 + cos * (outerRadius + 2), y2: 270 + sin * (outerRadius + 2),
-          stroke: "black", "stroke-width": gap, "stroke-linecap": "butt",
-        }));
-      }
-      offset += share;
-    });
   }
 
   const modelNumber = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
@@ -264,8 +229,8 @@
     renderGas();
     const labels = byId("labels");
     labels.replaceChildren();
-    drawRing(entries, "segments", "actual-dividers", 164, 78);
-    drawRing(funded ? targets : [], "target-segments", "target-dividers", 110, 13);
+    drawRing(byId("segments"), byId("actual-dividers"), entries, 164, 78);
+    drawRing(byId("target-segments"), byId("target-dividers"), funded ? targets : [], 110, 13);
     let offset = 0;
     const placed = [];
     for (const entry of entries) {

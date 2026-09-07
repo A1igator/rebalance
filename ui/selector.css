@@ -1,37 +1,39 @@
 :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0c100f; color: #eef3ef; }
 * { box-sizing: border-box; }
 body { margin: 0; min-height: 100vh; min-height: 100dvh; }
-main { width: min(100%, 1060px); margin: 0 auto; padding: 64px 28px; }
-header { margin-bottom: 28px; }
-.eyebrow { margin: 0 0 12px; color: #8f9e94; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; }
-h1 { margin: 0; font-size: clamp(28px, 4vw, 38px); font-weight: 500; letter-spacing: -1.2px; }
-.intro { margin: 12px 0 0; color: #a3afa6; font-size: 14px; line-height: 1.6; }
-.notice, .load-status { color: #8f9e94; font-size: 12px; line-height: 1.6; }
-.notice { margin: 0 0 24px; max-width: 650px; }
-.load-status { margin: 0 0 16px; }
+main { width: min(100%, 1060px); margin: 0 auto; padding: 32px 20px; }
+header { margin-bottom: 16px; }
+.eyebrow { margin: 0 0 8px; color: #8f9e94; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; }
+h1 { margin: 0; font-size: 28px; font-weight: 500; letter-spacing: -.8px; }
+.intro { margin: 8px 0 0; color: #a3afa6; font-size: 12px; line-height: 1.6; }
+.notice, .load-status { color: #8f9e94; font-size: 11px; line-height: 1.6; }
+.notice { margin: 0 0 20px; max-width: 650px; }
+.load-status { margin: 0 0 12px; }
 .notice:empty, .load-status:empty { display: none; }
-.portfolio-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 16px; }
+.portfolio-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 170px), 1fr)); gap: 12px; }
 button { font: inherit; cursor: pointer; }
-.portfolio-card { min-width: 0; min-height: 246px; padding: 24px; border: 1px solid #26312a; border-radius: 14px; background: #111713; color: inherit; text-align: left; display: flex; flex-direction: column; align-items: stretch; transition: border-color .15s, background .15s; }
+.portfolio-card { position: relative; min-width: 0; aspect-ratio: 1; padding: 12px; border: 1px solid #26312a; border-radius: 14px; background: #111713; color: inherit; text-align: left; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 5px; transition: border-color .15s, background .15s; }
 .portfolio-card:hover { border-color: #617669; background: #151d18; }
+.portfolio-card.is-connected { border-color: #617669; }
 button:focus-visible, a:focus-visible { outline: 2px solid #b4cbb8; outline-offset: 4px; }
 button:disabled { cursor: default; opacity: .65; }
-.card-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 22px; font-size: 11px; color: #a3afa6; }
-.signer { border: 1px solid #304035; padding: 4px 7px; border-radius: 5px; }
-.running { display: inline-flex; align-items: center; gap: 6px; }
-.running::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: #718076; }
+.card-top { display: flex; justify-content: space-between; align-items: center; gap: 5px; font-size: 9px; color: #a3afa6; }
+.signer { border: 1px solid #304035; padding: 3px 5px; border-radius: 5px; }
+.running { display: inline-flex; align-items: center; gap: 4px; }
+.running::before { content: ""; flex: 0 0 4px; width: 4px; height: 4px; border-radius: 50%; background: #718076; }
 .running.is-running::before { background: #b4cbb8; }
-.wallet { font-size: 20px; font-weight: 500; letter-spacing: -.5px; font-variant-numeric: tabular-nums; }
-.wallet-meta { margin-top: 7px; color: #8f9e94; font-size: 11px; }
-.target-label { margin-top: 25px; color: #8f9e94; font-size: 10px; }
-.target-bar { display: flex; width: 100%; height: 5px; gap: 2px; overflow: hidden; border-radius: 3px; margin-top: 10px; }
-.target-bar > span { min-width: 0; }
-.targets { display: flex; flex-wrap: wrap; gap: 5px 10px; margin-top: 10px; color: #b7c3ba; font-size: 10px; line-height: 1.5; }
-.card-error { margin-top: 14px; color: #d6b8a0; font-size: 11px; line-height: 1.5; }
-.new-portfolio { border-style: dashed; justify-content: center; background: transparent; }
-.new-icon { color: #b4cbb8; font-size: 30px; font-weight: 300; margin-bottom: 16px; }
-.new-label { font-size: 17px; font-weight: 500; }
-.new-description { margin-top: 8px; color: #8f9e94; font-size: 12px; }
+.portfolio-preview { display: grid; place-items: center; min-height: 0; min-width: 0; }
+.portfolio-preview svg { display: block; width: 100%; height: 100%; min-height: 0; }
+.wallet { font-size: 16px; font-weight: 500; fill: #eef3ef; letter-spacing: -.25px; font-variant-numeric: tabular-nums; }
+.preview-caption { font-size: 10px; fill: #8f9e94; }
+.card-footer { display: grid; gap: 4px; text-align: center; }
+.target-label { color: #b7c3ba; font-size: 10px; line-height: 1.3; }
+.wallet-meta { color: #8f9e94; font-size: 9px; line-height: 1.3; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.new-portfolio { border-style: dashed; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; background: transparent; text-align: center; }
+.new-icon { color: #b4cbb8; font-size: 36px; font-weight: 300; line-height: 1; margin-bottom: 14px; }
+.new-label { font-size: 14px; font-weight: 500; }
+.new-description { margin-top: 6px; color: #8f9e94; font-size: 10px; }
 .text-button { margin-top: 14px; border: 0; padding: 6px 0; background: transparent; color: #b4cbb8; font-size: 12px; text-decoration: underline; text-underline-offset: 4px; }
 dialog { width: min(440px, calc(100% - 32px)); padding: 28px; border: 1px solid #304035; border-radius: 16px; background: #111713; color: #eef3ef; }
 dialog::backdrop { background: #060907c9; }
@@ -46,5 +48,5 @@ h2 { margin: 0; font-size: 23px; font-weight: 500; letter-spacing: -.7px; }
 .signer-option span { font-size: 12px; color: #a3afa6; }
 .setup-status { color: #b7c3ba; font-size: 12px; line-height: 1.6; margin: 18px 0 0; }
 [hidden] { display: none !important; }
-@media (max-width: 600px) { main { padding: 36px 20px; } .portfolio-card { min-height: 230px; } }
+@media (max-width: 400px) { main { padding: 24px 12px; } .portfolio-grid { gap: 10px; } .portfolio-card { padding: 10px; } }
 @media (prefers-reduced-motion: reduce) { .portfolio-card { transition: none; } }

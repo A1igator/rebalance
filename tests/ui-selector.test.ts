@@ -41,7 +41,7 @@ async function browser(options: { hash?: string; pathname?: string; client?: boo
   const context = {
     window, URL, AbortController, TextDecoder,
     crypto: { randomUUID: () => { uuidCalls++; return `00000000-0000-4000-8000-${String(uuidCalls).padStart(12, '0')}`; } },
-    document: { getElementById: byId, createElement: (tag: string) => new Node(tag) },
+    document: { getElementById: byId, createElement: (tag: string) => new Node(tag), createElementNS: (_namespace: string, tag: string) => new Node(tag) },
     setTimeout: (fn: () => void) => { timers.set(++timerId, fn); return timerId; }, clearTimeout: (id: number) => timers.delete(id),
     fetch: async (url: string, init: { body?: string; signal?: AbortSignal; method?: string } = {}) => {
       const call = { url, body: init.body ? JSON.parse(init.body) : undefined, signal: init.signal, method: init.method };
@@ -63,7 +63,10 @@ async function browser(options: { hash?: string; pathname?: string; client?: boo
     },
   };
   if (options.client !== false) runInNewContext(await readFile(new URL('../ui/view-client.js', import.meta.url), 'utf8'), context);
-  if (options.selector !== false) runInNewContext(await readFile(new URL('../ui/selector.js', import.meta.url), 'utf8'), context);
+  if (options.selector !== false) {
+    runInNewContext(await readFile(new URL('../ui/allocation-ring.js', import.meta.url), 'utf8'), context);
+    runInNewContext(await readFile(new URL('../ui/selector.js', import.meta.url), 'utf8'), context);
+  }
   await flush();
   return {
     byId, calls, navigations, timers, streams, get uuidCalls() { return uuidCalls; },
@@ -87,7 +90,7 @@ test('bare selector displays saved targets and signer choices without linking a 
   assert.deepEqual(page.calls.map(c => c.url), ['/api/portfolios']);
   assert.match(page.byId('view-notice').textContent, /Viewing only.*through your agent/);
   assert.equal(page.cards().length, 3);
-  assert.match(content(page.cards()[0]!), /Ledger Running.*Robinhood.*Target allocation.*USDG 5% AAPL 23.75% NVDA 23.75% MSFT 23.75% AMD 23.75%/);
+  assert.match(content(page.cards()[0]!), /Ledger Running.*Targets.*Target allocation.*Robinhood.*USDG 5%, AAPL 23.75%, NVDA 23.75%, MSFT 23.75%, AMD 23.75%/);
   assert.match(page.cards()[0]!.attrs['aria-label']!, new RegExp(walletA));
   assert.match(page.cards()[0]!.attrs['aria-label']!, /Saved target allocation/);
   await page.click(page.cards().at(-1)!);
@@ -268,7 +271,7 @@ test('fresh streamed selection wins over delayed initial reads and stale connect
 test('invalid targets remain unavailable and invalid view links never claim a chat connection', async () => {
   const page = await browser({ reply: async call => call.url === '/api/view' ? { ok: false, status: 403, json: async () => ({ error: 'Invalid view' }) }
     : call.url === '/api/portfolios' ? ok({ portfolios: [{ ...portfolios[0], targets: { USDG: 9999 }, error: 'Unreadable config' }] }) : undefined });
-  assert.match(content(page.cards()[0]!), /Targets unavailable.*Configuration needs attention/);
+  assert.match(content(page.cards()[0]!), /Targets unavailable.*Needs attention/);
   assert.doesNotMatch(content(page.cards()[0]!), /This chat|99\.99%/);
   assert.match(page.byId('view-notice').textContent, /Viewing only/);
   await page.click(page.cards()[0]!);

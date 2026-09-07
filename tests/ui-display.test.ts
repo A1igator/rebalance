@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { runInNewContext } from 'node:vm';
+import { createContext, runInContext } from 'node:vm';
 
 const observed = '2026-09-06T02:30:00.000Z';
 const initialTime = Date.parse(observed);
@@ -22,7 +22,8 @@ type Response = { ok: boolean; json: () => Promise<unknown> };
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
 async function browser(options: { gas?: () => Promise<Response>; status?: () => Promise<Response> } = {}) {
-  const script = await readFile(new URL('../ui/app.js', import.meta.url), 'utf8');
+  const [ringScript, script] = await Promise.all(['allocation-ring.js', 'app.js']
+    .map(file => readFile(new URL(`../ui/${file}`, import.meta.url), 'utf8')));
   const elements = new Map<string, DisplayNode>();
   const lifecycle = new Map<string, () => void>();
   const timers = new Map<number, { fn: () => void; at: number }>();
@@ -48,7 +49,7 @@ async function browser(options: { gas?: () => Promise<Response>; status?: () => 
     close() { this.closed = true; }
     send(snapshot: unknown) { this.handlers.get('status')!({ data: JSON.stringify(snapshot) }); }
   }
-  runInNewContext(script, {
+  const context = createContext({
     Date: ClockDate, EventSource: Source, AbortController,
     setTimeout: (fn: () => void, ms: number) => { const id = ++nextTimer; timers.set(id, { fn, at: now + ms }); return id; },
     clearTimeout: (id: number) => timers.delete(id),
@@ -62,6 +63,8 @@ async function browser(options: { gas?: () => Promise<Response>; status?: () => 
       createElementNS: (_namespace: string, tag: string) => node(tag),
     },
   });
+  runInContext(ringScript, context);
+  runInContext(script, context);
   const source = Source.instances[0]!;
   source.send(current);
   await flush();

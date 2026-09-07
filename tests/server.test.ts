@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test, type TestContext } from 'node:test';
-import { runInNewContext } from 'node:vm';
+import { createContext, runInContext } from 'node:vm';
 import { serve } from '../src/server.js';
 import { chartPort, chartUrl } from '../src/chart-address.js';
 import { atomicWriteJson, readJson } from '../src/storage.js';
@@ -265,7 +265,8 @@ test('two wallet charts retain separate ports, HTTP snapshots and directory even
 });
 
 test('chart uses events while connected and one polling fallback only while disconnected', async () => {
-  const script = await readFile(new URL('../ui/app.js', import.meta.url), 'utf8');
+  const [ringScript, script] = await Promise.all(['allocation-ring.js', 'app.js']
+    .map(file => readFile(new URL(`../ui/${file}`, import.meta.url), 'utf8')));
   const timers = new Map<number, { fn: () => void; ms: number }>();
   let nextTimer = 0;
   let fetches = 0;
@@ -285,7 +286,7 @@ test('chart uses events while connected and one polling fallback only while disc
     close() { this.closed = true; }
     send(snapshot: Status) { this.handlers.get('status')!({ data: JSON.stringify(snapshot) }); }
   }
-  runInNewContext(script, {
+  const context = createContext({
     EventSource: Source, AbortController,
     setTimeout: (fn: () => void, ms: number) => { const id = ++nextTimer; timers.set(id, { fn, ms }); return id; },
     clearTimeout: (id: number) => timers.delete(id),
@@ -304,6 +305,8 @@ test('chart uses events while connected and one polling fallback only while disc
       createElementNS: () => ({ setAttribute: () => {}, textContent: '' }),
     },
   });
+  runInContext(ringScript, context);
+  runInContext(script, context);
   const source = Source.instances[0]!;
   assert.equal(fetches, 0, 'normal connection begins without a polling fetch');
   source.send(initial);
