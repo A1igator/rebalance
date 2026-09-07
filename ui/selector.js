@@ -130,7 +130,7 @@
       if (!Array.isArray(result?.portfolios)) throw new Error("Portfolio list unavailable.");
       if (!streamed) {
         portfolios = validPortfolios(result.portfolios);
-        byId("portfolio-status").textContent = portfolios.length ? "" : "No portfolios yet. Add a wallet to get started.";
+        byId("portfolio-status").textContent = "";
       }
     } catch (error) {
       if (!streamed) {
@@ -150,7 +150,7 @@
       if (streamed) return;
       if (typeof result?.canSetup !== "boolean" || (result.connectedWallet !== null && (typeof result.connectedWallet !== "string" || !/^0x[0-9a-f]{40}$/i.test(result.connectedWallet)))) throw new Error("View link unavailable.");
       authorized = true; canSetup = result.canSetup; connectedWallet = result.connectedWallet;
-      byId("view-notice").textContent = "Selecting a portfolio also connects it to this chat.";
+      byId("view-notice").textContent = "";
     } catch {
       if (streamed) return;
       byId("view-notice").textContent = "Viewing only. This view link is unavailable; open the page again through your agent to connect your chat.";
@@ -191,8 +191,8 @@
       streamed = true; authorized = true; viewReady = true;
       canSetup = update.snapshot.canSetup; connectedWallet = update.snapshot.connectedWallet;
       portfolios = validPortfolios(update.snapshot.portfolios);
-      byId("view-notice").textContent = "Selecting a portfolio also connects it to this chat.";
-      if (!connecting) byId("portfolio-status").textContent = portfolios.length ? "" : "No portfolios yet. Add a wallet to get started.";
+      byId("view-notice").textContent = "";
+      if (!connecting) byId("portfolio-status").textContent = "";
       byId("reload-portfolios").hidden = true;
       setSetupButtons(); render();
     } else if (update.error) {

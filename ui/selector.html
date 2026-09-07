@@ -12,16 +12,13 @@
     <script src="/selector.js" defer></script>
   </head>
   <body>
-    <main>
-      <header>
-        <p class="eyebrow">Rebalance</p>
-        <h1>Portfolios</h1>
-        <p class="intro">Choose a wallet to view its allocation.</p>
-      </header>
-      <p id="view-notice" class="notice" role="status">Checking the view link…</p>
-      <p id="portfolio-status" class="load-status" role="status">Loading portfolios…</p>
+    <main aria-label="Portfolios">
+      <div class="selector-feedback">
+        <p id="view-notice" role="status"></p>
+        <p id="portfolio-status" role="status">Loading portfolios…</p>
+        <button id="reload-portfolios" class="text-button" type="button" hidden>Try again</button>
+      </div>
       <div id="portfolio-grid" class="portfolio-grid" aria-label="Wallet portfolios"></div>
-      <button id="reload-portfolios" class="text-button" type="button" hidden>Try again</button>
     </main>
     <dialog id="setup-dialog" aria-labelledby="setup-title" aria-describedby="setup-description">
       <div class="dialog-heading"><h2 id="setup-title">New portfolio</h2><button id="close-setup" class="close-button" type="button" aria-label="Close setup">×</button></div>
