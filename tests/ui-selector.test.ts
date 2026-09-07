@@ -221,7 +221,7 @@ test('ready setup connects through the existing path and navigates only after ve
   const page = await browser({ reply: async call => call.url === '/api/connect' ? new Promise(resolve => { finish = resolve; }) : undefined });
   await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-privy'));
   await page.sendSetup(setupResult('privy', 'awaiting-approval', { approval }));
-  await page.sendSetup(setupResult('privy', 'ready', { wallet: walletB, chartUrl: portfolios[1]!.chartUrl, reused: true }));
+  await page.sendSetup(setupResult('privy', 'ready', { wallet: walletB, chartUrl: portfolios[1]!.chartUrl, reused: false }));
   assert.equal(page.navigations.length, 0);
   assert.deepEqual(page.calls.find(c => c.url === '/api/connect')!.body, { token, wallet: walletB });
   assert.equal(page.byId('setup-dialog').open, false);
@@ -233,12 +233,39 @@ test('ready setup connects through the existing path and navigates only after ve
   await page.hide();
 });
 
-test('a ready initial response reuses the wallet without starting an unnecessary setup stream', async () => {
-  const page = await browser({ reply: async call => call.url === '/api/setup'
-    ? ok(setupResult('privy', 'ready', { wallet: walletB, chartUrl: portfolios[1]!.chartUrl, reused: true })) : undefined });
+test('Privy reuse stays in the dialog and connects only after an explicit open, for initial or streamed results', async () => {
+  for (const immediate of [true, false]) {
+    const ready = setupResult('privy', 'ready', { wallet: walletB, chartUrl: portfolios[1]!.chartUrl, reused: true });
+    const page = await browser({ reply: async call => immediate && call.url === '/api/setup' ? ok(ready) : undefined });
+    await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-privy'));
+    if (!immediate) await page.sendSetup(ready);
+    assert.equal(page.calls.some(c => c.url === '/api/setup/events'), !immediate);
+    assert.equal(page.calls.some(c => c.url === '/api/connect'), false);
+    assert.deepEqual(page.navigations, []);
+    assert.equal(page.byId('setup-dialog').open, true);
+    assert.match(page.byId('setup-status').textContent, /already added.*cannot create another Ethereum wallet/);
+    assert.equal(page.byId('open-existing-portfolio').hidden, false);
+    assert.equal(page.byId('open-existing-portfolio').disabled, false);
+    await page.click(page.byId('open-existing-portfolio'));
+    assert.deepEqual(page.calls.find(c => c.url === '/api/connect')!.body, { token, wallet: walletB });
+    assert.deepEqual(page.navigations, [`http://127.0.0.1:4664/chart${fragment}`]);
+    assert.equal(page.uuidCalls, 1);
+    await page.hide();
+  }
+});
+
+test('dismissed Privy reuse cannot connect, and a reopened setup clears the previous open action', async () => {
+  const page = await browser();
   await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-privy'));
-  assert.equal(page.calls.some(c => c.url === '/api/setup/events'), false);
-  assert.deepEqual(page.navigations, [`http://127.0.0.1:4664/chart${fragment}`]);
+  await page.click(page.byId('close-setup'));
+  await page.sendSetup(setupResult('privy', 'ready', { wallet: walletB, chartUrl: portfolios[1]!.chartUrl, reused: true }));
+  await page.click(page.byId('open-existing-portfolio'));
+  assert.equal(page.calls.some(c => c.url === '/api/connect'), false);
+  await page.click(page.cards().at(-1)!);
+  assert.equal(page.byId('open-existing-portfolio').hidden, true);
+  assert.equal(page.byId('setup-privy').disabled, false);
+  await page.click(page.byId('open-existing-portfolio'));
+  assert.equal(page.calls.some(c => c.url === '/api/connect'), false);
   await page.hide();
 });
 

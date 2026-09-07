@@ -16,7 +16,9 @@ The original funded standalone wallet stays intact. Its old randomly generated p
 
 The pinned official Privy CLI reuses its cached first Ethereum wallet. If sign-in is needed, it opens the official approval page in the system browser. The dialog displays the same approval URL and user code as a fallback. Complete provider authentication there; the app finishes registration after the CLI succeeds. Nothing asks for a private key in chat.
 
-The CLI provides one signed-in Ethereum wallet, not a new wallet selector on every click. Choosing Privy again opens that wallet's portfolio. It does not log out or replace credentials automatically. A cached address is not proof of current service authorization. See [Privy implementation and validation](PRIVY.md).
+The CLI provides one signed-in Ethereum wallet, not a new wallet selector on every click. Choosing Privy again explains that its wallet is already added and offers **Open existing portfolio**; it does not redirect automatically. It does not log out or replace credentials automatically. A cached address is not proof of current service authorization. See [Privy implementation and validation](PRIVY.md).
+
+Privy itself supports additional embedded wallets through a separate app SDK integration with `createWallet({createAdditional: true})` and explicit wallet selection. Those features are not exposed by the selected Agent Sandbox CLI. Logout/relogin is not an additional-wallet creation method. [Official HD wallet documentation](https://docs.privy.io/recipes/hd-wallets).
 
 ## Ledger
 

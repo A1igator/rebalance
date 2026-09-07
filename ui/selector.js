@@ -9,6 +9,7 @@
   const percent = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
   let portfolios = [], authorized = false, canSetup = false, connectedWallet = null;
   let viewReady = !token, connecting = false, setupBusy = false, setupRequest = null, streamed = false, connectionRevision = 0;
+  let setupExisting = null;
   let setupState = null, setupController = null, setupGeneration = 0, setupSuspended = false, setupAttachmentAllowed = false;
 
   function element(tag, className, text) {
@@ -54,9 +55,10 @@
   function setSetupButtons() {
     for (const mode of Object.keys(modes)) byId(`setup-${mode}`).disabled = !canSetup || setupBusy || Boolean(setupRequest);
     byId("retry-setup").disabled = setupBusy;
+    byId("open-existing-portfolio").disabled = !authorized || connecting || !setupExisting;
   }
   function openSetup() {
-    if (setupState === "ready") { setupRequest = null; setupState = null; }
+    if (setupState === "ready") { setupRequest = null; setupState = null; setupExisting = null; byId("open-existing-portfolio").hidden = true; }
     if (!setupRequest) {
       byId("setup-status").textContent = canSetup ? "" : "Open this page through your agent to set up a wallet.";
       clearApproval(); byId("retry-setup").hidden = true;
@@ -192,6 +194,7 @@
   function acceptSetup(value, expected) {
     const result = verifiedSetup(value, expected);
     if (setupRequest !== expected) return true;
+    setupExisting = null; byId("open-existing-portfolio").hidden = true;
     setupState = result.state;
     setupBusy = !["ready", "failed"].includes(result.state);
     clearApproval();
@@ -203,6 +206,14 @@
       byId("setup-approval").hidden = false;
     }
     setSetupButtons();
+    if (result.state === "ready" && result.mode === "privy" && result.reused === true) {
+      setupAttachmentAllowed = false;
+      setupExisting = result;
+      byId("setup-status").textContent = `Your signed-in Privy wallet (${result.wallet.slice(0, 6)}…${result.wallet.slice(-4)}) is already added. This connection cannot create another Ethereum wallet.`;
+      byId("open-existing-portfolio").hidden = false;
+      setSetupButtons();
+      return true;
+    }
     if (result.state === "ready") {
       const attach = !setupSuspended && setupAttachmentAllowed && byId("setup-dialog").open &&
         connectionRevision === expected.revision && !connecting;
@@ -213,7 +224,7 @@
     return !setupBusy;
   }
   function setupUnavailable() {
-    setupBusy = false; clearApproval();
+    setupBusy = false; setupExisting = null; byId("open-existing-portfolio").hidden = true; clearApproval();
     byId("setup-status").textContent = "Setup progress is unavailable. Try again to check the same request.";
     byId("retry-setup").hidden = false;
     setSetupButtons();
@@ -276,6 +287,11 @@
     setupRequest = { mode, requestId: crypto.randomUUID(), revision: connectionRevision };
     setupAttachmentAllowed = true;
     void submitSetup();
+  });
+  byId("open-existing-portfolio").addEventListener("click", () => {
+    if (!setupExisting || !authorized || connecting || !byId("setup-dialog").open) return;
+    const portfolio = setupExisting;
+    setupAttachmentAllowed = false; byId("setup-dialog").close(); void choose(portfolio);
   });
   byId("retry-setup").addEventListener("click", () => { void submitSetup(); });
   byId("close-setup").addEventListener("click", () => { setupAttachmentAllowed = false; byId("setup-dialog").close(); });

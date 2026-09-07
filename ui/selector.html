@@ -25,7 +25,7 @@
       <p id="setup-description">Choose how to sign. Setup finishes here after any browser or device approval.</p>
       <div class="signer-options">
         <button id="setup-private-key" class="signer-option" type="button"><strong>Local key</strong><span>A wallet managed on this computer</span></button>
-        <button id="setup-privy" class="signer-option" type="button"><strong>Privy</strong><span>An agent wallet through Privy</span></button>
+        <button id="setup-privy" class="signer-option" type="button"><strong>Connect Privy wallet</strong><span>Uses your signed-in Privy wallet</span></button>
         <button id="setup-ledger" class="signer-option" type="button"><strong>Ledger</strong><span>Verify an account on your Ledger</span></button>
       </div>
       <p id="setup-status" class="setup-status" role="status"></p>
@@ -34,6 +34,7 @@
         <strong id="setup-approval-code"></strong>
         <a id="setup-approval-link" target="_blank" rel="noopener noreferrer">Open Privy approval</a>
       </div>
+      <button id="open-existing-portfolio" class="text-button" type="button" hidden>Open existing portfolio</button>
       <button id="retry-setup" class="text-button" type="button" hidden>Try again</button>
     </dialog>
   </body>
