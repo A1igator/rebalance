@@ -31,6 +31,8 @@ const defaults: EventStreamDependencies = {
  * Delivery success suppresses repeats in this stream; a new session gets a new stream.
  * There are no periodic reads. Timers cover actual stream failures or an optional
  * exact notification eligibility deadline; watched status files can cancel it.
+ * A false delivery result vetoes this attempt without marking it sent or causing
+ * a retry loop; a later file event, deadline or explicit wake can reconsider it.
  * A transport must settle delivery or close the stream; do not race a write with a
  * retry that could run concurrently with that same unresolved write.
  */
@@ -40,7 +42,7 @@ export function createEventStream<T extends { id: string }>(
     watchFiles?: readonly string[];
     nextWakeAt?: () => number | null;
     read: () => Promise<readonly T[]>;
-    deliver: (event: T) => Promise<void>;
+    deliver: (event: T) => Promise<void | boolean>;
     onError?: (phase: EventStreamFailure) => void;
   },
   overrides: Partial<EventStreamDependencies> = {},
@@ -101,9 +103,9 @@ export function createEventStream<T extends { id: string }>(
           if (closed) break;
           if (sent.has(event.id)) continue;
           phase = 'delivery';
-          await options.deliver(event);
+          const delivered = await options.deliver(event);
           // A transport write is not a durable acknowledgement or proof of push delivery.
-          sent.add(event.id);
+          if (delivered !== false) sent.add(event.id);
         }
         drainDelay = 1_000;
       }

@@ -18,7 +18,7 @@ async function fixture(t: TestContext) {
   const dataDir = await mkdtemp(join(tmpdir(), 'rebalance-notification-filter-'));
   t.after(() => rm(dataDir, { recursive: true, force: true }));
   let now = epoch;
-  const factory = (persist?: (path: string, value: unknown) => Promise<void>) => createNotificationFilter({ dataDir, now: () => now, persist });
+  const factory = (persist?: (path: string, value: unknown) => Promise<void>) => createNotificationFilter({ dataDir, now: () => now, statusModifiedAt: async () => now, persist });
   const status = async (kind: 'failure' | 'healthy' | 'intermediate', at = now, otherWallet = wallet) => atomicWriteJson(join(dataDir, 'status.json'), {
     wallet: otherWallet, error: kind === 'failure' ? 'Read unavailable.' : null,
     portfolio: { totalUsdE8: '100', positions: [{ id: 'USDG', balance: '100', priceUsdE8: '1', valueUsdE8: '100', weightBps: 10_000, targetBps: 10_000 }] },
@@ -189,4 +189,91 @@ test('future timestamps, clock rollback and a different wallet cannot establish 
   assert.deepEqual((await f.factory().select(queue)).events, []);
   assert.ok((await f.suppressed()).has('clock'));
   assert.equal((await f.saved()).suppressed.find((entry: { id: string }) => entry.id === 'clock').reason, 'previous-wallet');
+});
+
+const quoteMessage = 'Rebalance needs attention: A usable swap quote could not be obtained. No completion is confirmed by this alert. Review the current agent status before recovery.';
+const quoteFailure = (id: string, at = epoch): RebalanceEvent => ({ ...failure(id, at), message: quoteMessage });
+async function quoteStatus(f: Awaited<ReturnType<typeof fixture>>, at: number, kind: 'failure' | 'intermediate' | 'no-trade' | 'quoted') {
+  await f.status('healthy', at);
+  const path = join(f.dataDir, 'status.json');
+  const state = JSON.parse(await readFile(path, 'utf8'));
+  state.proposal = kind === 'no-trade' ? null : { fixture: 'trade' };
+  state.error = kind === 'failure' ? 'Quote unavailable.' : null;
+  state.graph = kind === 'failure' ? { node: 'error', trace: ['config','observe','plan','interval','quote','error'] }
+    : kind === 'intermediate' ? { node: 'quote', trace: ['config','observe','plan','interval','quote'] }
+    : kind === 'quoted' ? { node: 'receipt', trace: ['config','observe','plan','interval','quote','execute','receipt'] }
+    : { node: 'wait', trace: ['config','observe','plan','wait'] };
+  await atomicWriteJson(path, state);
+}
+
+test('historical quote failures stay quiet after a completed no-trade traversal', async t => {
+  const f=await fixture(t); f.setTime(epoch+200_000); await quoteStatus(f,epoch+200_000,'no-trade');
+  const q=quoteFailure('old-quote'); const before=JSON.stringify(q);
+  assert.deepEqual((await f.factory().select([q,critical()])).events,[critical()]);
+  assert.ok((await f.suppressed()).has(q.id)); assert.equal(JSON.stringify(q),before);
+});
+
+test('quote outage persists despite newer successful portfolio snapshots and deduplicates after eligibility', async t => {
+  const f=await fixture(t); const q=quoteFailure('persistent-quote');
+  await quoteStatus(f,epoch,'failure');
+  assert.equal((await f.factory().select([q])).nextAt,epoch+120_000);
+  f.setTime(epoch+120_000); await quoteStatus(f,epoch+119_000,'failure');
+  assert.deepEqual((await f.factory().select([q])).events,[q]);
+  assert.ok(!(await f.suppressed()).has(q.id),'a successful observation cannot clear a quote error');
+  f.setTime(epoch+130_000); await quoteStatus(f,epoch+130_000,'intermediate');
+  assert.deepEqual((await f.factory().select([q])).events,[]);
+  assert.ok(!(await f.suppressed()).has(q.id),'entering quote is not proof it succeeded');
+  f.setTime(epoch+140_000); await quoteStatus(f,epoch+140_000,'quoted');
+  await f.factory().select([q]);
+  f.setTime(epoch+200_000); await quoteStatus(f,epoch+200_000,'no-trade');
+  assert.deepEqual((await f.factory().select([q])).events,[]);
+  assert.ok((await f.suppressed()).has(q.id));
+});
+
+test('read and quote incidents have separate persistence and leave critical failures immediate', async t => {
+  const f=await fixture(t); const read=failure('read-scope'); const q=quoteFailure('quote-scope',epoch+30_000);
+  await f.status('failure'); await f.factory().select([read]);
+  f.setTime(epoch+30_000); await quoteStatus(f,epoch+29_000,'failure');
+  const unknown={...q,id:'unknown',message:'Unexpected failure'};
+  const hashed={...q,id:'hashed',hash:`0x${'a'.repeat(64)}`};
+  const result=await f.factory().select([read,q,unknown,hashed,critical()]);
+  assert.deepEqual(result.events,[unknown,hashed,critical()]);
+  assert.equal(result.nextAt,epoch+150_000);
+  f.setTime(epoch+150_000); await quoteStatus(f,epoch+149_000,'failure');
+  assert.deepEqual((await f.factory().select([read,q])).events,[q]);
+});
+
+
+test('an old unchanged error snapshot cannot newly wake a chat as a current persistent failure', async t => {
+  const f=await fixture(t); await f.status('failure');
+  const queue=[failure('offline-read')];
+  const filter=createNotificationFilter({dataDir:f.dataDir,now:()=>epoch+180_000,statusModifiedAt:async()=>epoch});
+  assert.deepEqual((await filter.select(queue)).events,[]);
+  assert.ok(!(await f.suppressed()).has(queue[0].id),'absence of fresh failure evidence does not claim recovery');
+  await quoteStatus(f,epoch,'failure');
+  const quote=quoteFailure('offline-quote');
+  assert.deepEqual((await filter.select([quote])).events,[]);
+});
+
+
+test('an old quote UUID cannot immediately mature a newly observed quote error before its new event is published', async t => {
+  const f=await fixture(t); f.setTime(epoch+600_000); await quoteStatus(f,epoch+599_000,'failure');
+  const old=quoteFailure('old-unreported-quote');
+  const initial=await f.factory().select([old]);
+  assert.deepEqual(initial.events,[]); assert.equal(initial.nextAt,epoch+720_000);
+  f.setTime(epoch+610_000); await quoteStatus(f,epoch+609_000,'failure');
+  const latest=quoteFailure('new-quote-event',epoch+610_000);
+  assert.equal((await f.factory().select([old,latest])).nextAt,epoch+730_000);
+  assert.ok((await f.suppressed()).has(old.id));
+});
+
+
+test('a stopped runner cannot revive a routine alert by rewriting an old error snapshot', async t => {
+  const f=await fixture(t); await f.status('failure'); const event=failure('stopped-read');
+  await f.factory().select([event]); f.setTime(epoch+120_000); await f.factory().select([event]);
+  const path=join(f.dataDir,'status.json');
+  const retained=JSON.parse(await readFile(path,'utf8'));
+  await atomicWriteJson(path,{...retained,armed:false});
+  assert.deepEqual((await f.factory().select([event,critical()])).events,[critical()]);
+  assert.ok(!(await f.suppressed()).has(event.id),'stopping is not evidence of recovery');
 });

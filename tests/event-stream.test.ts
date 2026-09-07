@@ -28,7 +28,7 @@ class Clock {
     this.now = until;
   }
 }
-function fixture(options: { queue?: Item[]; read?: () => Promise<Item[]>; deliver?: (item: Item) => Promise<void>;
+function fixture(options: { queue?: Item[]; read?: () => Promise<Item[]>; deliver?: (item: Item) => Promise<void | boolean>;
   watch?: EventStreamDependencies['watch']; watchFiles?: readonly string[]; nextWakeAt?: () => number | null; clock?: Clock } = {}) {
   const clock = options.clock ?? new Clock();
   const queue = options.queue ?? [];
@@ -234,6 +234,44 @@ test('queue changes during a slow delivery are drained serially and coalesced', 
   assert.equal(f.reads(), 2);
   assert.deepEqual(delivered, ['first', 'second', 'third']);
   assert.equal(f.clock.timers.size, 0);
+});
+
+test('a delivery veto after an earlier delayed send leaves the backlog eligible for a later status wake', async t => {
+  let release!: () => void;
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  let eligible = true;
+  let active = 0; let maximum = 0;
+  const attempts: string[] = [];
+  const delivered: string[] = [];
+  const retained = [{ id: 'first' }, { id: 'became-stale' }, { id: 'completion' }];
+  const f = fixture({ queue: retained, watchFiles: ['events.json', 'status.json'], deliver: async item => {
+    active++; maximum = Math.max(maximum, active); attempts.push(item.id);
+    try {
+      if (item.id === 'first') await blocked;
+      if (item.id === 'became-stale' && !eligible) return false;
+      delivered.push(item.id);
+      if (item.id === 'completion') return true;
+      // Existing void-return adapters still count as successful delivery.
+    } finally { active--; }
+  } }); t.after(f.stream.close);
+  await flush();
+  assert.deepEqual(attempts, ['first']); assert.equal(active, 1);
+  eligible = false; release(); await flush();
+  assert.deepEqual(attempts, ['first', 'became-stale', 'completion']);
+  assert.deepEqual(delivered, ['first', 'completion'], 'veto does not block a later critical event');
+  assert.equal(maximum, 1); assert.equal(active, 0);
+  assert.equal(f.clock.timers.size, 0); assert.deepEqual(f.errors, []);
+  assert.deepEqual(retained, [{ id: 'first' }, { id: 'became-stale' }, { id: 'completion' }]);
+  const reads = f.reads();
+  f.clock.advance(3_600_000); await flush();
+  assert.equal(f.reads(), reads, 'a veto cannot start an immediate or periodic retry');
+  assert.equal(attempts.length, 3);
+  eligible = true; f.watchers[0]!.changed('status.json'); await flush();
+  assert.deepEqual(attempts, ['first', 'became-stale', 'completion', 'became-stale']);
+  assert.deepEqual(delivered, ['first', 'completion', 'became-stale'], 'vetoed ID was not inserted in the sent set');
+  assert.equal(maximum, 1); assert.equal(f.clock.timers.size, 0);
+  f.watchers[0]!.changed('events.json'); await flush();
+  assert.equal(attempts.length, 4, 'successfully delivered entries are not repeated after reconsideration');
 });
 
 test('read failures alone schedule bounded retries; file hint storms do not bypass backoff', async t => {

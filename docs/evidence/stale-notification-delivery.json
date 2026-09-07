@@ -1,0 +1,38 @@
+{
+  "date": "2026-09-07",
+  "change": "Stale read/quote notification suppression and accepted native queue withdrawal",
+  "validation": {
+    "fullSuite": {
+      "tests": 472,
+      "passed": 472,
+      "failed": 0,
+      "skipped": 0
+    },
+    "typecheck": "passed",
+    "skillValidator": "passed",
+    "whitespace": "passed"
+  },
+  "integration": {
+    "notificationOnlyReload": true,
+    "listenerEnabled": true,
+    "listenerRunning": true,
+    "listenerError": null,
+    "ownedQueuedCount": 0,
+    "uncertainCount": 0,
+    "existingFinancialStateUnchanged": true,
+    "newFinancialActions": false
+  },
+  "nativeInterface": {
+    "installedCliVersion": "0.153.4",
+    "transport": "codex app-server --listen stdio://",
+    "method": "thread/queue/delete",
+    "scope": "Only accepted queue IDs recorded by this application in the configured destination task",
+    "runtimeValidation": "Isolated protocol/fixture subprocess tests; no live deletion occurred because no owned native alerts were pending"
+  },
+  "limitations": [
+    "Native deletion is best-effort because Desktop may already have fetched a queued prompt.",
+    "A newly connected live Claude channel and phone delivery were not tested.",
+    "Incoming notification handling follows the updated quiet instructions subject to higher-priority host instructions."
+  ],
+  "publishedRecord": "Aggregate validation only; excludes local wallet addresses, balances, process/task identifiers, queue IDs and state fingerprints."
+}

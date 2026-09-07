@@ -22,21 +22,24 @@ async function until(condition: () => boolean | Promise<boolean>) {
 async function fixture(t: TestContext) {
   const directory = await mkdtemp(join(tmpdir(), 'rebalance-codex-notifications-'));
   const calls: { command: string; args: readonly string[] }[] = [];
+  const withdrawals: { command: string; threadId: string; queueId: string }[] = [];
   const timers: { ms: number; callback: () => void; cancelled: boolean }[] = [];
   let queueChanged: ((filename: string | null) => void) | undefined;
   let controlChanged: (() => void) | undefined;
   let controlFailed: (() => void) | undefined;
-  let reads = 0;
+  let reads = 0, completedReads = 0;
   let now = Date.parse('2026-09-06T03:00:00Z');
+  let withdraw: CodexNotificationDependencies['withdraw'] = async () => 'deleted';
   let execute: CodexNotificationDependencies['execute'] = async () => ({ stdout: `Queued message queue-1 for thread ${threadId}\n` });
   const deps: Partial<CodexNotificationDependencies> = {
-    dataDir: directory, rootDir: directory, projectDir: '/fixture/rebalance', now: () => now,
+    dataDir: directory, rootDir: directory, projectDir: '/fixture/rebalance', now: () => now, statusModifiedAt: async () => now,
+    withdraw: async (command, targetThread, queueId) => { withdrawals.push({ command, threadId: targetThread, queueId }); return withdraw(command, targetThread, queueId); },
     execute: async (command, args) => { calls.push({ command, args }); return execute(command, args); },
-    stream: options => createEventStream({ ...options, read: async () => { reads++; return options.read(); } }, {
+    stream: options => createEventStream({ ...options, read: async () => { reads++; try { return await options.read(); } finally { completedReads++; } } }, {
       now: () => now,
       watch: (_directory, changed) => { queueChanged = changed; return () => { queueChanged = undefined; }; },
       after: (ms, callback) => {
-        const timer = { ms, callback, cancelled: false }; timers.push(timer);
+        const timer = { ms, callback: () => { timer.cancelled = true; callback(); }, cancelled: false }; timers.push(timer);
         return () => { timer.cancelled = true; };
       },
     }),
@@ -53,7 +56,8 @@ async function fixture(t: TestContext) {
     await rm(directory, { recursive: true, force: true });
   });
   return {
-    directory, deps, calls, timers, reads: () => reads,
+    directory, deps, calls, withdrawals, timers, reads: () => reads, completedReads: () => completedReads,
+    setWithdraw: (value: typeof withdraw) => { withdraw = value; },
     setExecute: (value: typeof execute) => { execute = value; },
     configure: () => configureCodexNotifications({ threadId }, deps),
     status: () => codexNotificationStatus(deps),
@@ -412,7 +416,10 @@ test('Codex read failure waits for its exact deadline, deduplicates restarts, an
   f.setTime(quietEpoch + 185_000); await f.writeStatus(readStatus(false, quietEpoch + 185_000));
   await until(async () => (await readJson<{incident: unknown}>(join(f.directory, 'read-notification-state.json')))?.incident === null);
   assert.equal(f.calls.length, 1, 'stable recovery never wakes the chat');
-  assert.equal((await f.status()).acceptedCount, 1, 'suppression does not erase native acceptance before acknowledgement');
+  await until(() => f.withdrawals.length === 1);
+  await until(async () => (await readJson<{ withdrawal?: { state: string } }[]>(join(f.directory, 'codex-notification-deliveries.json')))?.[0]?.withdrawal?.state === 'deleted');
+  assert.equal((await f.status()).acceptedCount, 0, 'withdrawn native prompts are no longer reported as queued');
+  assert.equal((await readJson<{ state: string }[]>(join(f.directory, 'codex-notification-deliveries.json')))?.[0]?.state, 'accepted', 'withdrawal preserves the original durable acceptance barrier');
   assert.equal((await readJson<{acknowledgedAt?: string}[]>(join(f.directory, 'events.json')))![0].acknowledgedAt, undefined);
   await again.stop();
 });
@@ -432,5 +439,174 @@ test('Codex suppresses transient reads and automatic recoveries without delaying
   await until(async () => (await f.status()).acceptedCount === 2);
   assert.equal((await f.status()).error, 'read-unavailable');
   assert.equal(f.calls.length, 2);
+  await worker.stop();
+});
+
+
+const quoteFailure = (id: string, at: number) => ({ ...readFailure(id, at),
+  message: 'Rebalance needs attention: A usable swap quote could not be obtained. No completion is confirmed by this alert. Review the current agent status before recovery.' });
+type JournalEntry = { id: string; threadId: string; state: string; attemptedAt: string; queueId?: string;
+  withdrawal?: { state: string; attemptedAt: string } };
+const acceptedEntry = (id: string, queueId: string, targetThread = threadId): JournalEntry => ({
+  id, threadId: targetThread, state: 'accepted', attemptedAt: new Date(quietEpoch - 1_000).toISOString(), queueId,
+});
+const savedDeliveries = (directory: string) => readJson<JournalEntry[]>(join(directory, 'codex-notification-deliveries.json'));
+
+// Every native withdrawal in this file is injected by fixture(); these are local
+// application queues only, never real Codex task queues or live trading workers.
+test('stale read and quote withdrawal uses only owned accepted IDs and retains protected journal entries', async t => {
+  const f = await fixture(t); await f.configure();
+  const otherThread = '00000000-0000-4000-8000-000000000002';
+  const retained = [readFailure('owned-read', quietEpoch - 10_000), quoteFailure('owned-quote', quietEpoch - 9_000),
+    event('critical-completion'), { ...readFailure('critical-hash', quietEpoch - 8_000), hash: `0x${'1'.repeat(64)}` },
+    readFailure('uncertain-read', quietEpoch - 7_000), readFailure('foreign-read', quietEpoch - 6_000)];
+  const protectedEntries = [acceptedEntry('critical-completion', 'critical-queue'), acceptedEntry('critical-hash', 'hash-queue'),
+    { id: 'uncertain-read', threadId, state: 'uncertain', attemptedAt: new Date(quietEpoch - 1_000).toISOString() },
+    acceptedEntry('foreign-read', 'foreign-queue', otherThread)];
+  await f.writeEvents(retained);
+  await f.writeStatus({ ...readStatus(false, quietEpoch), proposal: null });
+  await atomicWriteJson(join(f.directory, 'codex-notification-deliveries.json'), [
+    acceptedEntry('owned-read', 'read-queue'), acceptedEntry('owned-quote', 'quote-queue'), ...protectedEntries,
+  ]);
+  f.setWithdraw(async (command, target, queueId) => {
+    assert.equal(command, 'codex'); assert.equal(target, threadId);
+    assert.ok(['read-queue', 'quote-queue'].includes(queueId));
+    const prepared = (await savedDeliveries(f.directory))!.find(entry => entry.queueId === queueId);
+    assert.equal(prepared?.state, 'accepted'); assert.equal(prepared?.withdrawal?.state, 'prepared', 'intent must be durable before native deletion');
+    return 'deleted';
+  });
+  const worker = await f.start();
+  await until(() => f.withdrawals.length === 1);
+  await until(() => f.timers.some(timer => !timer.cancelled && timer.ms === 1));
+  f.setTime(quietEpoch + 1); f.timers.find(timer => !timer.cancelled && timer.ms === 1)!.callback();
+  await until(async () => (await savedDeliveries(f.directory))?.filter(entry => entry.withdrawal?.state === 'deleted').length === 2);
+  assert.deepEqual(f.withdrawals, [{ command: 'codex', threadId, queueId: 'read-queue' }, { command: 'codex', threadId, queueId: 'quote-queue' }]);
+  assert.deepEqual((await savedDeliveries(f.directory))!.filter(entry => !entry.withdrawal), protectedEntries);
+  assert.deepEqual(await readJson(join(f.directory, 'events.json')), retained, 'withdrawal is not acknowledgement or history deletion');
+  assert.equal(f.calls.length, 0);
+  await worker.stop();
+});
+
+test('withdrawal outcomes and crash-prepared intent remain no-resend barriers across restart', async t => {
+  for (const mode of ['deleted', 'absent', 'throw', 'prepared-crash']) await t.test(mode, async t => {
+    const f = await fixture(t); await f.configure();
+    const retained = readFailure('withdrawn-read', quietEpoch - 180_000);
+    await f.writeEvents([retained]); await f.writeStatus({ ...readStatus(false, quietEpoch), proposal: null });
+    const seeded = acceptedEntry(retained.id, 'known-owned-queue');
+    if (mode === 'prepared-crash') seeded.withdrawal = { state: 'prepared', attemptedAt: new Date(quietEpoch - 500).toISOString() };
+    await atomicWriteJson(join(f.directory, 'codex-notification-deliveries.json'), [seeded]);
+    f.setWithdraw(async () => { if (mode === 'throw') throw new Error('private native withdrawal detail'); return mode === 'absent' ? 'absent' : 'deleted'; });
+    const worker = await f.start();
+    const expected = mode === 'throw' ? 'uncertain' : mode === 'prepared-crash' ? 'prepared' : mode;
+    await until(async () => (await savedDeliveries(f.directory))?.[0]?.withdrawal?.state === expected);
+    await until(() => f.completedReads() > 0); // A seeded prepared intent predates the first filter read.
+    await worker.stop();
+    const barrier = await savedDeliveries(f.directory);
+    // Re-adopt the old raw failure without suppression history: only the durable
+    // delivery/withdrawal record now prevents a second native prompt or delete.
+    await rm(join(f.directory, 'read-notification-state.json'), { force: true });
+    f.setTime(quietEpoch + 1_000); await f.writeStatus(readStatus(true, quietEpoch - 181_000));
+    const reads = f.reads(); const resumed = await f.start();
+    await until(() => f.reads() > reads);
+    await until(async () => (await readJson<{ incident: { eligible: boolean } | null }>(join(f.directory, 'read-notification-state.json')))?.incident?.eligible === true);
+    await resumed.stop();
+    assert.equal(f.withdrawals.length, mode === 'prepared-crash' ? 0 : 1);
+    assert.equal(f.calls.length, 0); assert.deepEqual(await savedDeliveries(f.directory), barrier);
+    assert.deepEqual(await readJson(join(f.directory, 'events.json')), [retained]);
+    assert.doesNotMatch(await readFile(join(f.directory, 'codex-notification-deliveries.json'), 'utf8'), /private native/);
+  });
+});
+
+test('healing during journal preparation vetoes a selected alert and later critical events still deliver', async t => {
+  const f = await fixture(t); await f.configure();
+  const retained = readFailure('selected-but-healed', quietEpoch - 180_000);
+  await f.writeEvents([retained]); await f.writeStatus(readStatus(true, quietEpoch - 181_000));
+  let waiting = false; let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  t.after(() => release());
+  f.deps.persistJournal = async (path, entries) => {
+    if (!waiting && entries.some(entry => entry.id === retained.id && entry.state === 'prepared')) {
+      waiting = true; await gate;
+    }
+    await atomicWriteJson(path, entries);
+  };
+  const worker = await f.start(); await until(() => waiting);
+  assert.equal(f.calls.length, 0);
+  f.setTime(quietEpoch + 1); await f.writeStatus({ ...readStatus(false, quietEpoch + 1), proposal: null });
+  release();
+  await until(async () => (await savedDeliveries(f.directory))?.length === 0);
+  assert.equal(f.calls.length, 0); assert.equal(f.withdrawals.length, 0);
+  await f.writeEvents([retained, event('critical-after-veto')]);
+  await until(async () => (await f.status()).acceptedCount === 1);
+  assert.equal(f.calls.length, 1); assert.match(f.calls[0].args[4], /Retained event ID: critical-after-veto;/);
+  assert.deepEqual((await savedDeliveries(f.directory))!.map(entry => entry.id), ['critical-after-veto']);
+  assert.deepEqual(await readJson(join(f.directory, 'events.json')), [retained, event('critical-after-veto')]);
+  await worker.stop();
+});
+
+test('a new critical event delivers before stale withdrawal and the finite backlog still drains', async t => {
+  const f = await fixture(t); await f.configure();
+  const stale = readFailure('stale-behind-critical', quietEpoch - 10_000);
+  await f.writeEvents([stale, event('new-critical')]);
+  await f.writeStatus({ ...readStatus(false, quietEpoch), proposal: null });
+  await atomicWriteJson(join(f.directory, 'codex-notification-deliveries.json'), [acceptedEntry(stale.id, 'stale-native-queue')]);
+  f.setWithdraw(async () => { assert.equal(f.calls.length, 1, 'a critical event must be sent before background withdrawal'); return 'deleted'; });
+  const worker = await f.start();
+  await until(async () => (await f.status()).queuedEventIds.includes('new-critical'));
+  await until(() => f.withdrawals.length === 1 || f.timers.some(timer => !timer.cancelled && timer.ms === 1));
+  if (f.withdrawals.length === 0) { f.setTime(quietEpoch + 1); f.timers.find(timer => !timer.cancelled && timer.ms === 1)!.callback(); }
+  await until(async () => (await savedDeliveries(f.directory))?.find(entry => entry.id === stale.id)?.withdrawal?.state === 'deleted');
+  assert.equal(f.calls.length, 1); assert.equal(f.withdrawals.length, 1);
+  await worker.stop();
+});
+
+test('abort during the final asynchronous eligibility check prevents native execution after release', async t => {
+  const f = await fixture(t); await f.configure();
+  const retained = readFailure('abort-in-final-gate', quietEpoch - 180_000);
+  await f.writeEvents([retained]); await f.writeStatus(readStatus(true, quietEpoch - 181_000));
+  let checks = 0, waiting = false;
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  f.deps.statusModifiedAt = async () => {
+    if (++checks === 2) { waiting = true; await gate; }
+    return quietEpoch;
+  };
+  const worker = await f.start();
+  try {
+    await until(() => waiting);
+    assert.equal(checks, 2, 'the first selection completed and the final eligibility read is now blocked');
+    assert.equal((await savedDeliveries(f.directory))?.[0]?.state, 'prepared');
+    assert.equal(f.calls.length, 0);
+    worker.controller.abort();
+    release(); await worker.task;
+    assert.equal(f.calls.length, 0, 'a successful eligibility result must not override an intervening abort');
+    assert.equal(f.withdrawals.length, 0);
+    assert.deepEqual(await savedDeliveries(f.directory), []);
+    assert.deepEqual(await readJson(join(f.directory, 'events.json')), [retained]);
+  } finally { release(); await worker.stop(); }
+});
+
+test('an uncertain critical enqueue still drains an already-stale accepted backlog without another file wake', async t => {
+  const f = await fixture(t); await f.configure();
+  const stale = readFailure('stale-after-ambiguous-send', quietEpoch - 10_000);
+  const critical = event('uncertain-new-critical');
+  await f.writeEvents([stale, critical]);
+  await f.writeStatus({ ...readStatus(false, quietEpoch), proposal: null });
+  await atomicWriteJson(join(f.directory, 'codex-notification-deliveries.json'), [acceptedEntry(stale.id, 'owned-stale-queue')]);
+  f.setExecute(async () => { throw Object.assign(new Error('private native timeout detail'), { killed: true }); });
+  f.setWithdraw(async (command, target, queueId) => {
+    assert.equal(f.calls.length, 1);
+    assert.equal((await savedDeliveries(f.directory))?.find(entry => entry.id === critical.id)?.state, 'uncertain', 'enqueue uncertainty is durable before cleanup');
+    assert.equal(command, 'codex'); assert.equal(target, threadId); assert.equal(queueId, 'owned-stale-queue');
+    return 'deleted';
+  });
+  const worker = await f.start();
+  // No manual watcher hint or timer callback: enqueue settlement must wake cleanup.
+  await until(async () => (await savedDeliveries(f.directory))?.find(entry => entry.id === stale.id)?.withdrawal?.state === 'deleted');
+  assert.equal(f.calls.length, 1); assert.equal(f.withdrawals.length, 1);
+  const unknown = (await savedDeliveries(f.directory))!.find(entry => entry.id === critical.id)!;
+  assert.equal(unknown.state, 'uncertain'); assert.equal(unknown.queueId, undefined); assert.equal(unknown.withdrawal, undefined);
+  assert.deepEqual((await f.status()).uncertainEventIds, [critical.id]);
+  assert.deepEqual(await readJson(join(f.directory, 'events.json')), [stale, critical]);
   await worker.stop();
 });
