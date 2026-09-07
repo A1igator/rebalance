@@ -149,9 +149,9 @@ test('malformed successful check cannot reuse stale status as fresh evidence for
   assert.equal(count(f.calls, 'start'), 0);
 });
 
-test('full raw-key launch arms automatic recovery without rewriting transaction or cycle records', async t => {
-  for (const operation of ['unresolved', 'reverted'] as const) {
-    const f = await fixture(t); const hash = `0x${'1'.repeat(64)}`;
+test('full raw-key and Privy launch arm automatic recovery without rewriting transaction or cycle records', async t => {
+  for (const mode of ['private-key', 'privy'] as const) for (const operation of ['unresolved', 'reverted'] as const) {
+    const f = await fixture(t); f.current.mode = mode; const hash = `0x${'1'.repeat(64)}`;
     f.current.operation = { status: operation, hash };
     const records = { 'pending.json': { hash, nonce: 16 },
       'recovery.json': { originalHash: hash, cancellationHash: `0x${'2'.repeat(64)}`, status: 'unknown' },
@@ -174,7 +174,7 @@ test('setup-only and deferred signers never arm through a recovery barrier', asy
   for (const operation of ['unresolved', 'reverted'] as const) {
     for (const mode of ['private-key', 'ledger', 'privy'] as const) {
       for (const setupOnly of [true, false]) {
-        if (!setupOnly && mode === 'private-key') continue;
+        if (!setupOnly && mode !== 'ledger') continue;
         const f = await fixture(t); f.current.mode = mode;
         f.current.operation = { status: operation, hash: `0x${'1'.repeat(64)}` };
         const launched = await launch({ setupOnly }, f.deps);

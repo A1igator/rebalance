@@ -1,0 +1,82 @@
+{
+  "checkedAt": "2026-09-07T02:53:55.543265+00:00",
+  "package": {
+    "name": "@privy-io/agent-wallet-cli",
+    "version": "0.3.6",
+    "license": "Apache-2.0",
+    "integrity": "sha512-hSUOYaFGyjkDWsKhHF8Wy2q/7Lba0IIeHVpklgkmpQoLVZgYAtmi8SBhBRg9ZVWHKM6LA0+8PNqqyF1naVusgg==",
+    "locked": true,
+    "installLifecycleScripts": false
+  },
+  "sources": {
+    "skill": "https://agents.privy.io/skill.md",
+    "skillSha256": "9d38eb0562a82c92521e574c67eaa305dc0f54bca0da75fd806d566c0f93c257",
+    "signingSchema": "https://docs.privy.io/api-reference/wallets/ethereum/eth-sign-transaction"
+  },
+  "onboarding": {
+    "officialLoginResult": "existing session; preserved",
+    "appLoginResult": "reused cached public Ethereum wallet",
+    "appStatusResult": "cached public wallet returned; live authorization unverified",
+    "publicMetadata": "ignored .local/privy-wallet.json",
+    "credentialInspection": false
+  },
+  "adapter": {
+    "network": 4663,
+    "method": "eth_signTransaction",
+    "transport": "locked Node CLI subprocess with JSON stdin",
+    "timeoutMs": 30000,
+    "checks": [
+      "sender",
+      "chain",
+      "type",
+      "nonce",
+      "gas",
+      "gasPrice",
+      "recipient",
+      "value",
+      "data"
+    ],
+    "broadcast": "existing local RPC after durable transaction-hash persistence",
+    "recovery": "same-nonce single cancellation with both hashes retained",
+    "rawKeyFallback": false,
+    "llmInRunner": false,
+    "nativePolicyEnforcement": false
+  },
+  "validation": {
+    "focused": {
+      "passed": 115,
+      "failed": 0
+    },
+    "fullSerial": {
+      "command": "node --import tsx --test --test-concurrency=1 tests/*.test.ts",
+      "passed": 391,
+      "failed": 0,
+      "skipped": 0
+    },
+    "initialFullParallel": {
+      "passed": 389,
+      "failed": 2,
+      "note": "One notification fixture subtest cleanup failed with ENOTEMPTY; its parent test also failed. No Privy test failure."
+    },
+    "typecheck": "passed",
+    "skillValidator": "passed with isolated pyyaml 6.0.3",
+    "liveReadOnly": [
+      "official list-wallets",
+      "app privy status",
+      "app privy login (cached reuse)",
+      "app status"
+    ],
+    "activeModeAfter": "private-key",
+    "targetsChanged": false,
+    "runnerRestarted": false
+  },
+  "notVerified": [
+    "live Privy authorization",
+    "OAuth signing response envelope",
+    "Privy signing on Robinhood 4663",
+    "Privy mainnet swap",
+    "native provider policy demo",
+    "prize enrollment or submission"
+  ],
+  "financialTransactionsPerformed": false
+}

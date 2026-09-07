@@ -1,45 +1,81 @@
-# Privy prize and architecture assessment
+# Privy integration and prize assessment
 
-Checked against official sources on **2026-09-04**. The owner subsequently accepted the TEE trust model, making Privy the third planned partner. No Privy dependency, account, wallet, transaction, prize enrollment or integration has been created yet.
+The owner selected [Privy Agent Wallets](https://agents.privy.io) and its [official skill](https://agents.privy.io/skill.md). The integration uses the official **`@privy-io/agent-wallet-cli` 0.3.6**, pinned by version, through the local deterministic application. CLI source and signing schemas were inspected on **2026-09-06**; the prize assessment below was checked on **2026-09-04**.
 
-## Recommendation
+An existing local Privy session was detected and its public wallet metadata was read. Login reported an existing session, which was preserved. This establishes cached wallet availability, not current server authorization. The adapter and its isolated signing, dispatch, recovery and launch fixtures pass ([391-test validation record](evidence/privy-agent-wallets.json)); no live Privy signing, Robinhood transaction, swap receipt, policy enforcement or prize submission is established by this work.
 
-**Yes, Privy has an agent path, and Best financial flow is our planned third prize.** The owner accepts its TEE-based signing dependency. Delivery still requires a meaningful working Privy-backed financial flow in that optional mode. Uniswap and Ledger remain the other planned partners; the event allows at most three partner selections. Adding an adapter alone does not establish eligibility or a competitive entry.
+## Setup and explicit mode selection
+
+Application controls stay in the existing agent conversation. The agent uses:
+
+```bash
+npm run cli -- privy login
+npm run cli -- privy status
+```
+
+Login follows the official skill's pinned `pnpm --package=@privy-io/agent-wallet-cli@0.3.6 dlx privy-agent-wallet login` flow. For a new session, OAuth device authorization opens a browser and requires the user to verify and approve the displayed device code. Existing sessions are reused; setup does not log out or replace a session automatically. The public status command reports the cached Ethereum address and wallet ID without returning credentials. The upstream `list-wallets` command does not refresh tokens or validate authorization, so a successful status read cannot promise that the next signing request will succeed.
+
+After the user explicitly selects the Privy wallet, the existing configuration command selects its public address:
+
+```bash
+npm run cli -- configure --mode privy --wallet <public-address>
+```
+
+With an existing configuration, omitting `--targets` preserves the saved allocation, threshold, slippage and cadence. Initial configuration still requires targets. Pending transaction barriers remain in force. Login and wallet selection do not themselves arm trading or fund the wallet. Do not silently substitute this wallet for another configured signer.
+
+## Deterministic signing and submission
+
+The runtime invokes the installed, pinned CLI's `dist/index.js` with Node as a bounded subprocess. It does not run `pnpm dlx` or download a package on each tick, and no LLM participates in the daemon's planning, signing, submission or recovery. The only wallet operation needed for dispatch is `eth_signTransaction`; the application retains its existing Robinhood RPC broadcast and receipt path.
+
+The CLI selects the first `ethereum` wallet in its session and has no per-request wallet selector. The adapter must match the configured public address and validate the returned signed transaction's sender and complete transaction contents before accepting it for broadcast. It must reject missing, malformed, mismatched or unexpected output. A Privy error leaves the operation unavailable; it never falls back to the local private key or another wallet.
+
+The [official signing schema](https://docs.privy.io/api-reference/wallets/ethereum/eth-sign-transaction) supports explicit `chain_id`, `nonce`, `gas_limit`, `gas_price`, `value`, `to`, `data` and transaction `type`. The current skill additionally specifies top-level `caip2`. For the existing legacy-fee Robinhood path, the request uses `caip2: "eip155:4663"`, `chain_id: 4663`, `type: 0`, and explicit nonce, gas limit and gas price. EIP-1559 fee fields are omitted for that transaction type. The application supplies the prepared values rather than relying on server estimation or nonce selection.
+
+The documented response is:
+
+```json
+{
+  "method": "eth_signTransaction",
+  "data": {
+    "signed_transaction": "0x...",
+    "encoding": "rlp"
+  }
+}
+```
+
+The CLI prints the complete server JSON on success and exits with an error on failure. Signing alone does not broadcast. After validation, the existing local transaction path persists the transaction identity and pending state around RPC submission and reconciles receipts before another trade. Recovery retains the same nonce, hash and cycle protections; adding a signer does not reset timing or permit duplicate sends.
+
+## Session and network boundaries
+
+Privy performs signing through its hosted service; a local subprocess does not make the signer local. The application sends the prepared transaction fields to Privy and the signed transaction to the configured Robinhood RPC. No wallet private key is imported or exported for this integration. Privy's TEE trust model remains accepted for this explicitly selected mode. [Signing architecture](https://docs.privy.io/wallets/using-wallets/signers/overview)
+
+The official CLI owns session credentials. On macOS it uses the system credential manager when available, with an encrypted, machine-bound file fallback at `~/.privy/session.json`. The fallback is not a hardware wallet or a guarantee against a compromised local account. Credentials stay outside project configuration, source control and application logs. The inspected CLI refreshes an expired access token or authorization key, and performs one refresh-and-retry after HTTP 401. A revoked or failed refresh requires renewed login; cached public wallet metadata does not override that failure. `privy login` deliberately reuses cached state and cannot repair revocation by itself. When the user requests renewed authorization, the agent runs the official `pnpm --package=@privy-io/agent-wallet-cli@0.3.6 dlx privy-agent-wallet logout`, then `npm run cli -- privy login` to obtain a new device approval. Logout only clears the CLI session; it does not change Rebalance's configured wallet or move funds. Verify that the newly authorized Ethereum address still matches before proceeding. Do not log out automatically in response to a generic network failure.
+
+The CLI's default device authorization, token, wallet authentication and wallet RPC requests use `https://auth.privy.io`. Browser approval, wallet management and funding use `https://agents.privy.io`. The upstream package supports environment overrides for its API base, app ID and browser origin; these are routing settings, not network isolation or a Privy-native transaction policy. The integration does not claim a general outbound network restriction. Runtime subprocess deadlines bound the local wait because the inspected RPC fetch has no explicit timeout.
+
+The project remains on **Robinhood mainnet, chain 4663**, with no alternative-chain or signer fallback. [Privy's chain overview](https://docs.privy.io/wallets/overview/chains) includes EVM networks, and the inspected CLI does not contain a chain-ID whitelist for `rpc`. That supports the integration approach but does not prove that the OAuth wallet service accepts this exact Robinhood request. Live signing and a confirmed supported transaction remain evidence gates. A testnet listing does not establish mainnet support, gas sponsorship, balances/history coverage or managed transaction support. Ordinary native gas payment is sufficient; gas sponsorship is not required.
+
+## Native policies
+
+The selected CLI exposes login, public wallet listing and wallet RPC operations. It does not expose a policy-creation or policy-management command. **No Privy-native contract, method or signer restriction is implemented or verified by this adapter.** The local transaction validation is application behavior, not evidence of a provider-enforced policy.
+
+A focused allowed/denied demonstration remains optional future prize work if supported by this wallet flow. Confirm the actual service controls before claiming enforcement; do not introduce a different SDK/REST signing path merely to imply that the chosen CLI has those controls. The user removed spending caps, budget accounting and session-key work. Privy signs its own configured wallet; it is not a delegated signer over the Ledger wallet. [Scope decision](prompts/006-minimal-mvp.md), [direct-signing decision](prompts/008-direct-signing-and-ledger-connect.md)
 
 ## Prize fit
 
-[ETHOnline 2026 — Privy](https://ethglobal.com/events/ethonline2026/prizes#privy) offers **$2,500 for Best financial flow**. Requirements include Privy as a core product integration, at least one Privy wallet, a functional financial flow using generally available features, working demo/source access, and an explanation of the user benefit. Swaps are explicitly in scope. The published requirements do not demand an interactive graphical UI, an agent framework or a specific feedback filename.
+Privy remains the planned third partner alongside Uniswap and Ledger. [ETHOnline 2026 — Privy](https://ethglobal.com/events/ethonline2026/prizes#privy) lists **$2,500 for Best financial flow**. Its requirements include Privy as a core integration, at least one Privy wallet, a working financial flow using generally available features, demo/source access and a clear user benefit. Swaps are in scope. A dependency, cached wallet or signing adapter alone does not establish a qualifying financial flow.
 
-The separate $2,500 B2B prize asks for an organization/business workflow and a Privy control such as policies, signers, quorums or intents. The personal rebalancer fits financial flow more naturally. Do not invent a business use case merely to select a second category.
+The separate B2B prize calls for an organization/business workflow and a Privy control such as policies, signers, quorums or intents. The personal rebalancer targets financial flow; no B2B use case or provider policy demonstration is claimed. At most three partner selections are planned, and actual enrollment/submission remains unverified. Consult the [hackathon checklist](HACKATHON.md) before submission.
 
-## Official agent paths
+## Evidence still required
 
-- **Agent CLI:** Privy publishes `@privy-io/agent-wallet-cli` and agent skills. Its documented setup includes browser authorization followed by agent/terminal requests. That browser setup is an interaction mismatch to resolve before choosing this path for the strictly agent-controlled product. [Agent CLI](https://docs.privy.io/recipes/agent-integrations/agent-cli)
-- **Headless SDK/REST:** Privy's agentic-wallet documentation supports scoped signing and explicitly describes recurring portfolio rebalancing. A local deterministic scheduler can use an API without invoking an LLM on each run. Prefer assessing this route through the existing narrow local control boundary. [Agentic wallets](https://docs.privy.io/recipes/agent-integrations/agentic-wallets), [signer model](https://docs.privy.io/wallets/using-wallets/signers/overview)
-- **Coding assistance:** official MCP/docs and skills support Claude Code/Codex. These help build an integration but are not themselves a qualifying wallet/financial flow. [AI development tooling](https://docs.privy.io/basics/get-started/using-llms)
+- [x] Owner selected the official agent-wallet CLI and accepted Privy's hosted signing model.
+- [x] Official 0.3.6 package archive and transaction schema inspected; archive integrity matched registry metadata.
+- [x] Existing session preserved and public wallet metadata observed without publishing a personal wallet in this document.
+- [x] Adapter and isolated fixture tests validate output, wallet/transaction matching, unavailable signer behavior, explicit nonce/fee fields and unchanged pending/cycle behavior. The subprocess has a 30-second timeout; no live timeout was induced.
+- [ ] Actual Privy authorization and signing on Robinhood 4663 verified with clearly identified evidence.
+- [ ] A supported Privy-backed financial flow completes on Robinhood mainnet with receipt evidence, without a per-trade model call or human prompt.
+- [ ] Any optional provider-native policy claim has a real allowed/denied test through the selected wallet flow.
+- [ ] Working source, demo, wallet/transaction evidence and user-benefit explanation satisfy the selected prize requirements.
 
-## Compatibility and tradeoffs
-
-Privy's documented signing architecture performs signing in its enclave through API requests. A local daemon does not make that signer local; the relevant requests leave the machine and signing needs the service. This differs from both the local raw-key backend and Ledger. Keep the user's preferred local paths functional and make any Privy mode explicit. [Signer architecture](https://docs.privy.io/wallets/using-wallets/signers/overview)
-
-The planned `privy` profile reuses the deterministic planner and local config, with Privy wallet authorization and request handling. The user permits automatic swaps without per-trade human input and has [removed spending caps/budget accounting while retaining Privy-specific prize features](prompts/006-minimal-mvp.md). A single Privy wallet suffices for direct swaps; no custom vault or mandatory owner/executor-wallet split is required. The local daemon, rather than an LLM, sizes and dispatches trades.
-
-Keep supported Privy-native contract/method or signer restrictions for a focused allowed/denied-operation demonstration. Verify actual API semantics before claiming enforcement. Do not add monetary caps, usage counters or a generic cross-signer policy engine. The [latest decision](prompts/008-direct-signing-and-ledger-connect.md) removes session keys entirely: Privy signs its own wallet's swaps automatically; it is not a delegated signer over the Ledger wallet.
-
-The view-only chart is compatible. Agent-only user controls are also plausible with SDK/REST, but verify actual provisioning/authentication flows instead of claiming that the existing CLI has no browser step. Developer account setup and wallet ownership/authorization configuration remain unresolved.
-
-The project targets **Robinhood mainnet only (4663)**. Verify its actual Privy wallet signing/submission and authorization behavior. The earlier Robinhood Testnet gas-sponsorship listing does not establish mainnet support or sponsorship. Gas sponsorship is not required for this MVP; use ordinary fee payment when appropriate. Do not switch chains to obtain a provider feature. [Gas network support](https://docs.privy.io/wallets/gas-and-asset-management/gas/overview)
-
-Privy supports private-key import/export, but importing a key places signing in its API-managed model; it does not implement this project's local raw-key backend. Exporting and doing everything locally may weaken the claim that Privy is core. Keep these concepts separate. [Private-key import](https://docs.privy.io/wallets/wallets/import-a-wallet/private-key), [export](https://docs.privy.io/wallets/wallets/export)
-
-## Delivery gates
-
-- [ ] Core raw-key/Uniswap flow and deterministic tests are working.
-- [ ] A concrete Privy wallet flow offers user value and executes real supported mainnet operations with receipt evidence.
-- [ ] Agent-mediated setup/control, ownership, credentials and network support are verified, with a focused demonstration of supported Privy authorization restrictions and no spending limits.
-- [ ] Swaps execute with the coding agent closed and no per-trade human input; a pending transaction/provider-request record prevents duplicate sends.
-- [x] Owner accepts Privy's TEE-based hosted signing for the optional mode; local backends remain independent by design.
-- [ ] Working source, wallet/transaction evidence and user-benefit explanation meet the prize requirements.
-- [x] Plan Privy as the third partner alongside Uniswap/Ledger; defer 1inch and do not exceed the event partner limit. Actual submission is pending.
-
-This is a planned entry, not confirmation of eligibility, submission, acceptance or a win.
+No live Privy signing, mainnet API compatibility, swap, policy enforcement, submission, acceptance or award is claimed by documentation or fixture tests.

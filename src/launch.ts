@@ -240,10 +240,10 @@ export async function launch(options: LaunchOptions = {}, overrides: Partial<Lau
         result.messages.push('The read-only check failed; no trading runner was started.');
       }
       if (['unresolved', 'reverted'].includes(result.status!.operation?.status ?? '')) {
-        // Pending state is a barrier to another trade, not to the full raw-key
+        // Pending state is a barrier to another trade, not to the full automatic
         // runner that owns automatic recovery. Preflight errors still block;
         // the runner validates/reconciles both identities before any dispatch.
-        if (!options.setupOnly && result.status!.mode === 'private-key' && !preparationBlocked) {
+        if (!options.setupOnly && ['private-key', 'privy'].includes(result.status!.mode ?? '') && !preparationBlocked) {
           result.messages.push('The earlier transaction remains unresolved; automatic recovery is included in this launch. Its records and cycle timing are preserved.');
         } else {
           preparationBlocked = true;
@@ -266,7 +266,7 @@ export async function launch(options: LaunchOptions = {}, overrides: Partial<Lau
       return result;
     }
     if (result.chart.state !== 'ready' || result.status!.error) preparationBlocked = true;
-    if (result.status!.mode !== 'private-key') {
+    if (result.status!.mode === 'ledger') {
       result.messages.push(`${result.status!.mode} execution is deferred; no signer fallback is used.`);
     }
     if (result.status!.armed) { result.outcome = 'armed'; return result; }

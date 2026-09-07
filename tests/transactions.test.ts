@@ -317,7 +317,7 @@ test('configuration changes and unsupported signers cannot silently dispatch', a
   const h = mockedChain();
   await assert.rejects(dispatch({ ...configuration(), pollSeconds: 60 }, h.chain, transaction), /Configuration changed/);
   await assert.rejects(dispatch({ ...configuration(), mode: 'ledger' }, h.chain, transaction), /no fallback/);
-  await assert.rejects(dispatch({ ...configuration(), mode: 'privy' }, h.chain, transaction), /no fallback/);
+  await assert.rejects(dispatch({ ...configuration(), mode: 'privy' }, h.chain, transaction), /Configuration changed/);
   assert.equal(h.sent.length, 0);
 });
 
@@ -355,4 +355,52 @@ test('stop arriving after durable preparation removes only the known-unsent barr
   assert.equal(h.sent.length, 0);
   assert.equal(await readJson(PENDING_PATH), null);
   assert.ok(await readJson(stopPath));
+});
+
+
+test('Privy dispatch uses its selected signer, persists before broadcast and reconciles without a second signature', async () => {
+  const c = { ...configuration(), mode: 'privy' as const };
+  await atomicWriteJson(CONFIG_PATH, c);
+  const { privySigner } = await import('../src/privy.js');
+  const h = mockedChain(); let signatures = 0;
+  // A deliberately unusable raw-key override proves this mode never falls back to it.
+  process.env.REBALANCE_PRIVATE_KEY = 'NOT-A-KEY';
+  const signer = await privySigner(wallet, async (args, input) => {
+    if (args[0] === 'list-wallets') return `  ethereum: ${wallet} (fixture-wallet)\n`;
+    assert.deepEqual(args, ['rpc']);
+    const body = JSON.parse(input!); const tx = body.params.transaction;
+    assert.equal(body.caip2, 'eip155:4663');
+    signatures++;
+    const raw = await privateKeyToAccount(key).signTransaction({ chainId: tx.chain_id, type: 'legacy', nonce: tx.nonce,
+      gas: BigInt(tx.gas_limit), gasPrice: BigInt(tx.gas_price), value: BigInt(tx.value), data: tx.data, to: tx.to });
+    return JSON.stringify({ method: 'eth_signTransaction', data: { encoding: 'rlp', signed_transaction: raw } });
+  });
+  h.rpc.sendRawTransaction = async ({ serializedTransaction }) => {
+    const saved = await readJson<PendingTransaction>(PENDING_PATH);
+    assert.equal(saved?.status, 'prepared');
+    assert.equal(saved?.hash, keccak256(serializedTransaction));
+    h.sent.push(serializedTransaction);
+    return keccak256(serializedTransaction);
+  };
+  const result = await dispatch(c, h.chain, transaction, async () => signer);
+  assert.equal(result.status, 'pending');
+  await assert.rejects(dispatch(c, h.chain, transaction, async () => { throw new Error('must not sign twice'); }), /Reconcile/);
+  assert.equal(signatures, 1);
+  assert.equal(h.sent.length, 1);
+  const recovered = await reconcile(c, h.chain);
+  assert.equal(recovered.operation?.status, 'confirmed');
+  assert.equal(await readJson(PENDING_PATH), null);
+});
+
+test('Privy signer failure, wrong wallet and stop arriving during signing cannot broadcast', async () => {
+  const c = { ...configuration(), mode: 'privy' as const }; await atomicWriteJson(CONFIG_PATH, c);
+  const h = mockedChain();
+  await assert.rejects(dispatch(c, h.chain, transaction, async () => { throw new Error('Privy unavailable'); }), /Privy unavailable/);
+  await assert.rejects(dispatch(c, h.chain, transaction, async () => ({ address: otherWallet, signTransaction: async () => { throw new Error('must not sign'); } })), /key does not match/);
+  await assert.rejects(dispatch(c, h.chain, transaction, async () => ({ address: wallet, signTransaction: async tx => {
+    await atomicWriteJson(stopPath, { stopped: true });
+    return privateKeyToAccount(key).signTransaction(tx);
+  } })), /Execution was stopped/);
+  assert.equal(h.sent.length, 0);
+  assert.equal(await readJson(PENDING_PATH), null);
 });

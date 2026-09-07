@@ -3,7 +3,8 @@ import { resolve } from 'node:path';
 import { keccak256, TransactionReceiptNotFoundError, type Hex } from 'viem';
 import { createChain, type ChainTransaction } from './chain.js';
 import { noteSuccessfulSwap } from './cadence.js';
-import { DATA, LAST_TRANSACTION_PATH, PENDING_PATH, loadConfig, localAccount, type Config } from './config.js';
+import { DATA, LAST_TRANSACTION_PATH, PENDING_PATH, loadConfig, type Config } from './config.js';
+import { loadSigner } from './signers.js';
 import { acquireLock, atomicWriteJson, readJson, type DispatchFailure, type PendingTransaction } from './storage.js';
 
 export type Operation = { status: string; hash?: string; message?: string; kind?: string; blockNumber?: string; wallet?: string; chainId?: 4663; sendFailure?: DispatchFailure };
@@ -100,7 +101,7 @@ export async function reconcile(config: Config, chain: Chain): Promise<{ blocked
   if (receipt.from.toLowerCase() !== config.wallet.toLowerCase()) throw new Error('Receipt sender differs from the selected wallet');
   if (receipt.status !== 'success') {
     return { blocked: true, operation: { status: 'reverted', hash: pending.hash, kind: pending.kind,
-      message: 'Transaction reverted. The automatic raw-key runner verifies recovery before another attempt; the pending record remains preserved.' } };
+      message: 'Transaction reverted. The automatic runner verifies recovery before another attempt; the pending record remains preserved.' } };
   }
   const block = await chain.publicClient.getBlock({ blockNumber: receipt.blockNumber });
   const head = await chain.publicClient.getBlockNumber({ cacheTime: 0 });
@@ -128,15 +129,15 @@ async function requireDispatchReady(tx: ChainTransaction): Promise<void> {
   requireFresh();
 }
 
-/** The caller holds run.lock. Only this boundary reads the signing secret. */
-export async function dispatch(config: Config, chain: Chain, tx: ChainTransaction): Promise<Operation> {
-  if (config.mode !== 'private-key') throw new Error(`${config.mode} execution is not connected yet; no fallback signer was used`);
+/** The caller holds run.lock. The selected signer owns its credential handling. */
+export async function dispatch(config: Config, chain: Chain, tx: ChainTransaction, signer: typeof loadSigner = loadSigner): Promise<Operation> {
+  if (!['private-key', 'privy'].includes(config.mode)) throw new Error(`${config.mode} execution is not connected yet; no fallback signer was used`);
   const release = await acquireLock(DATA, 'config.lock');
   try {
     if (JSON.stringify(await loadConfig()) !== JSON.stringify(config)) throw new Error('Configuration changed; rebuild the transaction on the next cycle');
     if (await readJson(PENDING_PATH)) throw new Error('Reconcile the existing pending transaction first');
-    const account = await localAccount();
-    if (account.address.toLowerCase() !== config.wallet.toLowerCase()) throw new Error('Local key does not match the configured public wallet');
+    const account = await signer(config);
+    if (account.address.toLowerCase() !== config.wallet.toLowerCase()) throw new Error('Selected key does not match the configured public wallet');
     const rpc = chain.publicClient;
     if (await rpc.getChainId() !== 4663) throw new Error('RPC is not Robinhood mainnet');
     const nonce = await rpc.getTransactionCount({ address: config.wallet, blockTag: 'pending' });

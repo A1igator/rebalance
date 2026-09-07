@@ -16,6 +16,7 @@ import { STOP_PATH, monitor, status, tick } from './runtime.js';
 import { serve } from './server.js';
 import { acquireLock, atomicWriteJson, readJson, stringifyJson, type PendingTransaction } from './storage.js';
 import { validatePending } from './transactions.js';
+import { loginPrivy, privyWallet } from './privy.js';
 import { launch } from './launch.js';
 import { recover } from './recovery.js';
 import { configureCodexNotifications, codexNotificationStatus, prepareCodexNotifications,
@@ -23,6 +24,8 @@ import { configureCodexNotifications, codexNotificationStatus, prepareCodexNotif
 
 const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
   wallet create                        Create/reuse a local wallet; public address only
+  privy login                          Reuse session or open one-time Privy device approval
+  privy status                         Read public Privy session wallet (no network/signing)
   status                               Read local graph/portfolio state
   configure --targets USDG=5,AAPL=23.75,NVDA=23.75,MSFT=23.75,AMD=23.75
                                        Set explicit percentages (example only)
@@ -50,7 +53,7 @@ const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
   notifications stop                   Pause notification delivery; leave trading unchanged
 Native ETH is gas-only; select USDG + four stocks from the verified manifest.
 Supported stocks: ${Object.keys(ASSETS).filter(id => id !== 'USDG').join(', ')}.
-Privy and Ledger execution are deferred. Never pass a private key as a CLI argument.
+Privy uses its logged-in agent CLI; Ledger execution is deferred. Never pass a private key as a CLI argument.
 `;
 
 const { values, positionals: args } = parseArgs({ allowPositionals: true, options: {
@@ -244,6 +247,12 @@ async function main() {
     case 'wallet':
       if (args[1] !== 'create') throw new Error('Use wallet create');
       print(await createWallet()); return;
+    case 'privy': {
+      if (!['login', 'status'].includes(args[1] ?? '')) throw new Error('Use privy login or privy status');
+      const wallet = args[1] === 'login' ? await loginPrivy() : await privyWallet();
+      if (args[1] === 'login') await atomicWriteJson(resolve(DATA, 'privy-wallet.json'), { ...wallet, observedAt: new Date().toISOString() });
+      print(wallet); return;
+    }
     case 'status': print(await status()); return;
     case 'launch': {
       const result = await launch({ setupOnly: values['setup-only'], targets: values.targets,

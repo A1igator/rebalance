@@ -152,7 +152,7 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
       recoveryObservation.operation = result.operation;
       return result;
     },
-    recover: execute && configured?.mode === 'private-key' ? async () => {
+    recover: execute && ['private-key', 'privy'].includes(configured?.mode ?? '') ? async () => {
       const recovered = await automaticRecovery(config, chain);
       if (recovered) {
         state.operation = recovered.operation;
@@ -188,7 +188,6 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
     execute: async (trade, quote) => {
       if (await readJson(STOP_PATH)) return { status: 'stopping', message: 'Stop requested; no new transaction sent.' };
       if (config.mode === 'ledger') return { status: 'waiting-ledger', message: 'Drift detected. Hardware connection/signing is deferred until the device arrives.' };
-      if (config.mode === 'privy') return { status: 'waiting-privy', message: 'Privy integration is pending; no automatic signer fallback.' };
       const transaction = await chain.transaction(trade, quote as RouteQuote);
       state.cycle = await beginRebalanceCycle(config);
       const cycleDeadline = BigInt(Math.floor(Date.parse(state.cycle.activeUntil) / 1000));

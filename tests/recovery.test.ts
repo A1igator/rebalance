@@ -133,11 +133,11 @@ async function fixture(t: TestContext, active = false) {
     set latestNonce(value: number) { latestNonce = value; }, set queuedNonce(value: number) { queuedNonce = value; } };
 }
 
-async function auto(f: Awaited<ReturnType<typeof fixture>>, overrides: Partial<AutomaticRecoveryDependencies> = {}) {
+async function auto(f: Awaited<ReturnType<typeof fixture>>, overrides: Partial<AutomaticRecoveryDependencies> = {}, selected = config) {
   const release = await acquireLock(f.deps.dataDir, 'run.lock');
   try {
-    return await automaticRecovery(config, { publicClient: f.rpc as unknown as ReturnType<RecoveryDependencies['rpc']> }, {
-      dataDir: f.deps.dataDir, config: f.deps.config, account: f.deps.account,
+    return await automaticRecovery(selected, { publicClient: f.rpc as unknown as ReturnType<RecoveryDependencies['rpc']> }, {
+      dataDir: f.deps.dataDir, config: f.deps.config, account: f.deps.account, signer: f.deps.signer,
       now: () => Date.parse(f.pending.createdAt) + AUTO_RECOVERY_GRACE_MS,
       noteSuccessfulSwap: f.deps.noteSuccessfulSwap, ...overrides });
   } finally { await release(); }
@@ -578,4 +578,129 @@ test('legacy closure markers do not suppress a successful swap marker or mutate 
   assert.deepEqual(await readJson(f.path('cycle.json')), { ...f.cycle, swapConfirmed: true });
   assert.equal(await auto(f), null);
   assert.equal(f.successfulNotes, 1, 'completed journal replay cannot mark a later cycle');
+});
+
+test('Privy cancellation uses only its selected signer and preserves nonce, receipt and cycle protections', async t => {
+  for (const automatic of [false, true]) {
+    const f = await fixture(t);
+    const selected = { ...config, mode: 'privy' as const };
+    let signerLoads = 0; let signatures = 0;
+    f.deps.config = async () => selected;
+    f.deps.account = async () => assert.fail('Privy must never load the local private-key signer');
+    f.deps.signer = async requested => {
+      signerLoads++; assert.deepEqual(requested, selected);
+      return { address: account.address, signTransaction: async transaction => {
+        signatures++;
+        assert.deepEqual(transaction, { chainId: 4663, type: 'legacy', nonce: f.pending.nonce,
+          to: account.address, value: 0n, data: '0x', gas: 25_200n, gasPrice: 20n });
+        return account.signTransaction(transaction);
+      } };
+    };
+    if (automatic) {
+      const result = await auto(f, {}, selected);
+      assert.equal(result?.blocked, false); assert.equal(result?.operation?.status, 'cancelled');
+      assert.equal(await readJson(f.path('stop.json')), null);
+    } else assert.equal((await recover({ cancel: true }, f.deps)).outcome, 'cancelled');
+    assert.equal(signerLoads, 1); assert.equal(signatures, 1); assert.equal(f.keyReads, 0);
+    assert.equal(f.sent.length, 1); assert.equal(f.resumeCalls, 0);
+    assert.equal(await readJson(f.path('pending.json')), null);
+    assert.deepEqual(await readJson(f.path('cycle.json')), f.cycle);
+    assert.equal((await readJson<RecoveryRecord>(f.path('recovery.json')))?.resolution, 'cancelled');
+  }
+});
+
+test('Privy uncertain/prepared cancellation replays only receipts and never obtains a second signature', async t => {
+  const f = await fixture(t); const selected = { ...config, mode: 'privy' as const };
+  let signatures = 0;
+  f.deps.config = async () => selected;
+  f.deps.account = async () => assert.fail('No local signer fallback');
+  f.deps.signer = async () => ({ address: account.address, signTransaction: async transaction => {
+    signatures++; return account.signTransaction(transaction);
+  } });
+  f.mineOnSend = false; f.throwOnSend = true;
+  assert.equal((await auto(f, {}, selected))?.blocked, true);
+  const record = (await readJson<RecoveryRecord>(f.path('recovery.json')))!;
+  assert.equal(record.cancellation?.status, 'unknown');
+  f.deps.signer = async () => assert.fail('An existing cancellation is receipt-only, including after restart');
+  assert.equal((await auto(f, { now: () => Date.parse(f.pending.createdAt) + 86_400_000 }, selected))?.blocked, true);
+  record.cancellation!.status = 'prepared'; await atomicWriteJson(f.path('recovery.json'), record);
+  assert.equal((await auto(f, {}, selected))?.blocked, true);
+  const hash = record.cancellation!.hash;
+  Object.assign(f.txs.get(hash)!, { blockNumber: 100n, blockHash });
+  f.receipts.set(hash, { transactionHash: hash, from: account.address, to: account.address,
+    status: 'success', blockNumber: 100n, blockHash });
+  assert.equal((await auto(f, {}, selected))?.operation?.status, 'cancelled');
+  assert.equal(signatures, 1); assert.equal(f.sent.length, 1); assert.equal(f.keyReads, 0);
+  assert.equal(await readJson(f.path('pending.json')), null);
+});
+
+test('Privy original success/revert resolves before the grace deadline without loading any signer', async t => {
+  for (const outcome of ['success', 'reverted'] as const) {
+    const f = await fixture(t); const selected = { ...config, mode: 'privy' as const };
+    f.deps.config = async () => selected;
+    f.deps.account = async () => assert.fail('Receipt resolution must not load a local signer');
+    f.deps.signer = async () => assert.fail('Receipt resolution must not load a Privy signer');
+    f.mineOriginal(outcome);
+    const result = await auto(f, { now: () => Date.parse(f.pending.createdAt) + 1 }, selected);
+    assert.equal(result?.blocked, false);
+    assert.equal(result?.operation?.status, outcome === 'success' ? 'confirmed' : 'recovered-revert');
+    assert.equal(f.sent.length, 0); assert.equal(f.keyReads, 0);
+    assert.equal(f.successfulNotes, outcome === 'success' ? 1 : 0);
+    assert.equal(await readJson(f.path('pending.json')), null);
+    assert.equal(await readJson(f.path('stop.json')), null);
+    assert.deepEqual(await readJson(f.path('cycle.json')), outcome === 'success' ? { ...f.cycle, swapConfirmed: true } : f.cycle);
+  }
+});
+
+test('Privy unavailable or mismatched signer retains pending state without raw-key fallback', async t => {
+  for (const fault of ['unavailable', 'wrong-wallet', 'sign-failed'] as const) {
+    const f = await fixture(t); const selected = { ...config, mode: 'privy' as const };
+    let signatures = 0;
+    f.deps.config = async () => selected;
+    f.deps.account = async () => assert.fail('Privy errors cannot select the local signer');
+    f.deps.signer = async () => {
+      if (fault === 'unavailable') throw new Error('fixture secret-bearing provider error');
+      return { address: fault === 'wrong-wallet' ? '0x0000000000000000000000000000000000000001' : account.address,
+        signTransaction: async () => { signatures++; throw new Error('fixture secret-bearing provider error'); } };
+    };
+    const result = await auto(f, {}, selected);
+    assert.equal(result?.blocked, true); assert.equal(result?.operation?.status, 'unresolved');
+    assert.doesNotMatch(result?.operation?.message ?? '', /secret-bearing/);
+    assert.equal(signatures, fault === 'sign-failed' ? 1 : 0);
+    assert.equal(f.sent.length, 0); assert.equal(f.keyReads, 0);
+    assert.deepEqual(await readJson(f.path('pending.json')), f.pending);
+    assert.deepEqual(await readJson(f.path('cycle.json')), f.cycle);
+    assert.equal((await readJson<RecoveryRecord>(f.path('recovery.json')))?.cancellation, undefined);
+  }
+});
+
+test('Privy signer latency cannot bypass a newer stop, changed config or original receipt', async t => {
+  for (const changed of ['stop-during-load', 'stop-during-sign', 'config-during-sign', 'receipt-during-sign'] as const) {
+    const f = await fixture(t); const selected = { ...config, mode: 'privy' as const };
+    const stop = { requestedAt: 'later', requestId: changed };
+    let signatures = 0;
+    f.deps.config = async () => selected;
+    f.deps.account = async () => assert.fail('No local signer fallback');
+    f.deps.signer = async () => {
+      if (changed === 'stop-during-load') await atomicWriteJson(f.path('stop.json'), stop);
+      return { address: account.address, signTransaction: async transaction => {
+        signatures++;
+        if (changed === 'stop-during-sign') await atomicWriteJson(f.path('stop.json'), stop);
+        if (changed === 'config-during-sign') f.deps.config = async () => ({ ...selected, pollSeconds: 10 });
+        if (changed === 'receipt-during-sign') f.mineOriginal();
+        return account.signTransaction(transaction);
+      } };
+    };
+    // Read the mutable fixture config callback at each guard, as production does.
+    const result = await auto(f, { config: () => f.deps.config() }, selected);
+    assert.equal(result?.blocked, changed !== 'receipt-during-sign');
+    assert.equal(signatures, changed === 'stop-during-load' ? 0 : 1);
+    assert.equal(f.sent.length, 0); assert.equal(f.keyReads, 0);
+    if (changed.startsWith('stop')) assert.deepEqual(await readJson(f.path('stop.json')), stop);
+    if (changed === 'receipt-during-sign') {
+      assert.equal(result?.operation?.status, 'confirmed');
+      assert.equal(await readJson(f.path('pending.json')), null);
+      assert.equal(f.successfulNotes, 1);
+    } else assert.deepEqual(await readJson(f.path('pending.json')), f.pending);
+  }
 });

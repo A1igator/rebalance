@@ -606,12 +606,12 @@ test('recovery preserves the remaining attempt window and does not impose an hou
   }
 });
 
-test('deferred signers never enter automatic recovery for aged unresolved transactions', async t => {
+test('deferred Ledger never enters automatic recovery for aged unresolved transactions', async t => {
   const pending: PendingTransaction = { chainId: 4663, wallet, hash, nonce: 1,
     kind: 'swap', createdAt: observedAt, status: 'unknown' };
   await atomicWriteJson(PENDING_PATH, pending);
   mockRpc(t);
-  for (const mode of ['ledger', 'privy']) {
+  for (const mode of ['ledger']) {
     await atomicWriteJson(CONFIG_PATH, { ...config, mode });
     const state = await tick(true);
     assert.equal(state.operation?.status, 'unresolved');

@@ -10,6 +10,7 @@ import { status, tick, type Status } from './runtime.js';
 import { noteSuccessfulSwap } from './cadence.js';
 import { acquireLock, atomicWriteJson, readJson, type PendingTransaction } from './storage.js';
 import { validatePending, type Operation } from './transactions.js';
+import { loadSigner, type TransactionSigner } from './signers.js';
 
 export type RecoveryOptions = { cancel?: boolean; requestId?: string; expectedStop?: string };
 type Rpc = ReturnType<typeof createChain>['publicClient'];
@@ -33,7 +34,8 @@ export type RecoveryResult = {
 export type RecoveryDependencies = {
   dataDir: string; config: () => Promise<Config | null>;
   armed: () => Promise<boolean>; rpc: (config: Config) => Rpc;
-  account: typeof localAccount; resume: (expectedStop: string) => Promise<LaunchResult>;
+  account: typeof localAccount; signer?: (config: Config) => Promise<TransactionSigner>;
+  resume: (expectedStop: string) => Promise<LaunchResult>;
   refresh: () => Promise<Status>; noteSuccessfulSwap: (original: PendingTransaction) => Promise<void>;
   pause: () => Promise<void>; attempts: number;
 };
@@ -42,6 +44,8 @@ type Assessment = { outcome: 'original-confirmed' | 'original-reverted' | 'cance
   { outcome: 'confirming' | 'pending' | 'cancellation-needed' };
 const stopToken = (value: unknown) => value === null ? 'none' : createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const transactionIdentity = (p: PendingTransaction) => JSON.stringify([p.chainId, p.wallet.toLowerCase(), p.hash.toLowerCase(), p.nonce, p.kind]);
+const selectedSigner = (deps: Pick<RecoveryDependencies, 'account' | 'signer'>, config: Config): Promise<TransactionSigner> =>
+  deps.signer ? deps.signer(config) : config.mode === 'private-key' ? deps.account() : loadSigner(config);
 
 function validateRecord(record: RecoveryRecord, config: Config): void {
   if (!record || record.version !== 1 || typeof record.originallyArmed !== 'boolean' ||
@@ -99,10 +103,10 @@ function recoveryCore(config: Config, rpc: Rpc, original: PendingTransaction, re
 }
 
 async function cancelOnce(config: Config, rpc: Rpc, original: PendingTransaction, record: RecoveryRecord,
-  path: (name: string) => string, core: ReturnType<typeof recoveryCore>, accountLoader: typeof localAccount,
+  path: (name: string) => string, core: ReturnType<typeof recoveryCore>, signerLoader: (config: Config) => Promise<TransactionSigner>,
   guard: () => Promise<void>, onDispatch: () => void): Promise<Assessment> {
   if (record.cancellation) return core.assess();
-  if (config.mode !== 'private-key') throw new RecoveryError('Cancellation requires the selected raw-key signer; no fallback was used.');
+  if (config.mode !== 'private-key' && config.mode !== 'privy') throw new RecoveryError('Cancellation requires the selected automatic signer; no fallback was used.');
   const tx = await core.getTransaction(original.hash as Hex);
   const [latest, queued] = await Promise.all([
     rpc.getTransactionCount({ address: config.wallet, blockTag: 'latest' }), rpc.getTransactionCount({ address: config.wallet, blockTag: 'pending' }),
@@ -117,9 +121,10 @@ async function cancelOnce(config: Config, rpc: Rpc, original: PendingTransaction
   const gas = (await rpc.estimateGas({ account: config.wallet, to: config.wallet, data: '0x', value: 0n }) * 120n + 99n) / 100n;
   if (fee <= 0n || gas <= 0n || await rpc.getBalance({ address: config.wallet, blockTag: 'pending' }) < fee * gas) throw new RecoveryError('Insufficient native gas balance for cancellation.');
   await guard();
-  const account = await accountLoader();
-  if (account.address.toLowerCase() !== config.wallet.toLowerCase()) throw new RecoveryError('Local signer differs from the selected wallet.');
-  const serialized = await account.signTransaction({ chainId: 4663, type: 'legacy', nonce: original.nonce, to: config.wallet, value: 0n, data: '0x', gas, gasPrice: fee });
+  const signer = await signerLoader(config);
+  if (signer.address.toLowerCase() !== config.wallet.toLowerCase()) throw new RecoveryError('Signer differs from the selected wallet.');
+  await guard();
+  const serialized = await signer.signTransaction({ chainId: 4663, type: 'legacy', nonce: original.nonce, to: config.wallet, value: 0n, data: '0x', gas, gasPrice: fee });
   const assessed = await core.assess();
   if (assessed.outcome !== 'cancellation-needed') return assessed;
   await guard();
@@ -275,7 +280,7 @@ export async function recover(options: RecoveryOptions = {}, overrides: Partial<
     if (assessed.outcome === 'cancellation-needed') {
       if (!pending) throw new RecoveryError('The pending barrier disappeared without a validated original receipt.');
       if (!['unknown', 'prepared'].includes(original.status)) throw new RecoveryError('Explicit cancellation is limited to an uncertain original send.');
-      assessed = await cancelOnce(config, rpc, original, record, path, core, deps.account, ensureStop, () => { dispatched = true; });
+      assessed = await cancelOnce(config, rpc, original, record, path, core, config => selectedSigner(deps, config), ensureStop, () => { dispatched = true; });
       if (record.cancellation) result.cancellationHash = record.cancellation.hash;
     }
     for (let i = 0; i < attempts; i++) {
@@ -324,6 +329,7 @@ export async function recover(options: RecoveryOptions = {}, overrides: Partial<
 export const AUTO_RECOVERY_GRACE_MS = 30_000;
 export type AutomaticRecoveryDependencies = {
   dataDir: string; config: () => Promise<Config | null>; account: typeof localAccount;
+  signer?: (config: Config) => Promise<TransactionSigner>;
   now: () => number; noteSuccessfulSwap: (original: PendingTransaction) => Promise<void>;
 };
 export type AutomaticRecoveryResult = { blocked: boolean; operation: Operation | null } | null;
@@ -389,7 +395,7 @@ export async function automaticRecovery(config: Config, chain: Pick<ReturnType<t
           `Cancellation ${record.cancellation.hash} is awaiting a validated canonical receipt. Neither transaction will be resent.`);
       }
       if (assessed.outcome === 'confirming') return blocked('confirming', 'Original receipt is awaiting canonical two-confirmation evidence; no cancellation was sent.');
-      if (config.mode !== 'private-key') return blocked('unresolved', `${config.mode} automatic cancellation is unavailable; no signer fallback was used.`);
+      if (config.mode !== 'private-key' && config.mode !== 'privy') return blocked('unresolved', `${config.mode} automatic cancellation is unavailable; no signer fallback was used.`);
       await guard();
       const createdAt = Date.parse(original.createdAt);
       const now = deps.now();
@@ -400,7 +406,7 @@ export async function automaticRecovery(config: Config, chain: Pick<ReturnType<t
         record = { version: 1, automatic: true, original, createdAt: new Date(now).toISOString(), originallyArmed: true };
         await atomicWriteJson(path('recovery.json'), record);
       }
-      assessed = await cancelOnce(config, rpc, original, record, path, core, deps.account, guard, () => {});
+      assessed = await cancelOnce(config, rpc, original, record, path, core, config => selectedSigner(deps, config), guard, () => {});
       if (!('operation' in assessed)) return blocked(assessed.outcome === 'confirming' ? 'confirming' : 'unresolved',
         `Same-nonce cancellation ${record.cancellation?.hash ?? '(not submitted)'} is awaiting receipt reconciliation. No transaction will be blindly resent.`);
     }

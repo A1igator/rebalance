@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
+    "@privy-io/agent-wallet-cli": "0.3.6",
     "viem": "2.56.3"
   },
   "devDependencies": {
