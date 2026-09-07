@@ -1,9 +1,10 @@
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { access, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { portfolioRoot, resolveProfile, sessionIdentity } from './profile-routing.mjs';
 
 const executeFile = promisify(execFile);
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -59,11 +60,11 @@ function selectRequest(input, root, format, operation) {
   if (!format(input.prompt, root)) return null;
   if (input.permission_mode === 'plan') return { blocked: `Rebalance ${operation} was not run in Plan mode.` };
   if (typeof input.cwd !== 'string' || !isAbsolute(input.cwd) ||
-      typeof input.session_id !== 'string' || !input.session_id ||
+      typeof input.session_id !== 'string' || !input.session_id || input.session_id.length > 2048 || /[\0\r\n]/.test(input.session_id) ||
       typeof input.turn_id !== 'string' || !input.turn_id) {
     return { blocked: `Rebalance ${operation} needs a project directory and stable session/turn identity; nothing was started.` };
   }
-  return { cwd: input.cwd, requestId: createHash('sha256')
+  return { cwd: input.cwd, sessionId: sessionIdentity(input.session_id, {}), requestId: createHash('sha256')
     .update(JSON.stringify([input.session_id, input.turn_id])).digest('hex') };
 }
 
@@ -121,6 +122,7 @@ function hookFailure(phase) {
   const messages = {
     input: 'The Rebalance hook could not read its event input; no startup was attempted.',
     workspace: 'The Rebalance hook could not verify its project directory; no startup was attempted. Review the project hook setup.',
+    profile: 'The Rebalance hook could not pin this request to a wallet. Choose this conversation’s wallet or inspect its saved routing; no startup was attempted.',
     'stop-state': 'The Rebalance hook could not read its saved stop state; no startup was attempted. Preserve local records for recovery.',
     dependencies: 'The Rebalance hook could not prepare its locked dependencies; no startup was attempted. Check the local runtime and dependencies; Node.js 24 or later is required.',
     launch: 'The Rebalance launcher may have started the runner, but its result could not be verified. Current trading state is unknown. Inspect public status; do not repeat launch or start.',
@@ -147,8 +149,8 @@ async function ensureDependencies(root) {
   }
 }
 
-async function readStopToken(root) {
-  const directory = resolve(root, process.env.REBALANCE_DATA_DIR || '.local');
+async function readStopToken(root, profile) {
+  const directory = profile.dataDir;
   try {
     const stop = JSON.parse(await readFile(resolve(directory, 'stop.json'), 'utf8'));
     return stop === null ? 'none' : createHash('sha256').update(JSON.stringify(stop)).digest('hex');
@@ -158,20 +160,22 @@ async function readStopToken(root) {
   }
 }
 
-async function runLaunch(root, requestId, expectedStop) {
-  return runCommand(root, ['launch'], requestId, expectedStop);
+async function runLaunch(root, requestId, expectedStop, profile) {
+  return runCommand(root, ['launch'], requestId, expectedStop, profile);
 }
 
-async function runRecovery(root, requestId, expectedStop) {
-  return runCommand(root, ['recover', '--cancel'], requestId, expectedStop);
+async function runRecovery(root, requestId, expectedStop, profile) {
+  return runCommand(root, ['recover', '--cancel'], requestId, expectedStop, profile);
 }
 
-async function runCommand(root, command, requestId, expectedStop) {
+async function runCommand(root, command, requestId, expectedStop, profile) {
   const args = ['--import', 'tsx', resolve(root, 'src/cli.ts'), ...command,
     '--request-id', requestId, '--expected-stop', expectedStop];
   let stdout;
   try {
-    ({ stdout } = await executeFile(process.execPath, args, { cwd: root, timeout: 240_000, maxBuffer: 1_048_576 }));
+    ({ stdout } = await executeFile(process.execPath, args, { cwd: root, env: { ...process.env, REBALANCE_ROOT_DIR: profile.rootDir, REBALANCE_DATA_DIR: profile.dataDir,
+      REBALANCE_CHART_PORT: String(profile.chartPort), REBALANCE_PROFILE_WALLET: profile.wallet ?? '',
+      REBALANCE_PROFILE_PINNED: '1', REBALANCE_SESSION_ID: profile.sessionId }, timeout: 240_000, maxBuffer: 1_048_576 }));
   } catch (error) {
     // Failed launch commands can still return a structured public blocked state.
     // Raw process errors/stderr may contain provider or environment details.
@@ -180,6 +184,59 @@ async function runCommand(root, command, requestId, expectedStop) {
   const result = JSON.parse(stdout);
   if (result?.app !== 'Rebalance' || typeof result.outcome !== 'string') throw new Error('Invalid launch result');
   return result;
+}
+
+function validateRoute(value, rootDir, selected) {
+  const profile = value?.profile;
+  if (value?.version !== 1 || value.requestId !== selected.requestId || value.sessionId !== selected.sessionId ||
+      !profile || profile.rootDir !== rootDir || !isAbsolute(profile.dataDir) ||
+      !(profile.wallet === null || typeof profile.wallet === 'string' && /^0x[0-9a-f]{40}$/.test(profile.wallet)) ||
+      !Number.isInteger(profile.chartPort) || profile.chartPort < 1 || profile.chartPort > 65535 ||
+      (profile.dataDir !== rootDir && (profile.wallet === null || profile.dataDir !== resolve(rootDir, 'wallets', profile.wallet)))) {
+    throw new Error('Invalid saved hook wallet route');
+  }
+  return { ...profile, sessionId: selected.sessionId };
+}
+
+async function routeRequest(root, selected, overrides) {
+  const rootDir = portfolioRoot(process.env, root);
+  const path = resolve(rootDir, 'hook-routes', `${selected.requestId}.json`);
+  const read = async file => {
+    try { return JSON.parse(await readFile(file, 'utf8')); }
+    catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  };
+  const saved = await read(path);
+  if (saved !== null) return validateRoute(saved, rootDir, selected);
+  // Old receipts lived directly in .local. Never reinterpret a replay of an
+  // already-handled legacy command as authority for a newly attached wallet.
+  const digest = createHash('sha256').update(selected.requestId).digest('hex');
+  let profile;
+  if (await read(resolve(rootDir, 'launch-requests', `${digest}.json`)) ||
+      await read(resolve(rootDir, 'recovery-requests', `${digest}.json`))) {
+    const config = await read(resolve(rootDir, 'config.json'));
+    const wallet = config?.chainId === 4663 && typeof config.wallet === 'string' && /^0x[0-9a-f]{40}$/i.test(config.wallet)
+      ? config.wallet.toLowerCase() : null;
+    profile = { wallet, dataDir: rootDir, chartPort: 4663, rootDir };
+  } else {
+    const resolved = await (overrides.resolveProfile ?? resolveProfile)(rootDir, { sessionId: selected.sessionId });
+    profile = { wallet: resolved.wallet?.toLowerCase() ?? null, dataDir: resolve(resolved.dataDir),
+      chartPort: resolved.chartPort, rootDir: resolved.rootDir };
+  }
+  const record = { version: 1, requestId: selected.requestId, sessionId: selected.sessionId, profile };
+  validateRoute(record, rootDir, selected);
+  await mkdir(resolve(rootDir, 'hook-routes'), { recursive: true, mode: 0o700 });
+  let file;
+  try {
+    file = await open(path, 'wx', 0o600);
+    await file.writeFile(JSON.stringify(record) + '\n');
+    await file.sync();
+  } catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+    // Concurrent first arrivals use the first persisted route. An incomplete
+    // or corrupt receipt blocks safely instead of selecting another wallet.
+    return validateRoute(await read(path), rootDir, selected);
+  } finally { await file?.close(); }
+  return { ...profile, sessionId: selected.sessionId };
 }
 
 export async function handlePrompt(input, overrides = {}) {
@@ -194,15 +251,16 @@ export async function handlePrompt(input, overrides = {}) {
     const cwd = await realpath(selected.cwd);
     const child = relative(root, cwd);
     if (child === '..' || child.startsWith('../') || child.startsWith('..\\') || isAbsolute(child)) return null;
-    // Capture before a potentially slow npm ci; a stop issued during bootstrap
-    // must still win when the launcher reaches its conditional start.
+    // Freeze the native request before a chat switch, npm bootstrap or stop read.
+    phase = 'profile';
+    const profile = await routeRequest(root, selected, overrides);
     phase = 'stop-state';
-    const expectedStop = await (overrides.readStopToken ?? readStopToken)(root);
+    const expectedStop = await (overrides.readStopToken ?? readStopToken)(root, profile);
     phase = 'dependencies';
     await (overrides.ensureDependencies ?? ensureDependencies)(root);
     phase = recovery ? 'recovery' : 'launch';
     const run = recovery ? overrides.runRecovery ?? runRecovery : overrides.runLaunch ?? runLaunch;
-    return hookReply(await run(root, selected.requestId, expectedStop));
+    return hookReply(await run(root, selected.requestId, expectedStop, profile));
   } catch {
     return hookFailure(phase);
   }

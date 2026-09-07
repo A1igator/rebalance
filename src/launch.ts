@@ -6,10 +6,10 @@ import { fileURLToPath } from 'node:url';
 import type { Status } from './runtime.js';
 import type { CodexNotificationStatus } from './codex-notifications.js';
 import { acquireLock, atomicWriteJson, readJson } from './storage.js';
+import { chartPort, chartUrl } from './chart-address.js';
 
 const REPOSITORY = fileURLToPath(new URL('..', import.meta.url));
 const CLI = fileURLToPath(new URL('./cli.ts', import.meta.url));
-const CHART_URL = 'http://127.0.0.1:4663';
 export type LaunchOptions = { setupOnly?: boolean; targets?: string; requestId?: string; expectedStop?: string };
 type CommandResult = { ok: boolean; value: unknown };
 type ChartProbe = { state: 'absent' } | { state: 'unavailable' } | { state: 'response'; value: unknown };
@@ -51,13 +51,15 @@ function publicStatus(value: unknown): Status {
   return s;
 }
 
-function defaultDependencies(): LaunchDependencies {
+function defaultDependencies(port: number): LaunchDependencies {
   const dataDir = resolve(process.env.REBALANCE_DATA_DIR || resolve(REPOSITORY, '.local'));
+  const url = chartUrl(port);
   return {
     dataDir, alive: processAlive, pause: () => delay(250), attempts: 40,
     command: args => new Promise((resolveResult, reject) => {
       execFile(process.execPath, ['--import', 'tsx', CLI, ...args], {
-        cwd: REPOSITORY, env: { ...process.env, REBALANCE_DATA_DIR: dataDir },
+        cwd: REPOSITORY, env: { ...process.env, REBALANCE_DATA_DIR: dataDir,
+          REBALANCE_CHART_PORT: String(port), REBALANCE_PROFILE_PINNED: '1' },
         timeout: 120_000, maxBuffer: 1_048_576,
       }, (error, stdout) => {
         // CLI stdout is explicitly public JSON. Never publish raw subprocess
@@ -68,7 +70,7 @@ function defaultDependencies(): LaunchDependencies {
     }),
     chartStatus: async () => {
       try {
-        const response = await fetch(`${CHART_URL}/api/status`, { signal: AbortSignal.timeout(1500) });
+        const response = await fetch(`${url}/api/status`, { signal: AbortSignal.timeout(1500) });
         if (!response.ok) return { state: 'unavailable' };
         try { return { state: 'response', value: await response.json() }; }
         catch { return { state: 'unavailable' }; }
@@ -82,7 +84,9 @@ function defaultDependencies(): LaunchDependencies {
 
 /** Fixed CLI operations only; no model, shell command interpolation or signing here. */
 export async function launch(options: LaunchOptions = {}, overrides: Partial<LaunchDependencies> = {}): Promise<LaunchResult> {
-  const deps = { ...defaultDependencies(), ...overrides };
+  const port = chartPort();
+  const CHART_URL = chartUrl(port);
+  const deps = { ...defaultDependencies(port), ...overrides };
   const result: LaunchResult = { app: 'Rebalance', requested: options.setupOnly ? 'setup-only' : 'full',
     outcome: 'blocked', status: null, chart: { state: 'not-checked', url: CHART_URL },
     notifications: { state: 'not-checked', status: null }, messages: [] };

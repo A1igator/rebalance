@@ -59,7 +59,12 @@ export function validateConfig(value: unknown): Config {
 
 export async function loadConfig(): Promise<Config | null> {
   const value = await readJson<unknown>(CONFIG_PATH);
-  return value === null ? null : validateConfig(value);
+  const config = value === null ? null : validateConfig(value);
+  const wallet = process.env.REBALANCE_PROFILE_WALLET;
+  if (config && wallet && config.wallet.toLowerCase() !== wallet.toLowerCase()) {
+    throw new Error('Configuration wallet differs from this pinned portfolio; no other wallet was selected.');
+  }
+  return config;
 }
 
 export function percentToBps(value: string): number {

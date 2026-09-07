@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import childProcess from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { syncBuiltinESMExports } from 'node:module';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -63,6 +65,54 @@ async function fixture(t: TestContext) {
   return { dataDir, current, calls, alive, deps, notifications, notificationCalls };
 }
 const count = (calls: string[][], command: string) => calls.filter(args => args[0] === command).length;
+
+test('launch pins chart probes, result URLs and every child to one wallet context', async t => {
+  const f = await fixture(t);
+  const keys = ['REBALANCE_DATA_DIR', 'REBALANCE_CHART_PORT', 'REBALANCE_PROFILE_PINNED'] as const;
+  const previous = keys.map(key => process.env[key]);
+  t.after(() => {
+    t.mock.restoreAll(); syncBuiltinESMExports();
+    keys.forEach((key, index) => { if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index]; });
+  });
+  process.env.REBALANCE_DATA_DIR = f.dataDir;
+  process.env.REBALANCE_CHART_PORT = '4777';
+  process.env.REBALANCE_PROFILE_PINNED = '0';
+  const environments: NodeJS.ProcessEnv[] = [];
+  t.mock.method(childProcess, 'execFile', (...args: unknown[]) => {
+    const argv = args[1] as string[];
+    const options = args[2] as { env: NodeJS.ProcessEnv };
+    const callback = args[3] as (error: Error | null, stdout: string) => void;
+    environments.push(options.env);
+    const command = argv.slice(3);
+    assert.ok(['status', 'check', 'notifications'].includes(command[0]!));
+    // A later task context cannot redirect an already-running launch's children.
+    process.env.REBALANCE_DATA_DIR = join(f.dataDir, 'another-wallet');
+    process.env.REBALANCE_CHART_PORT = '4888';
+    process.env.REBALANCE_PROFILE_PINNED = '0';
+    const value = command[0] === 'notifications' ? f.notifications : f.current;
+    queueMicrotask(() => callback(null, JSON.stringify(value)));
+    return {} as childProcess.ChildProcess;
+  });
+  syncBuiltinESMExports();
+  const probes: string[] = [];
+  t.mock.method(globalThis, 'fetch', async (url: string | URL | Request) => {
+    probes.push(String(url));
+    return new Response(JSON.stringify(f.current));
+  });
+  const result = await launch({ setupOnly: true }, { alive: f.deps.alive, pause: async () => {}, attempts: 1 });
+  assert.equal(result.outcome, 'ready'); assert.equal(result.chart.state, 'ready');
+  assert.equal(result.chart.url, 'http://127.0.0.1:4777');
+  assert.deepEqual(probes, ['http://127.0.0.1:4777/api/status']);
+  assert.ok(environments.length >= 3);
+  for (const env of environments) {
+    assert.equal(env.REBALANCE_DATA_DIR, f.dataDir);
+    assert.equal(env.REBALANCE_CHART_PORT, '4777');
+    assert.equal(env.REBALANCE_PROFILE_PINNED, '1');
+  }
+  // A new launch reads its own pinned port rather than a module-global URL.
+  const next = await launch({ setupOnly: true }, f.deps);
+  assert.equal(next.chart.url, 'http://127.0.0.1:4888');
+});
 
 test('full launch checks first, reuses the owned chart, starts once, and verifies public arming', async t => {
   const f = await fixture(t);

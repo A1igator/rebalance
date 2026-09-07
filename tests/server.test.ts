@@ -8,6 +8,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { test, type TestContext } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { serve } from '../src/server.js';
+import { chartPort, chartUrl } from '../src/chart-address.js';
 import { atomicWriteJson, readJson } from '../src/storage.js';
 import type { Status } from '../src/runtime.js';
 
@@ -21,7 +22,7 @@ async function waitFor(condition: () => boolean, message: string) {
   assert.ok(condition(), message);
 }
 
-async function fixture(t: TestContext) {
+async function fixture(t: TestContext, port: number | null = 0) {
   const directory = await mkdtemp(join(tmpdir(), 'rebalance-chart-'));
   const path = (name: string) => join(directory, name);
   await atomicWriteJson(path('status.json'), initial);
@@ -29,7 +30,7 @@ async function fixture(t: TestContext) {
   let reads = 0;
   let gasReads = 0;
   const watchers: FSWatcher[] = [];
-  const server = await serve(0, { dataDir: directory,
+  const server = await serve(port ?? undefined, { dataDir: directory,
     readConfig: async () => null,
     readGas: async () => {
       gasReads++;
@@ -214,6 +215,53 @@ test('chart shutdown finishes with an active SSE client and closes its watcher',
   await closing;
   await waitFor(() => stream.response.destroyed && f.activeWatchers === 0, 'shutdown closes the client and file watcher');
   assert.equal(f.server.listening, false);
+});
+
+test('profile chart ports are strict and the server binds the pinned port by default', async t => {
+  const previous = process.env.REBALANCE_CHART_PORT;
+  t.after(() => { if (previous === undefined) delete process.env.REBALANCE_CHART_PORT; else process.env.REBALANCE_CHART_PORT = previous; });
+  delete process.env.REBALANCE_CHART_PORT;
+  assert.equal(chartPort(), 4663); assert.equal(chartUrl(), 'http://127.0.0.1:4663');
+  for (const value of ['', '0', '-1', '65536', '4663.5', ' 4663', '4663 ', '04663', '4663\n', 'NaN', '1e4', '4663/path']) {
+    assert.throws(() => chartPort(value), /REBALANCE_CHART_PORT/);
+  }
+  for (const value of ['1', '4664', '65535']) assert.equal(chartPort(value), Number(value));
+  for (const value of [0, -1, 65_536, 4663.5, NaN]) assert.throws(() => chartUrl(value), /Invalid chart port/);
+  process.env.REBALANCE_CHART_PORT = '0';
+  await assert.rejects(serve(), /REBALANCE_CHART_PORT/);
+  // Explicit port zero remains available for isolated, OS-assigned fixtures.
+  const allocated = await fixture(t);
+  const port = Number(new URL(allocated.url).port);
+  await allocated.server.closeChart();
+  process.env.REBALANCE_CHART_PORT = String(port);
+  const pinned = await fixture(t, null);
+  assert.equal(pinned.url, chartUrl(port));
+  assert.equal((await readResponse(`${pinned.url}/api/status`)).code, 200);
+});
+
+test('two wallet charts retain separate ports, HTTP snapshots and directory event streams', async t => {
+  const first = await fixture(t); const second = await fixture(t);
+  assert.notEqual(first.url, second.url);
+  const firstStatus = { ...initial, wallet: `0x${'1'.repeat(40)}`, mode: 'private-key' as const, updatedAt: 'first-wallet' };
+  const secondStatus = { ...initial, wallet: `0x${'2'.repeat(40)}`, mode: 'privy' as const, updatedAt: 'second-wallet' };
+  await atomicWriteJson(first.path('status.json'), firstStatus);
+  await atomicWriteJson(second.path('status.json'), secondStatus);
+  const firstStream = await subscribe(first.url); t.after(firstStream.close);
+  const secondStream = await subscribe(second.url); t.after(secondStream.close);
+  await waitFor(() => firstStream.events.length === 1 && secondStream.events.length === 1, 'both wallets receive their own initial snapshot');
+  assert.deepEqual(firstStream.events[0], firstStatus);
+  assert.deepEqual(secondStream.events[0], secondStatus);
+  await atomicWriteJson(first.path('status.json'), { ...firstStatus, updatedAt: 'first-wallet-updated' });
+  await waitFor(() => firstStream.events.length === 2, 'first wallet status change reaches only its chart');
+  assert.equal(secondStream.events.length, 1);
+  assert.equal(firstStream.events[1]!.wallet, firstStatus.wallet);
+  assert.deepEqual(JSON.parse((await readResponse(`${second.url}/api/status`)).body), secondStatus);
+  await atomicWriteJson(second.path('status.json'), { ...secondStatus, updatedAt: 'second-wallet-updated' });
+  await waitFor(() => secondStream.events.length === 2, 'second wallet status change reaches only its chart');
+  assert.equal(firstStream.events.length, 2);
+  assert.equal(secondStream.events[1]!.wallet, secondStatus.wallet);
+  assert.equal((await readResponse(`${first.url}/api/status`, 'GET', { Host: new URL(second.url).host })).code, 403);
+  assert.equal((await readResponse(`${first.url}/api/status`, 'GET', { Origin: second.url })).code, 403);
 });
 
 test('chart uses events while connected and one polling fallback only while disconnected', async () => {

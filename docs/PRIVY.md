@@ -15,13 +15,14 @@ npm run cli -- privy status
 
 Login follows the official skill's pinned `pnpm --package=@privy-io/agent-wallet-cli@0.3.6 dlx privy-agent-wallet login` flow. For a new session, OAuth device authorization opens a browser and requires the user to verify and approve the displayed device code. Existing sessions are reused; setup does not log out or replace a session automatically. The public status command reports the cached Ethereum address and wallet ID without returning credentials. The upstream `list-wallets` command does not refresh tokens or validate authorization, so a successful status read cannot promise that the next signing request will succeed.
 
-After the user explicitly selects the Privy wallet, the existing configuration command selects its public address:
+Register the Privy wallet as a separate portfolio with its own chosen targets, then connect the conversation:
 
 ```bash
-npm run cli -- configure --mode privy --wallet <public-address>
+npm run cli -- wallet add --mode privy --wallet <public-address> --targets <five-asset-allocation>
+npm run cli -- wallet connect <public-address>
 ```
 
-With an existing configuration, omitting `--targets` preserves the saved allocation, threshold, slippage and cadence. Initial configuration still requires targets. Pending transaction barriers remain in force. Login and wallet selection do not themselves arm trading or fund the wallet. Do not silently substitute this wallet for another configured signer.
+The Privy portfolio has its own targets, balances, cadence and pending records. Registration does not inherit another wallet’s state or arm trading; connecting prepares its chart without changing the other runners. A bare skill launch applies to the connected wallet. Login or connection does not fund it. See [wallet portfolios](PORTFOLIOS.md).
 
 ## Deterministic signing and submission
 

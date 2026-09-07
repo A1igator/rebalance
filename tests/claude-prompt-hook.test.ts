@@ -96,6 +96,46 @@ test('native expansion routes to the shared launcher once with pre-bootstrap sto
   assert.doesNotMatch(JSON.stringify(result), /fixture-private-transcript|fixture-session|550e8400/);
 });
 
+test('Claude normalized session selects a wallet and preserves that route after reconnecting the same prompt', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-claude-wallet-route-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const rootDir = join(root, '.local');
+  const walletA = `0x${'1'.repeat(40)}`;
+  const walletB = `0x${'2'.repeat(40)}`;
+  const first = { wallet: walletA, dataDir: join(rootDir, 'wallets', walletA), chartPort: 4664, rootDir };
+  const second = { wallet: walletB, dataDir: join(rootDir, 'wallets', walletB), chartPort: 4665, rootDir };
+  let selected = first;
+  const input = { ...event, cwd: root };
+  const requestId = selectClaudeLaunchRequest(input).requestId;
+  const sessionId = `claude:${event.session_id}`;
+  const routePath = join(rootDir, 'hook-routes', `${requestId}.json`);
+  const observed: unknown[] = [];
+  const overrides = {
+    repository: root,
+    resolveProfile: async (dataRoot: string, context: { sessionId: string }) => {
+      assert.equal(dataRoot, rootDir); assert.deepEqual(context, { sessionId }); return selected;
+    },
+    readStopToken: async (_root: string, profile: unknown) => {
+      assert.deepEqual(profile, { ...first, sessionId });
+      assert.deepEqual(JSON.parse(await readFile(routePath, 'utf8')).profile, first);
+      return 'none';
+    },
+    ensureDependencies: async () => {},
+    runLaunch: async (_root: string, id: string, _stop: string, profile: unknown) => {
+      assert.equal(id, requestId); observed.push(profile);
+      return { app: 'Rebalance', outcome: 'blocked', status: { armed: false }, messages: [] };
+    },
+    runRecovery: forbidden.runRecovery,
+  };
+  await handleClaudePrompt(input, overrides);
+  selected = second;
+  await handleClaudePrompt(input, overrides);
+  assert.deepEqual(observed, [{ ...first, sessionId }, { ...first, sessionId }]);
+  const route = JSON.parse(await readFile(routePath, 'utf8'));
+  assert.equal(route.requestId, requestId); assert.equal(route.sessionId, sessionId);
+  assert.deepEqual(route.profile, first);
+});
+
 test('outside workspaces and symlinks escaping the project never launch', async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-claude-root-')));
   const outside = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-claude-outside-')));

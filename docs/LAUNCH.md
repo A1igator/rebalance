@@ -1,5 +1,7 @@
 # Deterministic launch
 
+The launch context is now a [wallet portfolio](PORTFOLIOS.md). Before dependency setup or any stop-state read, a native request is durably pinned to the wallet attached to that conversation. Replaying it after a chat connection change keeps its original wallet. Each wallet has separate launch records, process locks, cadence and chart port. A bare invocation launches the selected wallet; an explicit `launch --all` requests separate launches for all registered wallets. Connecting the chat alone prepares a view with setup-only and does not arm or stop a runner.
+
 The user-facing command is a bare **`$rebalance`**, typed or selected from the project's skill suggestion. Once its project hook is loaded and trusted, Codex routes the submitted command to application code before the model chooses tools:
 
 ```text

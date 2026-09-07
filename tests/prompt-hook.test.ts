@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -22,6 +23,13 @@ const ambientPrompt = (request: string, url = 'http://127.0.0.1:4663/') => [
   '## My request:',
   request,
 ].join('\n');
+
+type HookProfile = { wallet: string | null; dataDir: string; chartPort: number; rootDir: string; sessionId?: string };
+function walletProfile(root: string, digit: string, chartPort: number): HookProfile {
+  const wallet = `0x${digit.repeat(40)}`;
+  const rootDir = join(root, '.local');
+  return { wallet, dataDir: join(rootDir, 'wallets', wallet), chartPort, rootDir };
+}
 
 function publicResult(reply: { hookSpecificOutput: { additionalContext: string } }) {
   const context = reply.hookSpecificOutput.additionalContext;
@@ -130,6 +138,135 @@ test('a bare command routes directly to the launcher with stable opaque request 
   assert.match(result.hookSpecificOutput.additionalContext, /do not repeat launch or start/);
   assert.ok(result.hookSpecificOutput.additionalContext.endsWith(JSON.stringify(launchResult)));
   assert.notEqual(selectLaunchRequest(event).requestId, selectLaunchRequest({ ...event, turn_id: 'another-turn' }).requestId);
+});
+
+test('launch and recovery pin the wallet before stop/bootstrap and reuse it after chat reattachment', async t => {
+  for (const action of ['launch', 'recovery']) await t.test(action, async t => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-hook-frozen-wallet-')));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const first = walletProfile(root, '1', 4664);
+    const second = walletProfile(root, '2', 4665);
+    let selected = first;
+    const input = { ...event, cwd: root, prompt: action === 'recovery' ? '$rebalance recover' : '$rebalance' };
+    const requestId = (selectRecoveryRequest(input, root) ?? selectLaunchRequest(input, root)).requestId;
+    const routePath = join(first.rootDir, 'hook-routes', `${requestId}.json`);
+    const phases: string[] = [];
+    const observed: HookProfile[] = [];
+    let dispatches = 0;
+    const assertPinned = async () => {
+      const saved = JSON.parse(await readFile(routePath, 'utf8'));
+      assert.equal(saved.version, 1); assert.equal(saved.requestId, requestId);
+      assert.equal(saved.sessionId, event.session_id);
+      assert.deepEqual(saved.profile, first);
+    };
+    const dispatch = async (repo: string, id: string, expectedStop: string, profile: HookProfile) => {
+      assert.equal(repo, root); assert.equal(id, requestId); assert.equal(expectedStop, 'a'.repeat(64));
+      assert.deepEqual(profile, { ...first, sessionId: event.session_id });
+      await assertPinned(); observed.push(profile); phases.push('dispatch');
+      if (++dispatches === 1) throw new Error('fixture lost dispatch output');
+      return { app: 'Rebalance', outcome: 'blocked', status: { armed: false }, messages: [] };
+    };
+    const overrides = {
+      repository: root,
+      resolveProfile: async (dataRoot: string, context: { sessionId: string }) => {
+        assert.equal(dataRoot, first.rootDir); assert.deepEqual(context, { sessionId: event.session_id });
+        return selected;
+      },
+      readStopToken: async (repo: string, profile: HookProfile) => {
+        assert.equal(repo, root); assert.deepEqual(profile, { ...first, sessionId: event.session_id });
+        await assertPinned(); phases.push('stop'); return 'a'.repeat(64);
+      },
+      ensureDependencies: async () => { await assertPinned(); phases.push('dependencies'); },
+      runLaunch: action === 'launch' ? dispatch : () => assert.fail('recovery must not launch'),
+      runRecovery: action === 'recovery' ? dispatch : () => assert.fail('launch must not manually recover'),
+    };
+    const initial = publicResult(await handlePrompt(input, overrides));
+    assert.equal(initial.outcome, action === 'recovery' ? 'unknown' : 'starting');
+    const frozen = await readFile(routePath, 'utf8');
+    selected = second;
+    assert.equal(publicResult(await handlePrompt(input, overrides)).outcome, 'blocked');
+    assert.deepEqual(phases, ['stop', 'dependencies', 'dispatch', 'stop', 'dependencies', 'dispatch']);
+    assert.equal(observed.length, 2);
+    assert.equal(await readFile(routePath, 'utf8'), frozen, 'a retry cannot rewrite the original wallet route');
+    assert.equal(existsSync(join(second.dataDir, 'launch-requests')), false);
+  });
+});
+
+test('independent native sessions route the same turn label to different wallet state', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-hook-wallet-sessions-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const profiles = { 'session-a': walletProfile(root, '1', 4664), 'session-b': walletProfile(root, '2', 4665) };
+  const visits: string[] = [];
+  const inputs = Object.keys(profiles).map(session_id => ({ ...event, cwd: root, session_id, turn_id: 'same-native-turn-label' }));
+  const replies = await Promise.all(inputs.map(input => handlePrompt(input, {
+    repository: root,
+    resolveProfile: async (_root: string, { sessionId }: { sessionId: keyof typeof profiles }) => profiles[sessionId],
+    readStopToken: async (_root: string, profile: HookProfile) => {
+      const expected = profiles[profile.sessionId as keyof typeof profiles];
+      assert.deepEqual(profile, { ...expected, sessionId: profile.sessionId });
+      return profile.sessionId === 'session-a' ? 'a'.repeat(64) : 'b'.repeat(64);
+    },
+    ensureDependencies: async () => {},
+    runLaunch: async (_root: string, requestId: string, expectedStop: string, profile: HookProfile) => {
+      const session = profile.sessionId as keyof typeof profiles;
+      assert.equal(requestId, selectLaunchRequest(inputs.find(value => value.session_id === session), root).requestId);
+      assert.equal(expectedStop, session === 'session-a' ? 'a'.repeat(64) : 'b'.repeat(64));
+      assert.deepEqual(profile, { ...profiles[session], sessionId: session }); visits.push(session);
+      return { app: 'Rebalance', outcome: 'blocked', status: { armed: false }, messages: [] };
+    },
+  })));
+  assert.deepEqual(visits.sort(), ['session-a', 'session-b']);
+  assert.ok(replies.every(reply => publicResult(reply).outcome === 'blocked'));
+  assert.notEqual(selectLaunchRequest(inputs[0], root).requestId, selectLaunchRequest(inputs[1], root).requestId);
+  assert.equal((await readdir(join(root, '.local', 'hook-routes'))).filter(name => name.endsWith('.json')).length, 2);
+});
+
+test('legacy handled request records retain legacy wallet affinity after the chat selects another wallet', async t => {
+  for (const action of ['launch', 'recovery']) await t.test(action, async t => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-hook-legacy-route-')));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const attached = walletProfile(root, '2', 4665);
+    const input = { ...event, cwd: root, prompt: action === 'recovery' ? '$rebalance recover' : '$rebalance' };
+    const id = (selectRecoveryRequest(input, root) ?? selectLaunchRequest(input, root)).requestId;
+    const directory = join(attached.rootDir, action === 'recovery' ? 'recovery-requests' : 'launch-requests');
+    await mkdir(directory, { recursive: true });
+    const legacyPath = join(directory, `${createHash('sha256').update(id).digest('hex')}.json`);
+    const original = '{"fixture":"already-handled-native-request"}\n';
+    await writeFile(legacyPath, original);
+    const dispatch = async (_root: string, requestId: string, expectedStop: string, profile: HookProfile) => {
+      assert.equal(requestId, id); assert.equal(expectedStop, 'none');
+      assert.equal(profile.dataDir, attached.rootDir); assert.equal(profile.rootDir, attached.rootDir);
+      assert.equal(profile.chartPort, 4663); assert.equal(profile.sessionId, event.session_id);
+      return { app: 'Rebalance', outcome: 'already-handled', status: { armed: false }, messages: [] };
+    };
+    const reply = await handlePrompt(input, {
+      repository: root, resolveProfile: async () => attached,
+      readStopToken: async (_root: string, profile: HookProfile) => { assert.equal(profile.dataDir, attached.rootDir); return 'none'; },
+      ensureDependencies: async () => {},
+      runLaunch: action === 'launch' ? dispatch : () => assert.fail('must not launch'),
+      runRecovery: action === 'recovery' ? dispatch : () => assert.fail('must not recover'),
+    });
+    assert.equal(publicResult(reply).outcome, 'already-handled');
+    assert.equal(await readFile(legacyPath, 'utf8'), original);
+    const route = JSON.parse(await readFile(join(attached.rootDir, 'hook-routes', `${id}.json`), 'utf8'));
+    assert.equal(route.profile.dataDir, attached.rootDir);
+  });
+});
+
+test('route persistence failure blocks before stop state, dependency bootstrap or dispatch', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-hook-route-failure-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const profile = walletProfile(root, '1', 4664);
+  await mkdir(profile.rootDir, { recursive: true });
+  await writeFile(join(profile.rootDir, 'hook-routes'), 'fixture-secret-route-storage-error');
+  const reply = await handlePrompt({ ...event, cwd: root }, {
+    repository: root, resolveProfile: async () => profile,
+    readStopToken: () => assert.fail('must persist route before reading stop state'),
+    ensureDependencies: () => assert.fail('must persist route before dependency bootstrap'),
+    runLaunch: () => assert.fail('must not dispatch without a durable route'),
+  });
+  assert.equal(publicResult(reply).outcome, 'blocked');
+  assert.doesNotMatch(JSON.stringify(reply), /fixture-secret|EEXIST|ENOTDIR/);
 });
 
 test('explicit recovery forms route only to recovery with stable identity and the original stop generation', async t => {

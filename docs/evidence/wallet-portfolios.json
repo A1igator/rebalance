@@ -1,0 +1,42 @@
+{
+  "chainId": 4663,
+  "implementation": "Independent wallet portfolios, pinned deterministic workers and per-conversation attachment",
+  "validation": {
+    "typecheck": "passed",
+    "fullRegression": {
+      "tests": 415,
+      "passed": 415,
+      "failed": 0,
+      "skipped": 0
+    },
+    "subsequentFocusedProfiles": {
+      "tests": 10,
+      "passed": 10,
+      "includesOneAddedBatchFailureRegression": true
+    },
+    "distinctTestsPassed": 416,
+    "skillValidator": "passed",
+    "gitWhitespace": "passed"
+  },
+  "limits": [
+    "The existing funded raw-key runner was not restarted; it retains its loaded runtime until a later user launch.",
+    "Privy was registered and viewed only; no actual Privy signature, provider mainnet acceptance or swap was tested.",
+    "New Privy notifications remain unconfigured until a destination is selected.",
+    "Native multi-wallet hook dispatch and a newly connected live Claude channel are fixture-tested, not demonstrated in a fresh user session.",
+    "Queue acceptance and acknowledgement do not prove mobile delivery.",
+    "Privy CLI 0.3.6 exposes one first-Ethereum session wallet and no per-request wallet selector; app profile isolation does not add concurrent independent Privy logins."
+  ],
+  "financialActionsPerformed": [],
+  "secretsInspected": false,
+  "verifiedDate": "2026-09-07",
+  "localIntegrationChecks": {
+    "existingPortfolioPreservedInPlace": true,
+    "existingFinancialFilesByteUnchanged": true,
+    "chatAttachmentRemainedOnExistingPortfolio": true,
+    "separateProfileRegistrationPassed": true,
+    "bothReadOnlyChartEndpointsReportedCorrectWalletIdentity": true,
+    "notificationOnlyListenerReloadPassed": true,
+    "newFundedTradingActivationPerformed": false
+  },
+  "publishedRecord": "Aggregate validation results only. Local wallet addresses, holdings, balances, process identifiers, conversation identifiers and state fingerprints are excluded."
+}

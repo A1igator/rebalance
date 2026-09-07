@@ -1,5 +1,7 @@
 # Transaction recovery
 
+Pending and recovery records, nonce barriers, cooldowns and process locks belong to the selected [wallet portfolio](PORTFOLIOS.md). Background workers stay pinned to that wallet when a chat connects elsewhere. Use explicit `--profile <public-address>` for an operation directed at a different portfolio.
+
 An uncertain send blocks later trades. A missing transaction or receipt at one RPC does not prove that the transaction was never accepted. Preserve the original hash and nonce; the chart shows the last observed holdings while reconciliation waits.
 
 ## Automatic recovery in an armed runner

@@ -10,6 +10,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { Notification } from '@modelcontextprotocol/sdk/types.js';
 import { atomicWriteJson } from '../src/storage.js';
+import { connectionPath } from '../scripts/profile-routing.mjs';
 
 const directory = await mkdtemp(join(tmpdir(), 'rebalance-channel-test-'));
 const previousDirectory = process.env.REBALANCE_DATA_DIR;
@@ -30,7 +31,7 @@ async function waitFor(condition: () => boolean, message: string): Promise<void>
   assert.ok(condition(), message);
 }
 
-async function openSession(dataDir = directory) {
+async function openSession(dataDir = directory, env: Record<string, string> = {}) {
   const received: Notification[] = [];
   const errors: Error[] = [];
   const client = new Client({ name: 'rebalance-channel-test', version: '1.0.0' }, { capabilities: {} });
@@ -41,7 +42,7 @@ async function openSession(dataDir = directory) {
     command: process.execPath,
     args: ['--import', 'tsx', fileURLToPath(new URL('../src/channel.ts', import.meta.url))],
     cwd: fileURLToPath(new URL('..', import.meta.url)),
-    env: { REBALANCE_DATA_DIR: dataDir },
+    env: { REBALANCE_DATA_DIR: dataDir, ...env },
     stderr: 'pipe',
   });
   let stderr = '';
@@ -201,4 +202,43 @@ test('Claude channel keeps brief read failures and automatic recovery quiet acro
   await waitFor(() => reconnect.received.length > 0, 'unacknowledged completion replays');
   assert.deepEqual(reconnect.received.map(eventId), ['meaningful-completion']);
   await reconnect.client.close();
+});
+
+
+test('Claude sessions pin notifications and acknowledgements while a chat attaches to another wallet', { timeout: 12_000 }, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'rebalance-channel-profiles-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const walletA = `0x${'a'.repeat(40)}`, walletB = `0x${'b'.repeat(40)}`;
+  const dataB = join(root, 'wallets', walletB);
+  await mkdir(dataB, { recursive: true }); await mkdir(join(root, 'connections'));
+  await atomicWriteJson(join(root, 'config.json'), { wallet: walletA, chainId: 4663 });
+  await atomicWriteJson(join(dataB, 'config.json'), { wallet: walletB, chainId: 4663 });
+  await atomicWriteJson(join(root, 'portfolios.json'), { version: 1, profiles: [
+    { wallet: walletA, chainId: 4663, directory: '.', chartPort: 4663 },
+    { wallet: walletB, chainId: 4663, directory: `wallets/${walletB}`, chartPort: 4664 },
+  ] });
+  const sessionId = 'claude:fixture-profile-session';
+  const connect = (wallet: string) => atomicWriteJson(connectionPath(root, sessionId), { version: 1, chainId: 4663, wallet });
+  const shared = { id: 'same-event-id', type: 'rebalance-completed', createdAt: '2026-09-07T00:00:00Z', message: 'Completed.' };
+  await atomicWriteJson(join(root, 'events.json'), [shared]);
+  await atomicWriteJson(join(dataB, 'events.json'), [shared]);
+  await connect(walletA);
+  const env = { REBALANCE_ROOT_DIR: root, REBALANCE_SESSION_ID: sessionId };
+  const first = await openSession(root, env); t.after(() => first.client.close());
+  await waitFor(() => first.received.length === 1, 'first wallet should deliver');
+  assert.equal(first.received[0]?.params?.content, `Portfolio ${walletA} on Robinhood (4663): Completed.`);
+  assert.equal((first.received[0]?.params?.meta as Record<string, string>).portfolio_wallet, walletA);
+  assert.ok(first.client.getInstructions()?.includes(`--profile ${walletA} status`));
+  await connect(walletB);
+  const second = await openSession(root, env); t.after(() => second.client.close());
+  await waitFor(() => second.received.length === 1, 'new channel should select the new attachment');
+  assert.equal((second.received[0]?.params?.meta as Record<string, string>).portfolio_wallet, walletB);
+  assert.ok(second.client.getInstructions()?.includes(`--profile ${walletB} status`));
+  assert.notEqual((await first.client.callTool({ name: 'acknowledge_event', arguments: { id: shared.id } })).isError, true);
+  assert.ok(JSON.parse(await readFile(join(root, 'events.json'), 'utf8'))[0].acknowledgedAt);
+  assert.deepEqual(JSON.parse(await readFile(join(dataB, 'events.json'), 'utf8')), [shared], 'old channel must not acknowledge the newly attached wallet');
+  assert.notEqual((await second.client.callTool({ name: 'acknowledge_event', arguments: { id: shared.id } })).isError, true);
+  assert.ok(JSON.parse(await readFile(join(dataB, 'events.json'), 'utf8'))[0].acknowledgedAt);
+  assert.deepEqual(first.errors, []); assert.deepEqual(second.errors, []);
+  await first.client.close(); await second.client.close();
 });

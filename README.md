@@ -10,6 +10,8 @@ Ask the agent to change a target. Integer arithmetic redistributes the other wei
 
 The [fee decision](docs/prompts/017-mainnet-cadence-codex.md) accepts the measured mainnet fees and cancels the conditional testnet migration. The funded demo retains its network, wallet and allocation; its user-armed monitor completed the first five-asset rebalance after recovery. [Earlier fee and testnet research](docs/FEE_CHECK.md) is preserved as history.
 
+**Wallet portfolios:** each wallet has its own allocation, state and deterministic background runner. The conversation connects to a wallet without changing other portfolios or moving funds. Separate chart URLs show each wallet. Use the agent to list/add/connect wallets; see [wallet portfolios and commands](docs/PORTFOLIOS.md).
+
 ## Use through your agent
 
 Open this repository in Codex or Claude Code and invoke the project **Rebalance skill**: `$rebalance` in Codex or `/rebalance` in Claude Code. The [single-call launch](docs/prompts/019-single-skill-arming.md) requests setup **and arming automatic trading** under your saved allocation. Startup is implemented in the deterministic [launcher](src/launch.ts), which preserves configuration, reconciles receipts, reuses/starts the chart and runner, and verifies actual readiness. Scoped setup-only, status, event and stop requests perform only their named operation. The shared [skill](skills/rebalance/SKILL.md) handles user input and reports results.

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setImmediate as turn, setTimeout as delay } from 'node:timers/promises';
@@ -30,7 +30,7 @@ async function fixture(t: TestContext) {
   let now = Date.parse('2026-09-06T03:00:00Z');
   let execute: CodexNotificationDependencies['execute'] = async () => ({ stdout: `Queued message queue-1 for thread ${threadId}\n` });
   const deps: Partial<CodexNotificationDependencies> = {
-    dataDir: directory, projectDir: '/fixture/rebalance', now: () => now,
+    dataDir: directory, rootDir: directory, projectDir: '/fixture/rebalance', now: () => now,
     execute: async (command, args) => { calls.push({ command, args }); return execute(command, args); },
     stream: options => createEventStream({ ...options, read: async () => { reads++; return options.read(); } }, {
       now: () => now,
@@ -109,6 +109,45 @@ test('event changes deliver native queue args only and accepted events survive r
   await until(async () => (await f.status()).acceptedCount === 2);
   assert.equal(f.calls.length, 2);
   await next.stop();
+});
+
+test('queued notifications keep their wallet for reads and acknowledgement after chat attachment changes', async t => {
+  const f = await fixture(t);
+  const walletA = `0x${'a'.repeat(40)}`, walletB = `0x${'b'.repeat(40)}`;
+  await atomicWriteJson(join(f.directory, 'config.json'), { wallet: walletA.toUpperCase().replace('0X', '0x'), chainId: 4663 });
+  await mkdir(join(f.directory, 'connections'));
+  await atomicWriteJson(join(f.directory, 'connections', 'fixture.json'), { version: 1, chainId: 4663, wallet: walletA });
+  await f.configure(); await f.writeEvents([event()]);
+  const worker = await f.start();
+  await until(async () => (await f.status()).acceptedCount === 1);
+  await atomicWriteJson(join(f.directory, 'connections', 'fixture.json'), { version: 1, chainId: 4663, wallet: walletB });
+  await f.writeEvents([event(), event('event-2')]);
+  await until(async () => (await f.status()).acceptedCount === 2);
+  for (const call of f.calls) {
+    const prompt = call.args[4];
+    const command = `REBALANCE_ROOT_DIR='${f.directory}' npm run cli -- --profile ${walletA}`;
+    assert.ok(prompt.includes(`wallet: ${walletA}`));
+    assert.ok(prompt.includes(`${command} events`));
+    assert.ok(prompt.includes(`${command} status`));
+    assert.ok(prompt.includes(`${command} events ack `));
+    assert.equal(prompt.split(`--profile ${walletA}`).length - 1, 3);
+    assert.ok(!prompt.includes(walletB));
+  }
+  await worker.stop();
+});
+
+test('missing public configuration retains critical events with an explicitly pinned data directory', async t => {
+  const f = await fixture(t); await f.configure();
+  await f.writeEvents([{ ...event(), type: 'rebalance-attention' }]);
+  const worker = await f.start();
+  await until(async () => (await f.status()).acceptedCount === 1);
+  const prompt = f.calls[0].args[4];
+  const command = `REBALANCE_DATA_DIR='${f.directory}' REBALANCE_PROFILE_PINNED=1 npm run cli --`;
+  assert.ok(prompt.includes(`${command} events`));
+  assert.ok(prompt.includes(`${command} status`));
+  assert.ok(prompt.includes(`${command} events ack event-1`));
+  assert.doesNotMatch(prompt, /--profile/);
+  await worker.stop();
 });
 
 test('connection-test events request only arrival reporting and exact acknowledgement', async t => {

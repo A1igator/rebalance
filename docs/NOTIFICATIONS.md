@@ -1,5 +1,7 @@
 # Same-session notifications and Remote Control
 
+All queue, filter, binding and delivery state is [per wallet](PORTFOLIOS.md). The legacy wallet keeps `.local/events.json`; additional wallets have separate queues under `.local/wallets/<address>/`. Codex prompts include the producing wallet and explicit `--profile` commands, so changing the conversation's connection cannot redirect an acknowledgement. Claude channels pin their wallet for their lifetime and select again on a normal reconnect.
+
 The local monitor records four kinds of operational events. Recording an event does not necessarily wake a chat:
 
 - `ledger-rebalance-needed`: drift needs attention. The current event hook is implemented; hardware readiness, connection/rejection handling and actual Ledger signing remain deferred. Its message explicitly says hardware setup is pending.

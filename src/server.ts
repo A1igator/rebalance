@@ -8,6 +8,7 @@ import { stringifyJson } from './storage.js';
 import { createGasDisplayReader, type GasDisplay } from './gas-display.js';
 import { GAS_REFERENCE } from './gas-reference.js';
 import { projectRebalanceFees } from './fee-projection.js';
+import { chartPort } from './chart-address.js';
 
 const assets = {
   '/': ['index.html', 'text/html; charset=utf-8'],
@@ -82,7 +83,8 @@ function streamStatus(response: ServerResponse, deps: ChartDependencies): void {
   }
 }
 
-export async function serve(port = 4663, overrides: Partial<ChartDependencies> = {}) {
+export async function serve(port = chartPort(), overrides: Partial<ChartDependencies> = {}) {
+  if (!Number.isInteger(port) || port < 0 || port > 65_535) throw new Error('Invalid chart port.');
   const deps: ChartDependencies = { dataDir: DATA, readStatus: status, readGas: createGasDisplayReader(), readConfig: loadConfig,
     watchChanges: (directory, listener) => watch(directory, listener), ...overrides };
   const server = createServer(async (request, response) => {
