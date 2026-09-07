@@ -5,6 +5,7 @@ import { getAddress, isAddress, type Address, type Hex } from 'viem';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { acquireLock, atomicWriteJson, readJson } from './storage.js';
 import { ASSETS } from './assets.js';
+import { validateManagedAllocation, type ManagedAllocation } from './allocation-management.js';
 
 export const DATA = resolve(process.env.REBALANCE_DATA_DIR || '.local');
 export const CONFIG_PATH = resolve(DATA, 'config.json');
@@ -20,6 +21,7 @@ export type Config = {
   mode: 'private-key' | 'privy' | 'ledger';
   rpcUrl: string;
   targets: Record<string, number>;
+  allocation?: ManagedAllocation;
   driftThresholdBps: number;
   slippageBps: number;
   deadlineSeconds: number;
@@ -54,6 +56,7 @@ export function validateConfig(value: unknown): Config {
   ] as const) {
     if (!Number.isInteger(c[name]) || c[name] < min || c[name] > max) throw new Error(`Invalid ${name} (${min}–${max})`);
   }
+  if (c.allocation !== undefined) c.allocation = validateManagedAllocation(c.allocation, c.targets);
   return { ...c, wallet: getAddress(c.wallet) };
 }
 

@@ -41,6 +41,12 @@ The initial live signer is `private-key` on Robinhood mainnet, chain ID 4663. Pr
 
 For Privy onboarding, use [Privy's official agent skill](https://agents.privy.io/skill.md) through the local `privy login` command; run it for the user. If it starts device authorization, prominently show the returned device code and browser approval link. Browser approval is the user's one-time action, not a per-trade prompt. Existing cached sessions are reused without logout; `privy status` does not validate server authorization. For explicitly requested reauthorization after a revoked session, follow the logout/device-login sequence in [the Privy guide](../../docs/PRIVY.md). Do not import/export credentials or replace the saved wallet on a login error. Register the Privy address with its own targets using `wallet add`, then connect the chat to it. The ordinary full launch handles that selected runner. Login itself never changes the selected portfolio or arms it. Privy signing and recovery run directly in code without an agent connection; native provider policy enforcement and live Robinhood acceptance remain unverified.
 
+## User-defined risk management
+
+For risk-adjusted allocation requests, read [the allocation guide](../../docs/ALLOCATION.md). User-selected, horizon-dependent asset risk is the main input. Volatility and other historical measures are optional; never override a user's long-term judgment with them. The agent captures explicit risk scores, return assumptions, horizon and constraints in a local policy JSON, then uses `allocation preview` and, for a requested policy change, `allocation set`. Do not invent missing beliefs or forecasts. Describe the full resolved policy and target split; no additional approval is needed when the user has already supplied or delegated the concrete change and execution is permitted.
+
+Call the subjective objective a user-risk score; standard Sharpe is a separate explicitly selected objective requiring a labelled aligned return panel. Frozen inputs recalculate on policy edits, and the existing local runner maintains the resulting targets without LLM input. Statistics supplied only for diagnostics never override user-risk ranking. The app currently has no history provider; spot quotes cannot substitute for returns. Synthetic panels are preview-only. `allocation status` reads the connected wallet's saved assumptions and calculation; `allocation manual` retains targets and removes the policy. Manual target commands disable it atomically. These scoped requests do not invoke full launch or arm a runner.
+
 ## Translate the requested operation
 
 | User intent | CLI |
@@ -54,6 +60,10 @@ For Privy onboarding, use [Privy's official agent skill](https://agents.privy.io
 | Read the cached public Privy wallet | `npm run cli -- privy status` |
 | Set the complete allocation | `npm run cli -- configure --targets USDG=20,AAPL=20,NVDA=20,MSFT=20,AMD=20` |
 | Change one existing target | `npm run cli -- targets set USDG 30` |
+| Preview a policy from user-supplied risk and return assumptions | `npm run cli -- allocation preview /absolute/path/to/policy.json` |
+| Save the requested risk policy and derived targets | `npm run cli -- allocation set /absolute/path/to/policy.json` |
+| Read this wallet's risk policy and calculation | `npm run cli -- allocation status` |
+| Keep targets and return to manual allocation | `npm run cli -- allocation manual` |
 | Inspect current holdings and preview the deterministic plan | `npm run cli -- check` |
 | Initialize and arm/reuse the app | `npm run cli -- launch` |
 | Initialize without starting an inactive trader | `npm run cli -- launch --setup-only` |

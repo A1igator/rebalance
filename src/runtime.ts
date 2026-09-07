@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { createChain, type RouteQuote } from './chain.js';
 import { DATA, STATE_PATH, PENDING_PATH, loadConfig, type Config } from './config.js';
+import { allocationSummary } from './allocation-management.js';
 import { planTrade, type Portfolio, type TradePlan } from './core.js';
 import { attentionCondition, ledgerCondition, rebalanceCompleted, transactionRecovered, type FailurePhase, type RebalanceAttention } from './events.js';
 import { automaticRecovery } from './recovery.js';
@@ -16,7 +17,7 @@ export const STOP_PATH = resolve(DATA, 'stop.json');
 export type Status = {
   app: 'Rebalance'; chain: { id: 4663; name: 'Robinhood' };
   mode: Config['mode'] | null; wallet: string | null;
-  config: { targets: Record<string, number>; rebalanceIntervalSeconds: number } | null;
+  config: { targets: Record<string, number>; rebalanceIntervalSeconds: number; allocation?: ReturnType<typeof allocationSummary> } | null;
   cycle: RebalanceCycle | null;
   portfolio: Portfolio | null;
   operation: Operation | null;
@@ -56,7 +57,8 @@ export async function status(): Promise<Status> {
     if (saved?.wallet?.toLowerCase() === config.wallet.toLowerCase()) Object.assign(state, saved);
     state.wallet = config.wallet;
     state.mode = config.mode;
-    state.config = { targets: config.targets, rebalanceIntervalSeconds: config.rebalanceIntervalSeconds };
+    state.config = { targets: config.targets, rebalanceIntervalSeconds: config.rebalanceIntervalSeconds,
+      ...(config.allocation ? { allocation: allocationSummary(config) } : {}) };
     state.portfolio = withCurrentTargets(state.portfolio, config);
     if (!state.portfolio) {
       state.updatedAt = null;
@@ -120,7 +122,8 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
     // to reopen. Its original timestamp remains the chart's freshness signal.
     const retained = withCurrentTargets(previous.portfolio, configured);
     Object.assign(state, {
-      wallet: configured.wallet, mode: configured.mode, config: { targets: configured.targets, rebalanceIntervalSeconds: configured.rebalanceIntervalSeconds },
+      wallet: configured.wallet, mode: configured.mode, config: { targets: configured.targets, rebalanceIntervalSeconds: configured.rebalanceIntervalSeconds,
+        ...(configured.allocation ? { allocation: allocationSummary(configured) } : {}) },
       cycle: previous.cycle ?? null,
       portfolio: retained, updatedAt: retained ? previous.updatedAt : null,
       nativeBalance: retained ? previous.nativeBalance : undefined, blockNumber: retained ? previous.blockNumber : undefined,
@@ -141,7 +144,8 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
       config = loaded;
       state.mode = config.mode;
       state.wallet = config.wallet;
-      state.config = { targets: config.targets, rebalanceIntervalSeconds: config.rebalanceIntervalSeconds };
+      state.config = { targets: config.targets, rebalanceIntervalSeconds: config.rebalanceIntervalSeconds,
+        ...(config.allocation ? { allocation: allocationSummary(config) } : {}) };
       state.armed = execute;
       chain = chainFor(config);
       return true;

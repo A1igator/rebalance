@@ -10,6 +10,8 @@ import { ASSETS } from './assets.js';
 import { createChain, ROBINHOOD } from './chain.js';
 import { CONFIG_PATH, DATA, PENDING_PATH, createWallet, loadConfig, parseTargets, percentToBps, validateConfig, type Config } from './config.js';
 import { redistributeTargets } from './core.js';
+import { readCycle } from './cadence.js';
+import { allocationStatus, previewAllocation, readAllocationInput, withAllocation, withoutAllocation } from './allocation-management.js';
 import { GRAPH } from './graph.js';
 import { events, acknowledgeEvent, publishEvent } from './events.js';
 import { STOP_PATH, monitor, status, tick } from './runtime.js';
@@ -41,6 +43,10 @@ const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
     [--threshold 5] [--slippage 0.5] [--poll 30] [--rebalance-interval-seconds 3600]
   targets set AAPL 30                   Change one percentage; redistribute the rest
   targets replace <ASSET=percent,...>   Replace all five targets explicitly
+  allocation preview <policy.json>      Calculate targets from explicit inputs; no changes
+  allocation set <policy.json>          Save per-wallet policy and calculated targets together
+  allocation status                    Read policy, assumptions and last calculation
+  allocation manual                    Keep current targets; remove the allocation policy
   check                                Fresh read/plan/quote; never sign
   launch [--setup-only]                 Prepare/reuse chart and arm/reuse the runner
     [--targets <ASSET=percent,...>]      Initial allocation only; preserve saved targets
@@ -285,6 +291,43 @@ async function main() {
       if (args[1] === 'ack' && args[2]) { await acknowledgeEvent(args[2]); print({ acknowledged: args[2] }); }
       else print(await events());
       return;
+    case 'allocation': {
+      const action = args[1];
+      if (!action || !['preview', 'set', 'status', 'manual'].includes(action) ||
+          args.length !== (['preview', 'set'].includes(action) ? 3 : 2)) {
+        throw new Error('Use allocation preview/set <policy.json>, allocation status or allocation manual');
+      }
+      for (const [name, value] of Object.entries(values)) {
+        if (value !== undefined && value !== false) throw new Error(`--${name} does not apply to allocation commands`);
+      }
+      if (action === 'status') { print(allocationStatus(await requiredConfig())); return; }
+      if (action === 'preview') {
+        print(previewAllocation(await requiredConfig(), await readAllocationInput(args[2]!))); return;
+      }
+      // Read a bounded input once before taking the lock, then calculate against
+      // the latest config while serialized with every manual target operation.
+      const input = action === 'set' ? await readAllocationInput(args[2]!) : null;
+      await inLock('config.lock', async () => {
+        const config = await requiredConfig();
+        if (action === 'manual') {
+          const manual = withoutAllocation(config);
+          await atomicWriteJson(CONFIG_PATH, manual);
+          print(allocationStatus(manual)); return;
+        }
+        const assertAdoptionReady = async () => {
+          if (await readJson(PENDING_PATH)) throw new Error('Reconcile the pending operation before adopting an allocation policy');
+          const cycle = await readCycle();
+          if (cycle && cycle.activeUntil > Date.now()) throw new Error('Wait for the active rebalance cycle before adopting an allocation policy');
+        };
+        await assertAdoptionReady();
+        const next = validateConfig(withAllocation(config, input));
+        // Dispatch shares config.lock and checks its captured config. Cycle
+        // preparation can precede that lock, so recheck after the calculation.
+        await assertAdoptionReady();
+        await atomicWriteJson(CONFIG_PATH, next);
+        print({ ...allocationStatus(next), effective: 'next graph evaluation; existing cycle timing is preserved' });
+      }); return;
+    }
     case 'configure':
       await inLock('config.lock', async () => {
         if (await readJson(PENDING_PATH)) throw new Error('Reconcile the pending operation before changing wallet or configuration');
@@ -296,12 +339,13 @@ async function main() {
           throw new Error('Stop this wallet runner before changing its signing mode.');
         }
         const wallet = await readJson<{ address: string }>(resolve(DATA, 'wallet.json'));
-        if (!values.targets && !previous) throw new Error('Specify the target percentages');
+        if (values.targets === undefined && !previous) throw new Error('Specify the target percentages');
         const config = validateConfig({ version: 1, chainId: 4663,
           wallet: values.wallet ?? previous?.wallet ?? wallet?.address,
           mode: values.mode ?? previous?.mode ?? 'private-key',
           rpcUrl: values.rpc ?? previous?.rpcUrl ?? ROBINHOOD.rpcUrls.default.http[0],
-          targets: values.targets ? parseTargets(values.targets) : previous?.targets,
+          targets: values.targets !== undefined ? parseTargets(values.targets) : previous?.targets,
+          ...(values.targets === undefined && previous?.allocation ? { allocation: previous.allocation } : {}),
           driftThresholdBps: values.threshold ? percentToBps(values.threshold) : previous?.driftThresholdBps ?? 500,
           slippageBps: values.slippage ? percentToBps(values.slippage) : previous?.slippageBps ?? 50,
           deadlineSeconds: previous?.deadlineSeconds ?? 120,
@@ -323,7 +367,7 @@ async function main() {
         if (args[1] === 'set' && args[2] && args[3]) targets = redistributeTargets(config.targets, args[2], percentToBps(args[3]));
         else if (args[1] === 'replace' && args[2]) targets = parseTargets(args[2]);
         else throw new Error('Use targets set AAPL 30 or targets replace with all five percentages');
-        await atomicWriteJson(CONFIG_PATH, validateConfig({ ...config, targets }));
+        await atomicWriteJson(CONFIG_PATH, validateConfig({ ...withoutAllocation(config), targets }));
         print({ targets, effective: 'next graph evaluation; an already-broadcast transaction still settles' });
       }); return;
     case 'check':

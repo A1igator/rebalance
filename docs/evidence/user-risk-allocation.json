@@ -1,0 +1,47 @@
+{
+  "date": "2026-09-07",
+  "feature": "Per-wallet user-defined risk allocation with an explicitly selected historical Sharpe alternative",
+  "preimplementationPlan": "docs/prompts/040-user-defined-risk-allocation.md",
+  "validation": {
+    "fullSuite": {
+      "passed": 545,
+      "failed": 0,
+      "skipped": 0
+    },
+    "focusedCliAfterEmptyTargetCorrection": {
+      "passed": 6,
+      "failed": 0
+    },
+    "typecheck": "passed",
+    "skillValidator": "passed",
+    "whitespace": "passed",
+    "localDocumentationLinks": "passed"
+  },
+  "solver": {
+    "name": "grid-v1",
+    "maximumCandidates": 5000000,
+    "integerTotalBps": 10000,
+    "tieBreak": "score tolerance, minimum target turnover, sorted asset weights",
+    "inputs": "explicit user assumptions; optional labelled aligned return panel"
+  },
+  "scope": {
+    "newDependencies": 0,
+    "livePolicyInstalled": false,
+    "liveTargetsEdited": false,
+    "fundedRunnerStartedOrRestarted": false,
+    "historicalDataProviderAdded": false,
+    "newModelScheduleAdded": false,
+    "liveKeysOrCredentialsInspected": false,
+    "liveSignaturesOrTransactionsSubmitted": false
+  },
+  "readOnlyCheck": {
+    "existingPortfolioAllocationMode": "manual",
+    "savedTargetsMatchPriorDemo": true
+  },
+  "limitations": [
+    "Optimization is best within the specified grid plus feasible incumbent and user model, not a future-performance guarantee.",
+    "Historical inputs are supplied explicitly; no verified market-history feed exists in the app.",
+    "Historical diagnostics use constant weights per observation and omit execution costs.",
+    "User risk scores are subjective points, not calibrated loss probabilities."
+  ]
+}

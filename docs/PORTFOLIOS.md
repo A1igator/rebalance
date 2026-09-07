@@ -46,3 +46,6 @@ Notification bindings remain per wallet. Connecting a different chat does not st
 ## Validation
 
 Isolated tests cover different allocations and state, two simultaneous background workers without real network/signing, independent stop behavior, separate chart HTTP/SSE streams, chat selection and explicit scope, source-wallet acknowledgement, native replay affinity, missing/corrupt configuration and duplicate identity rejection. Production migration checks use only public state and setup-only chart work. Registering an unfunded wallet or showing its targets is not a live swap or successful provider authorization.
+
+
+Risk-based allocation is also wallet-scoped. `allocation preview/set/status/manual` use the same chat attachment or explicit `--profile` routing. Policy inputs, adopted targets and calculation provenance are one local configuration revision per wallet; changing the chat connection does not change that revision. Read [the allocation guide](ALLOCATION.md) for subjective risk and optional statistical inputs.
