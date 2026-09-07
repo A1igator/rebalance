@@ -25,7 +25,10 @@
       <p id="setup-description">Choose how to sign. Setup finishes here after any browser or device approval.</p>
       <div class="signer-options">
         <button id="setup-private-key" class="signer-option" type="button"><strong>Local key</strong><span>A wallet managed on this computer</span></button>
-        <button id="setup-privy" class="signer-option" type="button"><strong>Connect Privy wallet</strong><span>Uses your signed-in Privy wallet</span></button>
+        <div id="privy-choice" class="privy-choice" role="group" tabindex="-1" data-limited="false">
+          <button id="setup-privy" class="signer-option" type="button"><strong>Privy</strong><span>Your Agent Sandbox wallet</span></button>
+          <span id="privy-limit" class="privy-limit" role="tooltip">Privy Agent Sandbox supports one Ethereum wallet per account. Your Privy wallet is already added.</span>
+        </div>
         <button id="setup-ledger" class="signer-option" type="button"><strong>Ledger</strong><span>Verify an account on your Ledger</span></button>
       </div>
       <p id="setup-status" class="setup-status" role="status"></p>

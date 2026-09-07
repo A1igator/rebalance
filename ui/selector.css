@@ -53,3 +53,12 @@ h2 { margin: 0; font-size: 23px; font-weight: 500; letter-spacing: -.7px; }
 [hidden] { display: none !important; }
 @media (max-width: 400px) { main { padding: 12px; } .portfolio-grid { gap: 10px; } .portfolio-card { padding: 10px; } }
 @media (prefers-reduced-motion: reduce) { .portfolio-card { transition: none; } }
+
+.privy-choice { position: relative; min-width: 0; }
+.privy-choice > button { width: 100%; }
+.privy-choice[data-limited="true"] { cursor: not-allowed; }
+.privy-choice[data-limited="true"] > button { pointer-events: none; }
+.privy-choice:focus-visible { outline: 2px solid #b4cbb8; outline-offset: 4px; border-radius: 9px; }
+.privy-limit { display: none; position: absolute; z-index: 1; left: 12px; right: 12px; top: calc(100% + 6px); padding: 10px 12px; border: 1px solid #617669; border-radius: 8px; background: #233027; color: #eef3ef; font-size: 12px; line-height: 1.5; pointer-events: none; }
+.privy-choice[data-limited="true"]:hover .privy-limit,
+.privy-choice[data-limited="true"]:focus-visible .privy-limit { display: block; }

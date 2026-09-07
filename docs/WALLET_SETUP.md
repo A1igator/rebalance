@@ -16,9 +16,9 @@ The original funded standalone wallet stays intact. Its old randomly generated p
 
 The pinned official Privy CLI reuses its cached first Ethereum wallet. If sign-in is needed, it opens the official approval page in the system browser. The dialog displays the same approval URL and user code as a fallback. Complete provider authentication there; the app finishes registration after the CLI succeeds. Nothing asks for a private key in chat.
 
-The CLI provides one signed-in Ethereum wallet, not a new wallet selector on every click. Choosing Privy again explains that its wallet is already added and offers **Open existing portfolio**; it does not redirect automatically. It does not log out or replace credentials automatically. A cached address is not proof of current service authorization. See [Privy implementation and validation](PRIVY.md).
+The CLI provides one signed-in Ethereum wallet, not a new wallet selector on every click. Once a Privy portfolio exists, the option is disabled and its hover tooltip explains the limit. An older in-flight setup returning the same wallet still offers **Open existing portfolio** instead of redirecting automatically. It does not log out or replace credentials automatically. A cached address is not proof of current service authorization. See [Privy implementation and validation](PRIVY.md).
 
-Privy itself supports additional embedded wallets through a separate app SDK integration with `createWallet({createAdditional: true})` and explicit wallet selection. Those features are not exposed by the selected Agent Sandbox CLI. Logout/relogin is not an additional-wallet creation method. [Official HD wallet documentation](https://docs.privy.io/recipes/hd-wallets).
+The human explicitly requires **agents.privy.io exclusively**, with no developer dashboard, app secret or alternate app integration. A fresh inspection of the Sandbox website and official skill on September 7 also found no supported additional-Ethereum-wallet control: its wallet page selects the first linked Ethereum/Solana wallet, creates on login only for users without wallets, and My agents manages device sessions. Generic additional-wallet functions inside the bundled SDK are not exposed Sandbox features and must not be invoked as a workaround. Logout/relogin is not a documented additional-wallet creation method. Keep the existing portfolio/session and report this limitation; do not pretend that opening it creates another wallet. [Agent Sandbox](https://agents.privy.io), [official skill](https://agents.privy.io/skill.md), [My agents](https://agents.privy.io/manage).
 
 ## Ledger
 
@@ -33,3 +33,6 @@ Each click has a conversation-scoped request ID. Double delivery and the dialog'
 Requests require the existing local view capability and same-origin JSON. Read-only status and event streams never begin or retry setup. New setup progress bypasses both model transports. Older model-directed setup records remain available only for compatibility; new clicks do not populate that queue.
 
 Tests use temporary roots, disposable mnemonic vectors and fake provider/device processes. They do not demonstrate a real Privy login, hardware verification or live swap.
+
+
+The New portfolio dialog disables Privy once a Privy portfolio is registered. Hovering the disabled choice (or focusing its wrapper with the keyboard) explains the current Sandbox one-Ethereum-wallet limit. The existing Privy portfolio card stays available. Live portfolio snapshots refresh this state, while the click handler also refuses a duplicate setup request. The explanation stays in the tooltip rather than adding persistent text outside the choices.

@@ -10,6 +10,7 @@ const portfolios = [
   { wallet: walletA, chainId: 4663, mode: 'ledger', targets, running: true, chartUrl: 'http://127.0.0.1:4663/chart' },
   { wallet: walletB, chainId: 4663, mode: 'privy', targets, running: false, chartUrl: 'http://127.0.0.1:4664/chart', allocationObjective: 'user-risk' },
 ];
+const noPrivyPortfolios = portfolios.filter(portfolio => portfolio.mode !== 'privy');
 type Reply = { ok: boolean; status?: number; json: () => Promise<unknown>; body?: ReadableStream<Uint8Array> };
 type Call = { url: string; body?: Record<string, unknown>; signal?: AbortSignal; method?: string };
 const ok = (value: unknown): Reply => ({ ok: true, status: 200, json: async () => value });
@@ -29,7 +30,7 @@ class Node {
   close() { this.open = false; for (const fn of this.handlers.get('close') || []) fn(); }
 }
 function content(node: Node): string { return [node.textContent, ...node.children.map(content)].filter(Boolean).join(' '); }
-async function browser(options: { hash?: string; pathname?: string; client?: boolean; selector?: boolean; reply?: (call: Call) => Promise<Reply | undefined> } = {}) {
+async function browser(options: { hash?: string; pathname?: string; client?: boolean; selector?: boolean; registry?: typeof portfolios; reply?: (call: Call) => Promise<Reply | undefined> } = {}) {
   const elements = new Map<string, Node>(), lifecycle = new Map<string, (() => void)[]>(), timers = new Map<number, () => void>();
   const calls: Call[] = [], navigations: string[] = [], streams: ReadableStreamDefaultController<Uint8Array>[] = [], setupStreams: ReadableStreamDefaultController<Uint8Array>[] = [];
   let timerId = 0, uuidCalls = 0;
@@ -57,7 +58,7 @@ async function browser(options: { hash?: string; pathname?: string; client?: boo
         return { ...ok(null), body };
       }
       if (url === '/api/view') return ok({ connectedWallet: walletA, canSetup: true });
-      if (url === '/api/portfolios') return ok({ portfolios });
+      if (url === '/api/portfolios') return ok({ portfolios: options.registry ?? portfolios });
       if (url === '/api/connect') return ok({ wallet: call.body?.wallet, chartUrl: portfolios.find(p => p.wallet === call.body?.wallet)?.chartUrl, tradingChanged: false });
       if (url === '/api/setup') return ok({ state: 'preparing', mode: call.body?.mode, requestId: call.body?.requestId, message: 'Preparing your wallet…', tradingChanged: false });
       throw new Error(`Unexpected request ${url}`);
@@ -158,7 +159,7 @@ const approval = { url: 'https://agents.privy.io/?user_code=ABC12-XYZ34', code: 
 
 test('setup submits only the selected signer once and follows local progress without any model queue', async () => {
   for (const mode of ['private-key', 'privy', 'ledger']) {
-    const page = await browser();
+    const page = await browser({ registry: noPrivyPortfolios });
     await page.click(page.cards().at(-1)!); await page.click(page.byId(`setup-${mode}`));
     await page.click(page.byId(`setup-${mode}`));
     const setup = page.calls.filter(c => c.url === '/api/setup');
@@ -186,7 +187,7 @@ test('setup submits only the selected signer once and follows local progress wit
 });
 
 test('Ledger physical address approval needs no Privy URL and does not imply a signing request', async () => {
-  const page = await browser();
+  const page = await browser({ registry: noPrivyPortfolios });
   await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-ledger'));
   await page.sendSetup(setupResult('ledger', 'awaiting-approval', { message: 'Verify and approve this address on your Ledger.' }));
   assert.match(page.byId('setup-status').textContent, /Verify and approve this address/);
@@ -201,7 +202,7 @@ test('Ledger physical address approval needs no Privy URL and does not imply a s
 
 test('failed, offline and unverified setup keep the exact same UUID and signer on explicit retry', async () => {
   for (const state of ['failed', 'offline', 'uncertain']) {
-    const page = await browser({ reply: async call => call.url === '/api/setup' ? state === 'offline'
+    const page = await browser({ registry: noPrivyPortfolios, reply: async call => call.url === '/api/setup' ? state === 'offline'
       ? { ok: false, status: 503, json: async () => ({ error: 'PRIVATE native failure' }) }
       : ok(setupResult('privy', state, { message: 'Complete sign-in or try again.' })) : undefined });
     await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-privy'));
@@ -218,7 +219,7 @@ test('failed, offline and unverified setup keep the exact same UUID and signer o
 
 test('ready setup connects through the existing path and navigates only after verified connection', async () => {
   let finish!: (value: Reply) => void;
-  const page = await browser({ reply: async call => call.url === '/api/connect' ? new Promise(resolve => { finish = resolve; }) : undefined });
+  const page = await browser({ registry: noPrivyPortfolios, reply: async call => call.url === '/api/connect' ? new Promise(resolve => { finish = resolve; }) : undefined });
   await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-privy'));
   await page.sendSetup(setupResult('privy', 'awaiting-approval', { approval }));
   await page.sendSetup(setupResult('privy', 'ready', { wallet: walletB, chartUrl: portfolios[1]!.chartUrl, reused: false }));
@@ -236,7 +237,7 @@ test('ready setup connects through the existing path and navigates only after ve
 test('Privy reuse stays in the dialog and connects only after an explicit open, for initial or streamed results', async () => {
   for (const immediate of [true, false]) {
     const ready = setupResult('privy', 'ready', { wallet: walletB, chartUrl: portfolios[1]!.chartUrl, reused: true });
-    const page = await browser({ reply: async call => immediate && call.url === '/api/setup' ? ok(ready) : undefined });
+    const page = await browser({ registry: noPrivyPortfolios, reply: async call => immediate && call.url === '/api/setup' ? ok(ready) : undefined });
     await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-privy'));
     if (!immediate) await page.sendSetup(ready);
     assert.equal(page.calls.some(c => c.url === '/api/setup/events'), !immediate);
@@ -255,7 +256,7 @@ test('Privy reuse stays in the dialog and connects only after an explicit open, 
 });
 
 test('dismissed Privy reuse cannot connect, and a reopened setup clears the previous open action', async () => {
-  const page = await browser();
+  const page = await browser({ registry: noPrivyPortfolios });
   await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-privy'));
   await page.click(page.byId('close-setup'));
   await page.sendSetup(setupResult('privy', 'ready', { wallet: walletB, chartUrl: portfolios[1]!.chartUrl, reused: true }));
@@ -270,7 +271,7 @@ test('dismissed Privy reuse cannot connect, and a reopened setup clears the prev
 });
 
 test('closing setup adds the ready wallet without changing attachment; reopening permits a new request', async () => {
-  const page = await browser();
+  const page = await browser({ registry: noPrivyPortfolios });
   await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-privy'));
   await page.click(page.byId('close-setup'));
   await page.sendSetup(setupResult('privy', 'ready', { wallet: walletB, chartUrl: portfolios[1]!.chartUrl }));
@@ -284,8 +285,8 @@ test('closing setup adds the ready wallet without changing attachment; reopening
 });
 
 test('later agent selection prevents setup completion from stealing attachment while dialog stays open', async () => {
-  const page = await browser();
-  await page.send(snapshot(walletA));
+  const page = await browser({ registry: noPrivyPortfolios });
+  await page.send(snapshot(walletA, noPrivyPortfolios));
   await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-privy'));
   await page.send(snapshot(walletB));
   assert.equal(page.byId('setup-dialog').open, true);
@@ -298,7 +299,7 @@ test('later agent selection prevents setup completion from stealing attachment w
 
 test('a changed first stream snapshot also wins over a delayed initial setup response', async () => {
   let finish!: (value: Reply) => void;
-  const page = await browser({ reply: async call => call.url === '/api/setup' ? new Promise(resolve => { finish = resolve; }) : undefined });
+  const page = await browser({ registry: noPrivyPortfolios, reply: async call => call.url === '/api/setup' ? new Promise(resolve => { finish = resolve; }) : undefined });
   await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-privy'));
   await page.send(snapshot(walletB));
   finish(ok(setupResult('privy', 'ready', { wallet: walletC, chartUrl: 'http://127.0.0.1:4665/chart' }))); await flush();
@@ -316,7 +317,7 @@ test('invalid setup identities, states and ready destinations never connect or n
     { state: 'ready', wallet: 'bad-wallet', chartUrl: portfolios[1]!.chartUrl },
     { state: 'ready', wallet: walletB, chartUrl: portfolios[1]!.chartUrl, reused: 'yes' },
   ]) {
-    const page = await browser({ reply: async call => call.url === '/api/setup' ? ok(setupResult('privy', 'preparing', changed)) : undefined });
+    const page = await browser({ registry: noPrivyPortfolios, reply: async call => call.url === '/api/setup' ? ok(setupResult('privy', 'preparing', changed)) : undefined });
     await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-privy'));
     assert.match(page.byId('setup-status').textContent, /progress is unavailable/);
     assert.equal(page.byId('retry-setup').hidden, false);
@@ -337,7 +338,7 @@ test('only the matching official Privy code link can be shown in the approval di
     { url: 'https://agents.privy.io/?user_code=ABC12-XYZ34&access_token=secret' },
     { code: 'WRONG-CODE' }, { code: '<script>secret</script>' },
   ]) {
-    const page = await browser();
+    const page = await browser({ registry: noPrivyPortfolios });
     await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-privy'));
     await page.sendSetup(setupResult('privy', 'awaiting-approval', { approval: { ...approval, ...changed } }));
     assert.match(page.byId('setup-status').textContent, /progress is unavailable/);
@@ -351,7 +352,7 @@ test('only the matching official Privy code link can be shown in the approval di
 
 test('failed or interrupted setup streams finish cleanly and retry the same request without healthy polling', async () => {
   for (const failed of [true, false]) {
-    const page = await browser();
+    const page = await browser({ registry: noPrivyPortfolios });
     await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-ledger'));
     if (failed) await page.sendSetup(setupResult('ledger', 'failed', { message: 'Unlock Ledger and try again.' }));
     else { page.setupStreams.at(-1)!.close(); await flush(); }
@@ -366,7 +367,7 @@ test('failed or interrupted setup streams finish cleanly and retry the same requ
 });
 
 test('page suspension aborts setup streaming and restores its read-only stream without resubmitting or stealing selection', async () => {
-  const page = await browser();
+  const page = await browser({ registry: noPrivyPortfolios });
   await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-privy'));
   await page.hide();
   assert.equal(page.calls.find(c => c.url === '/api/setup/events')!.signal!.aborted, true);
@@ -491,4 +492,87 @@ test('both entry pages load the shared watcher, and chart Back retains only a va
     runInNewContext(navigation, { document: { getElementById: () => link }, window: { location: { hash } } });
     assert.equal(link.attrs.href, expected);
   }
+});
+
+
+test('an existing Privy portfolio disables its New option and guards direct activation without creating a request', async () => {
+  const page = await browser();
+  await page.click(page.cards().at(-1)!);
+  const choice = page.byId('setup-privy');
+  assert.equal(choice.disabled, true);
+  assert.equal(page.byId('privy-choice').attrs['data-limited'], 'true');
+  assert.equal(page.byId('privy-choice').attrs.tabindex, '0');
+  assert.equal(page.byId('privy-choice').attrs['aria-describedby'], 'privy-limit');
+  await page.click(choice);
+  for (const handler of choice.handlers.get('click') || []) handler();
+  await flush();
+  assert.equal(page.uuidCalls, 0);
+  assert.equal(page.calls.some(call => call.url === '/api/setup' || call.url === '/api/setup/events'), false);
+  assert.equal(page.navigations.length, 0);
+  assert.equal(page.byId('setup-private-key').disabled, false);
+  assert.equal(page.byId('setup-ledger').disabled, false);
+  await page.click(page.byId('close-setup'));
+  await page.click(page.cards()[1]!);
+  assert.deepEqual(page.calls.find(call => call.url === '/api/connect')!.body, { token, wallet: walletB });
+  assert.deepEqual(page.navigations, [`http://127.0.0.1:4664/chart${fragment}`]);
+  await page.hide();
+});
+
+test('Privy availability follows streamed registry changes while the New dialog is open', async () => {
+  const page = await browser({ registry: noPrivyPortfolios });
+  await page.click(page.cards().at(-1)!);
+  assert.equal(page.byId('setup-privy').disabled, false);
+  assert.notEqual(page.byId('privy-choice').attrs['data-limited'], 'true');
+  await page.send(snapshot(walletA));
+  assert.equal(page.byId('setup-dialog').open, true);
+  assert.equal(page.byId('setup-privy').disabled, true);
+  assert.equal(page.byId('privy-choice').attrs['data-limited'], 'true');
+  await page.click(page.byId('setup-privy'));
+  assert.equal(page.uuidCalls, 0); assert.equal(page.calls.some(call => call.url === '/api/setup'), false);
+  await page.send(snapshot(walletA, noPrivyPortfolios));
+  assert.equal(page.byId('setup-privy').disabled, false);
+  assert.notEqual(page.byId('privy-choice').attrs['data-limited'], 'true');
+  assert.equal(page.byId('privy-choice').attrs.tabindex, '-1');
+  assert.notEqual(page.byId('privy-choice').attrs['aria-describedby'], 'privy-limit');
+  await page.click(page.byId('setup-privy'));
+  assert.equal(page.uuidCalls, 1);
+  assert.deepEqual(page.calls.find(call => call.url === '/api/setup')!.body, { token, mode: 'privy', requestId });
+  assert.equal(page.navigations.length, 0);
+  await page.hide();
+});
+
+test('Privy limit leaves local-key and Ledger onboarding available', async () => {
+  for (const mode of ['private-key', 'ledger']) {
+    const page = await browser();
+    await page.click(page.cards().at(-1)!);
+    assert.equal(page.byId('setup-privy').disabled, true);
+    assert.equal(page.byId(`setup-${mode}`).disabled, false);
+    await page.click(page.byId(`setup-${mode}`));
+    assert.equal(page.uuidCalls, 1);
+    assert.deepEqual(page.calls.filter(call => call.url === '/api/setup').map(call => call.body), [{ token, mode, requestId }]);
+    await page.hide();
+  }
+});
+
+test('a stale initial registry cannot re-enable Privy after a live snapshot reports it added', async () => {
+  let finish!: (value: Reply) => void;
+  const page = await browser({ reply: async call => call.url === '/api/portfolios' ? new Promise(resolve => { finish = resolve; }) : undefined });
+  await page.send(snapshot(walletA));
+  await page.click(page.cards().at(-1)!);
+  assert.equal(page.byId('setup-privy').disabled, true);
+  finish(ok({ portfolios: noPrivyPortfolios })); await flush();
+  assert.equal(page.byId('setup-privy').disabled, true);
+  assert.equal(page.byId('privy-choice').attrs['data-limited'], 'true');
+  await page.click(page.byId('setup-privy'));
+  assert.equal(page.uuidCalls, 0); assert.equal(page.calls.some(call => call.url === '/api/setup'), false);
+  await page.hide();
+});
+
+
+test('the disabled Privy option explains the existing-wallet limit on hover and keyboard focus', async () => {
+  const [html, css] = await Promise.all(['selector.html', 'selector.css'].map(file => readFile(new URL(`../ui/${file}`, import.meta.url), 'utf8')));
+  assert.match(html!, /id="privy-choice"[^>]*role="group"/);
+  assert.match(html!, /id="privy-limit"[^>]*role="tooltip">Privy Agent Sandbox supports one Ethereum wallet per account\. Your Privy wallet is already added\.<\/span>/);
+  assert.match(css!, /\.privy-limit\s*\{[^}]*display:\s*none/);
+  assert.match(css!, /\.privy-choice\[data-limited="true"\]:hover \.privy-limit\s*,\s*\.privy-choice\[data-limited="true"\]:focus-visible \.privy-limit\s*\{\s*display:\s*block/);
 });

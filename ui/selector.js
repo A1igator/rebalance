@@ -52,8 +52,14 @@
       return (left < 0 ? assetOrder.length : left) - (right < 0 ? assetOrder.length : right) || a.localeCompare(b);
     });
   }
+  const hasPrivyPortfolio = () => portfolios.some(portfolio => portfolio.mode === "privy");
   function setSetupButtons() {
-    for (const mode of Object.keys(modes)) byId(`setup-${mode}`).disabled = !canSetup || setupBusy || Boolean(setupRequest);
+    const privyAdded = hasPrivyPortfolio();
+    for (const mode of Object.keys(modes)) byId(`setup-${mode}`).disabled = !canSetup || setupBusy || Boolean(setupRequest) || mode === "privy" && privyAdded;
+    byId("privy-choice").setAttribute("data-limited", String(privyAdded));
+    byId("privy-choice").setAttribute("aria-describedby", privyAdded ? "privy-limit" : "");
+    byId("privy-choice").setAttribute("tabindex", privyAdded ? "0" : "-1");
+    byId("privy-choice").setAttribute("aria-label", privyAdded ? "Privy unavailable: wallet already added" : "Privy wallet");
     byId("retry-setup").disabled = setupBusy;
     byId("open-existing-portfolio").disabled = !authorized || connecting || !setupExisting;
   }
@@ -86,6 +92,7 @@
     }
   }
   function render() {
+    setSetupButtons();
     const grid = byId("portfolio-grid");
     grid.replaceChildren();
     for (const portfolio of portfolios) {
@@ -283,7 +290,7 @@
     } catch { if (setupRequest === expected) setupUnavailable(); }
   }
   for (const mode of Object.keys(modes)) byId(`setup-${mode}`).addEventListener("click", () => {
-    if (!canSetup || setupBusy || setupRequest) return;
+    if (!canSetup || setupBusy || setupRequest || mode === "privy" && hasPrivyPortfolio()) return;
     setupRequest = { mode, requestId: crypto.randomUUID(), revision: connectionRevision };
     setupAttachmentAllowed = true;
     void submitSetup();

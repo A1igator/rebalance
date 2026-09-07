@@ -135,3 +135,8 @@ An optional per-wallet policy now derives target weights from the user's explici
 ## Direct wallet setup and shared local seed — September 7 update
 
 [Prompt 047](docs/prompts/047-deterministic-wallet-onboarding.md) supersedes the model-directed New portfolio flow. The companion starts a local job for each signer choice: one shared local seed with consecutive browser-wallet accounts, the official Privy sign-in flow, or Ledger account-address verification on the existing device seed. File events deliver progress directly to the view. Repeated requests resume the same account; successful setup registers an unarmed portfolio and connects only the still-active conversation view. Existing portfolios and targets remain intact. See [setup semantics](docs/WALLET_SETUP.md); real Ledger hardware verification and new Privy login remain integration checks, not inferred test results.
+
+
+## Privy provider scope — September 7 correction
+
+The human requires agents.privy.io exclusively. The proposed developer-app API path in [prompt 049](docs/prompts/049-additional-privy-wallets.md) was withdrawn and its uncommitted implementation removed. Keep the existing Agent Sandbox signer/session; no developer dashboard or app secrets are part of this project. The current Sandbox website and CLI expose no verified additional-Ethereum-wallet creation flow. Clearly describe connection/reuse and preserve existing wallets rather than claiming new wallet creation. See [the Privy guide](docs/PRIVY.md).
