@@ -39,17 +39,20 @@ async function main() {
   const explicit = option(args, '--profile');
   const sessionId = sessionIdentity(option(args, '--session'));
   const root = portfolioRoot();
+  if (args[0] === 'view') {
+    if (args.length !== 1) throw new Error('Use view with optional --profile and --session.');
+    const { prepareView } = await import('./view.js');
+    print(await prepareView(root, sessionId, explicit)); return;
+  }
   if (args[0] === 'wallet' && ['list','add','connect'].includes(args[1] ?? '')) {
     const { portfolios, addPortfolio, connectPortfolio } = await import('./profiles.js');
     if (args[1] === 'list') { if (args.length !== 2) throw new Error('Use wallet list'); print({ portfolios: await portfolios(root), sessionId: sessionId ?? null }); return; }
     if (args[1] === 'connect') {
       if (args.length !== 3 || !sessionId) throw new Error('Use wallet connect <address> with this conversation’s --session identity.');
-      const connected = await connectPortfolio(root, sessionId, args[2]!);
-      const profile = await resolveProfile(root, { wallet: args[2] });
+      const { prepareView } = await import('./view.js');
       // Connection can prepare the view, but never arms or stops a trading runner.
-      let view: unknown;
-      try { view = await child(['launch','--setup-only'], profile, sessionId); }
-      catch { view = { outcome: 'unavailable', message: 'Connection saved; chart readiness is unverified.' }; }
+      const view = await prepareView(root, sessionId, args[2]);
+      const connected = await connectPortfolio(root, sessionId, args[2]!);
       print({ ...connected, view }); return;
     }
     const wallet = option(args, '--wallet'); const mode = option(args, '--mode'); const targets = option(args, '--targets');

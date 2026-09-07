@@ -4,7 +4,7 @@ import { access, mkdir, open, readFile, realpath, rename, rm, writeFile } from '
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { portfolioRoot, resolveProfile, sessionIdentity } from './profile-routing.mjs';
+import { portfolioRoot, resolveProfile, sessionIdentity, readProfiles, connectionPath, readRoutingJson } from './profile-routing.mjs';
 
 const executeFile = promisify(execFile);
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -187,6 +187,11 @@ async function runCommand(root, command, requestId, expectedStop, profile) {
 }
 
 function validateRoute(value, rootDir, selected) {
+  if (value?.selectionRequired === true) {
+    if (value.version !== 1 || value.requestId !== selected.requestId || value.sessionId !== selected.sessionId ||
+        Object.keys(value).some(key => !['version','requestId','sessionId','selectionRequired'].includes(key))) throw new Error('Invalid saved selection request');
+    return { selectionRequired: true };
+  }
   const profile = value?.profile;
   if (value?.version !== 1 || value.requestId !== selected.requestId || value.sessionId !== selected.sessionId ||
       !profile || profile.rootDir !== rootDir || !isAbsolute(profile.dataDir) ||
@@ -218,11 +223,15 @@ async function routeRequest(root, selected, overrides) {
       ? config.wallet.toLowerCase() : null;
     profile = { wallet, dataDir: rootDir, chartPort: 4663, rootDir };
   } else {
-    const resolved = await (overrides.resolveProfile ?? resolveProfile)(rootDir, { sessionId: selected.sessionId });
-    profile = { wallet: resolved.wallet?.toLowerCase() ?? null, dataDir: resolve(resolved.dataDir),
-      chartPort: resolved.chartPort, rootDir: resolved.rootDir };
+    let resolved;
+    try { resolved = await (overrides.resolveProfile ?? resolveProfile)(rootDir, { sessionId: selected.sessionId }); }
+    catch (error) {
+      if (!await needsWalletSelection(root, selected)) throw error;
+    }
+    profile = resolved ? { wallet: resolved.wallet?.toLowerCase() ?? null, dataDir: resolve(resolved.dataDir),
+      chartPort: resolved.chartPort, rootDir: resolved.rootDir } : null;
   }
-  const record = { version: 1, requestId: selected.requestId, sessionId: selected.sessionId, profile };
+  const record = { version: 1, requestId: selected.requestId, sessionId: selected.sessionId, ...(profile ? { profile } : { selectionRequired: true }) };
   validateRoute(record, rootDir, selected);
   await mkdir(resolve(rootDir, 'hook-routes'), { recursive: true, mode: 0o700 });
   let file;
@@ -236,7 +245,35 @@ async function routeRequest(root, selected, overrides) {
     // or corrupt receipt blocks safely instead of selecting another wallet.
     return validateRoute(await read(path), rootDir, selected);
   } finally { await file?.close(); }
-  return { ...profile, sessionId: selected.sessionId };
+  return validateRoute(record, rootDir, selected);
+}
+
+async function runView(root, sessionId) {
+  const { stdout } = await executeFile(process.execPath, ['--import', 'tsx', resolve(root, 'src/cli.ts'), 'view', '--session', sessionId], {
+    cwd: root, env: { ...process.env, REBALANCE_ROOT_DIR: portfolioRoot(process.env, root) }, timeout: 20_000, maxBuffer: 16_384,
+  });
+  const result = JSON.parse(stdout);
+  if (result?.state !== 'ready' || typeof result.url !== 'string') throw new Error('Invalid view result');
+  return result;
+}
+async function withView(result, root, selected, overrides) {
+  try {
+    const view = await (overrides.runView ?? runView)(root, selected.sessionId);
+    if (!view) return result;
+    let presentation;
+    if (overrides.openView) {
+      try { presentation = await overrides.openView({ url: view.url, rootDir: portfolioRoot(process.env, root), sessionId: selected.sessionId }); }
+      catch { presentation = { host: 'host', opened: false, reason: 'Open the local view through this agent host.' }; }
+    }
+    return { ...result, view: { ...view, ...(presentation ? { presentation } : {}) } };
+  } catch {
+    return { ...result, view: { state: 'unavailable', message: 'The companion view could not be prepared. The reported trading result is unchanged.' } };
+  }
+}
+async function needsWalletSelection(root, selected) {
+  const rootDir = portfolioRoot(process.env, root);
+  if (await readRoutingJson(resolve(rootDir, 'hook-routes', `${selected.requestId}.json`))) return false;
+  return (await readProfiles(rootDir)).length > 1 && await readRoutingJson(connectionPath(rootDir, selected.sessionId)) === null;
 }
 
 export async function handlePrompt(input, overrides = {}) {
@@ -254,13 +291,20 @@ export async function handlePrompt(input, overrides = {}) {
     // Freeze the native request before a chat switch, npm bootstrap or stop read.
     phase = 'profile';
     const profile = await routeRequest(root, selected, overrides);
+    if (profile.selectionRequired) {
+      if (recovery) return hookReply({ app: 'Rebalance', outcome: 'blocked', status: null, messages: ['This request did not select a wallet; no recovery was attempted.'] });
+      await (overrides.ensureDependencies ?? ensureDependencies)(root);
+      return hookReply(await withView({ app: 'Rebalance', outcome: 'needs-input', status: null,
+        messages: ['Choose a portfolio in the companion view. This invocation is selection-only; use a new skill invocation to launch the selected portfolio. No wallet runner was armed or stopped.'] }, root, selected, overrides));
+    }
     phase = 'stop-state';
     const expectedStop = await (overrides.readStopToken ?? readStopToken)(root, profile);
     phase = 'dependencies';
     await (overrides.ensureDependencies ?? ensureDependencies)(root);
     phase = recovery ? 'recovery' : 'launch';
     const run = recovery ? overrides.runRecovery ?? runRecovery : overrides.runLaunch ?? runLaunch;
-    return hookReply(await run(root, selected.requestId, expectedStop, profile));
+    const result = await run(root, selected.requestId, expectedStop, profile);
+    return hookReply(recovery ? result : await withView(result, root, selected, overrides));
   } catch {
     return hookFailure(phase);
   }

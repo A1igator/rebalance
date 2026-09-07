@@ -1,0 +1,49 @@
+{
+  "recordedAt": "2026-09-07",
+  "plan": "docs/prompts/044-portfolio-selector-and-companion-view.md",
+  "planCommit": "c22b930",
+  "verification": {
+    "tests": 614,
+    "passed": 614,
+    "failed": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "typecheck": "passed",
+    "skillValidation": "passed",
+    "whitespace": "passed"
+  },
+  "browser": {
+    "host": "Codex in-app browser",
+    "layout": "existing narrow side panel",
+    "verified": [
+      "portfolio grid",
+      "per-wallet target models",
+      "Privy card selection",
+      "Back to selector",
+      "three signer choices",
+      "minimal read-only chart",
+      "agent connection changes navigate the existing view"
+    ],
+    "setupRequestSent": false
+  },
+  "activation": {
+    "readOnlyChartProcessesReloaded": 2,
+    "originalConversationWalletRestored": true,
+    "portfolioExecutionRecordsUnchanged": true,
+    "fundedRunnersStartedOrRestarted": false,
+    "hookInvoked": false,
+    "financialRecoveryInvoked": false,
+    "keysOrCredentialsInspected": false,
+    "signedOrSubmittedTransactions": false
+  },
+  "claude": {
+    "cmuxCommandContract": "fixture-tested",
+    "desktopPreviewConfiguration": "attach-only local origin",
+    "sameSessionTokenRotation": "tested",
+    "crossSessionRebinding": "rejected",
+    "nativePaneOpened": "not exercised",
+    "nativeSetupMessageDelivery": "not exercised",
+    "phoneDelivery": "not verified"
+  },
+  "dependenciesAdded": []
+}

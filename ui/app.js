@@ -2,6 +2,8 @@
   "use strict";
   const ns = "http://www.w3.org/2000/svg";
   const byId = (id) => document.getElementById(id);
+  const viewToken = /^#view=([a-f0-9]{64})$/i.exec(window.location?.hash || "")?.[1];
+  byId("portfolios-back")?.setAttribute("href", viewToken ? `/#view=${viewToken}` : "/");
   const percent = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
   const time = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
   const colors = { USDG: "#b4cbb8", AAPL: "#8dbafa", NVDA: "#bad776", MSFT: "#b5a1df", AMD: "#e3a37c" };

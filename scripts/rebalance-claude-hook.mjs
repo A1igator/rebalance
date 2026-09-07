@@ -1,6 +1,7 @@
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { handlePrompt, selectLaunchRequest } from './rebalance-hook.mjs';
+import { openCompanionView } from './companion-view.mjs';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -47,7 +48,7 @@ export async function handleClaudePrompt(input, overrides = {}) {
   if (selected.blocked) return reply({ app: 'Rebalance', outcome: 'blocked', messages: [selected.blocked] });
   // Shared implementation retains canonical workspace checking, pre-bootstrap stop
   // capture, locked dependency installation, launcher dedup and unknown-start output.
-  const result = await handlePrompt(selected.normalized, { ...overrides, repository: overrides.repository ?? repository });
+  const result = await handlePrompt(selected.normalized, { openView: openCompanionView, ...overrides, repository: overrides.repository ?? repository });
   return result === null ? null : { ...result, hookSpecificOutput: {
     ...result.hookSpecificOutput, hookEventName: 'UserPromptExpansion',
   } };

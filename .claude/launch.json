@@ -1,0 +1,10 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Rebalance",
+      "port": 4663,
+      "url": "http://127.0.0.1:4663"
+    }
+  ]
+}

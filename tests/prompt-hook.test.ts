@@ -8,7 +8,8 @@ import { join, resolve as resolvePath } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-const { handlePrompt, launchPromptFormat, recoveryPromptFormat, selectLaunchRequest, selectRecoveryRequest } = await import(new URL('../scripts/rebalance-hook.mjs', import.meta.url).href);
+const { handlePrompt: realHandlePrompt, launchPromptFormat, recoveryPromptFormat, selectLaunchRequest, selectRecoveryRequest } = await import(new URL('../scripts/rebalance-hook.mjs', import.meta.url).href);
+const handlePrompt = (input: unknown, overrides: Record<string, unknown> = {}) => realHandlePrompt(input, { runView: async () => undefined, ...overrides });
 const event = { hook_event_name: 'UserPromptSubmit', prompt: '$rebalance', permission_mode: 'default',
   session_id: 'fixture-session', turn_id: 'fixture-turn', cwd: '/fixture' };
 const skillPrompt = (root: string) => `[$rebalance](${resolvePath(root, 'skills/rebalance/SKILL.md')})`;

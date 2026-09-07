@@ -55,7 +55,7 @@ function eventId(notification: Notification): unknown {
   return (notification.params?.meta as Record<string, unknown> | undefined)?.event_id;
 }
 
-test('real MCP stdio sessions deliver queued events, expose only acknowledgement, and retain unacknowledged events across restart', { timeout: 25_000 }, async () => {
+test('real MCP stdio sessions deliver queued events, expose scoped acknowledgement and companion setup tools, and retain unacknowledged events across restart', { timeout: 25_000 }, async () => {
   const first = {
     id: 'offline-receipt-one', type: 'rebalance-completed' as const,
     createdAt: '2026-09-04T20:00:00.000Z', message: 'A recorded rebalance receipt is ready.',
@@ -66,7 +66,7 @@ test('real MCP stdio sessions deliver queued events, expose only acknowledgement
   const capabilities = initial.client.getServerCapabilities();
   assert.deepEqual(capabilities?.experimental, { 'claude/channel': {} });
   const tools = await initial.client.listTools();
-  assert.deepEqual(tools.tools.map(tool => tool.name), ['acknowledge_event']);
+  assert.deepEqual(tools.tools.map(tool => tool.name), ['acknowledge_event', 'connect_companion_view', 'acknowledge_setup_request']);
   const forbidden = await initial.client.callTool({ name: 'sign_transaction', arguments: {} });
   assert.equal(forbidden.isError, true);
   await waitFor(() => initial.received.length === 1, 'offline event should arrive after the MCP initialization handshake');

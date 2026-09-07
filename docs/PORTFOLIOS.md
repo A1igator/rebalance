@@ -49,3 +49,13 @@ Isolated tests cover different allocations and state, two simultaneous backgroun
 
 
 Risk-based allocation is also wallet-scoped. `allocation preview/set/status/manual` use the same chat attachment or explicit `--profile` routing. Policy inputs, adopted targets and calculation provenance are one local configuration revision per wallet; changing the chat connection does not change that revision. Read [the allocation guide](ALLOCATION.md) for subjective risk and optional statistical inputs.
+
+## Companion selector — 2026-09-07
+
+`npm run cli -- view` prepares the local opening grid before a wallet has been selected, including with an empty registry. It returns a conversation-specific URL; open the entire URL in the host side pane. `--profile <address> view` opens one chart. The URL fragment carries an opaque local handle for attachment and setup requests, not a wallet key or signing authority. It is not stored in shared preview configuration or committed evidence. A bare origin is an unlinked read-only view.
+
+The grid lists independent portfolios, mode, target model and runner status. Clicking a card uses the same per-conversation connection record as `wallet connect`. The target view is prepared before UI selection; other conversations and each pinned worker retain their own wallet. The chart Back button returns to the selector without detaching or stopping anything. Local file events update the selection and registry; changing the attachment from the agent moves the companion to that wallet. No model call is required for navigation.
+
+New wallet offers raw key, Privy and Ledger and sends a fixed setup intent to the owning conversation. Codex uses its native queue; Claude uses the existing channel. Native acceptance is not proof of agent receipt or completed wallet creation. Claude requests stay pending while that session’s channel is absent. Each explicit request has an idempotency ID; a prepared or uncertain dispatch is not automatically resent. Actual onboarding stays with the agent. No browser key inputs, signing, allocation edits or trading controls are added.
+
+See [persistent companion views](COMPANION_VIEW.md) for Claude Desktop and cmux support and native verification limits. The old pie-only restriction now applies to the chart content; selector/back/setup-intent clicks are the owner's explicit exception.
