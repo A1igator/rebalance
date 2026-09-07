@@ -1,21 +1,25 @@
 # Privy integration and prize assessment
 
-The owner selected [Privy Agent Wallets](https://agents.privy.io) and its [official skill](https://agents.privy.io/skill.md). The integration uses the official **`@privy-io/agent-wallet-cli` 0.3.6**, pinned by version, through the local deterministic application. CLI source and signing schemas were inspected on **2026-09-06**; the prize assessment below was checked on **2026-09-04**.
+The owner selected [Privy Agent Wallets](https://agents.privy.io) and its [official skill](https://agents.privy.io/skill.md). The integration uses the official **`@privy-io/agent-wallet-cli` 0.3.6**, pinned by version, through the local deterministic application. CLI source and signing schemas were inspected on **2026-09-06**, and the device-approval adapter was checked against the pinned source on **2026-09-07**; the prize assessment below was checked on **2026-09-04**.
 
 An existing local Privy session was detected and its public wallet metadata was read. Login reported an existing session, which was preserved. This establishes cached wallet availability, not current server authorization. The adapter and its isolated signing, dispatch, recovery and launch fixtures pass ([391-test validation record](evidence/privy-agent-wallets.json)); no live Privy signing, Robinhood transaction, swap receipt, policy enforcement or prize submission is established by this work.
 
 ## Setup and explicit mode selection
 
-Application controls stay in the existing agent conversation. The agent uses:
+In the local portfolio selector, **New portfolio → Privy** starts deterministic setup. If the official CLI already has a usable cached Ethereum wallet, setup reuses that address. Otherwise the installed pinned CLI starts its device approval flow and opens the official Privy page in the system browser. The local UI displays the same approval URL and user code, waits for approval, and obtains the public wallet address after the CLI succeeds. The surrounding setup flow registers/connects the portfolio; authentication itself does not fund a wallet or arm trading.
+
+The browser link must use `https://agents.privy.io/` with only a matching `user_code` query parameter. Other origins, credentials, fragments, extra parameters and mismatched codes are rejected. The CLI's official browser opening remains enabled: version 0.3.6 exposes neither `--no-browser` nor a machine-readable login mode. This is browser approval with local progress, not an embedded Privy sign-in form.
+
+The agent commands remain available:
 
 ```bash
 npm run cli -- privy login
 npm run cli -- privy status
 ```
 
-Login follows the official skill's pinned `pnpm --package=@privy-io/agent-wallet-cli@0.3.6 dlx privy-agent-wallet login` flow. For a new session, OAuth device authorization opens a browser and requires the user to verify and approve the displayed device code. Existing sessions are reused; setup does not log out or replace a session automatically. The public status command reports the cached Ethereum address and wallet ID without returning credentials. The upstream `list-wallets` command does not refresh tokens or validate authorization, so a successful status read cannot promise that the next signing request will succeed.
+The agent's `privy login` command follows the official skill's pinned `pnpm --package=@privy-io/agent-wallet-cli@0.3.6 dlx privy-agent-wallet login` flow. The UI adapter invokes the already installed 0.3.6 entry point with Node, without installing packages during setup. For a new session, OAuth device authorization opens a browser and requires the user to verify and approve the displayed device code. Existing sessions are reused; setup does not log out or replace a session automatically. The public status command reports the cached Ethereum address and wallet ID without returning credentials. The upstream `list-wallets` command does not refresh tokens or validate authorization, so a successful status read cannot promise that the next signing request will succeed.
 
-Register the Privy wallet as a separate portfolio with its own chosen targets, then connect the conversation:
+For explicit setup through the agent, register the Privy wallet as a separate portfolio with its own chosen targets, then connect the conversation:
 
 ```bash
 npm run cli -- wallet add --mode privy --wallet <public-address> --targets <five-asset-allocation>
@@ -23,6 +27,16 @@ npm run cli -- wallet connect <public-address>
 ```
 
 The Privy portfolio has its own targets, balances, cadence and pending records. Registration does not inherit another wallet’s state or arm trading; connecting prepares its chart without changing the other runners. A bare skill launch applies to the connected wallet. Login or connection does not fund it. See [wallet portfolios](PORTFOLIOS.md).
+
+## Approval lifecycle and shared-session limits
+
+The onboarding adapter reads only the CLI's public wallet listing and its approval display output. The official CLI retains device codes, OAuth tokens and signing authorization material; those do not enter setup progress, portfolio configuration or logs. Native errors and other output are discarded or replaced with fixed errors. Both output streams are bounded. Approval progress must be saved successfully before setup adopts a wallet. Cancellation or a 599-second approval deadline kills the child; the adapter waits at most one further second for termination confirmation.
+
+The CLI has one session for the local OS user, shared across portfolios. UI logins use an exclusive `~/.cache/rebalance/privy-login.lock` containing only a process ID and ownership token. A concurrent login fails without opening another approval. A crashed adapter or unconfirmed child termination leaves the lock in place; inspect the original login process before clearing an interrupted lock. The adapter never guesses that it is safe to start a second login. Standalone upstream CLI commands do not participate in this application lock, so avoid starting a separate login during UI approval.
+
+Privy 0.3.6 always routes Ethereum RPC requests to the first Ethereum wallet in its session. It has no per-request wallet-ID selector, named session or separate wallet-creation command. Choosing Privy therefore adds or connects that available wallet; it does not promise a new, distinct Ethereum wallet. Reauthorization and account switching are explicit agent operations because replacing the global session can affect existing Privy portfolios. The UI never runs logout automatically.
+
+The implementation is covered by isolated fake-process tests for reuse, serialized login, approved URL/code matching, awaited progress, cancellation, deadlines, bounded output and uncertain termination. These tests do not perform a real login or validate current server authorization. The flow and public approval fields are described by [Privy's Agent CLI documentation](https://docs.privy.io/recipes/agent-integrations/agent-cli) and [device authorization documentation](https://docs.privy.io/recipes/agent-integrations/agent-authorization).
 
 ## Deterministic signing and submission
 
@@ -52,7 +66,7 @@ Privy performs signing through its hosted service; a local subprocess does not m
 
 The official CLI owns session credentials. On macOS it uses the system credential manager when available, with an encrypted, machine-bound file fallback at `~/.privy/session.json`. The fallback is not a hardware wallet or a guarantee against a compromised local account. Credentials stay outside project configuration, source control and application logs. The inspected CLI refreshes an expired access token or authorization key, and performs one refresh-and-retry after HTTP 401. A revoked or failed refresh requires renewed login; cached public wallet metadata does not override that failure. `privy login` deliberately reuses cached state and cannot repair revocation by itself. When the user requests renewed authorization, the agent runs the official `pnpm --package=@privy-io/agent-wallet-cli@0.3.6 dlx privy-agent-wallet logout`, then `npm run cli -- privy login` to obtain a new device approval. Logout only clears the CLI session; it does not change Rebalance's configured wallet or move funds. Verify that the newly authorized Ethereum address still matches before proceeding. Do not log out automatically in response to a generic network failure.
 
-The CLI's default device authorization, token, wallet authentication and wallet RPC requests use `https://auth.privy.io`. Browser approval, wallet management and funding use `https://agents.privy.io`. The upstream package supports environment overrides for its API base, app ID and browser origin; these are routing settings, not network isolation or a Privy-native transaction policy. The integration does not claim a general outbound network restriction. Runtime subprocess deadlines bound the local wait because the inspected RPC fetch has no explicit timeout.
+The CLI's default device authorization, token, wallet authentication and wallet RPC requests use `https://auth.privy.io`. Browser approval, wallet management and funding use `https://agents.privy.io`. The upstream package supports environment overrides for its API base, app ID and browser origin; these are routing settings, not network isolation or a Privy-native transaction policy. The integration does not claim a general outbound network restriction. Runtime subprocess deadlines bound the local wait because the inspected RPC fetch has no explicit timeout. UI onboarding omits the upstream API-base, app-ID and browser-origin environment overrides so that the pinned CLI uses its official sandbox defaults; this is not a general network sandbox.
 
 The project remains on **Robinhood mainnet, chain 4663**, with no alternative-chain or signer fallback. [Privy's chain overview](https://docs.privy.io/wallets/overview/chains) includes EVM networks, and the inspected CLI does not contain a chain-ID whitelist for `rpc`. That supports the integration approach but does not prove that the OAuth wallet service accepts this exact Robinhood request. Live signing and a confirmed supported transaction remain evidence gates. A testnet listing does not establish mainnet support, gas sponsorship, balances/history coverage or managed transaction support. Ordinary native gas payment is sufficient; gas sponsorship is not required.
 
@@ -73,7 +87,7 @@ The separate B2B prize calls for an organization/business workflow and a Privy c
 - [x] Owner selected the official agent-wallet CLI and accepted Privy's hosted signing model.
 - [x] Official 0.3.6 package archive and transaction schema inspected; archive integrity matched registry metadata.
 - [x] Existing session preserved and public wallet metadata observed without publishing a personal wallet in this document.
-- [x] Adapter and isolated fixture tests validate output, wallet/transaction matching, unavailable signer behavior, explicit nonce/fee fields and unchanged pending/cycle behavior. The subprocess has a 30-second timeout; no live timeout was induced.
+- [x] Adapter and isolated fixture tests validate output, wallet/transaction matching, unavailable signer behavior, explicit nonce/fee fields and unchanged pending/cycle behavior. Signing/public-status subprocesses have a 30-second timeout; UI approval has a separate bounded window described above. No live timeout was induced.
 - [ ] Actual Privy authorization and signing on Robinhood 4663 verified with clearly identified evidence.
 - [ ] A supported Privy-backed financial flow completes on Robinhood mainnet with receipt evidence, without a per-trade model call or human prompt.
 - [ ] Any optional provider-native policy claim has a real allowed/denied test through the selected wallet flow.

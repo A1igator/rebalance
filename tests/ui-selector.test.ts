@@ -22,15 +22,16 @@ class Node {
   append(...children: Node[]) { this.children.push(...children); }
   replaceChildren() { this.children = []; }
   setAttribute(name: string, value: string) { this.attrs[name] = value; }
+  removeAttribute(name: string) { delete this.attrs[name]; }
   addEventListener(name: string, fn: () => void) { this.handlers.set(name, [...this.handlers.get(name) || [], fn]); }
   click() { if (!this.disabled) for (const fn of this.handlers.get('click') || []) fn(); }
   showModal() { this.open = true; }
-  close() { this.open = false; }
+  close() { this.open = false; for (const fn of this.handlers.get('close') || []) fn(); }
 }
 function content(node: Node): string { return [node.textContent, ...node.children.map(content)].filter(Boolean).join(' '); }
 async function browser(options: { hash?: string; pathname?: string; client?: boolean; selector?: boolean; reply?: (call: Call) => Promise<Reply | undefined> } = {}) {
   const elements = new Map<string, Node>(), lifecycle = new Map<string, (() => void)[]>(), timers = new Map<number, () => void>();
-  const calls: Call[] = [], navigations: string[] = [], streams: ReadableStreamDefaultController<Uint8Array>[] = [];
+  const calls: Call[] = [], navigations: string[] = [], streams: ReadableStreamDefaultController<Uint8Array>[] = [], setupStreams: ReadableStreamDefaultController<Uint8Array>[] = [];
   let timerId = 0, uuidCalls = 0;
   const byId = (id: string) => {
     if (!elements.has(id)) { const node = new Node('div'); node.id = id; elements.set(id, node); }
@@ -48,9 +49,9 @@ async function browser(options: { hash?: string; pathname?: string; client?: boo
       calls.push(call);
       const response = await options.reply?.(call);
       if (response) return response;
-      if (url === '/api/view/events') {
+      if (url === '/api/view/events' || url === '/api/setup/events') {
         const body = new ReadableStream<Uint8Array>({ start(controller) {
-          streams.push(controller);
+          (url === '/api/setup/events' ? setupStreams : streams).push(controller);
           init.signal?.addEventListener('abort', () => { try { controller.error(new Error('Aborted')); } catch {} });
         } });
         return { ...ok(null), body };
@@ -58,7 +59,7 @@ async function browser(options: { hash?: string; pathname?: string; client?: boo
       if (url === '/api/view') return ok({ connectedWallet: walletA, canSetup: true });
       if (url === '/api/portfolios') return ok({ portfolios });
       if (url === '/api/connect') return ok({ wallet: call.body?.wallet, chartUrl: portfolios.find(p => p.wallet === call.body?.wallet)?.chartUrl, tradingChanged: false });
-      if (url === '/api/setup') return ok({ state: 'accepted', requestId: call.body?.requestId, message: 'Setup request queued. Continue in your agent.' });
+      if (url === '/api/setup') return ok({ state: 'preparing', mode: call.body?.mode, requestId: call.body?.requestId, message: 'Preparing your wallet…', tradingChanged: false });
       throw new Error(`Unexpected request ${url}`);
     },
   };
@@ -69,13 +70,19 @@ async function browser(options: { hash?: string; pathname?: string; client?: boo
   }
   await flush();
   return {
-    byId, calls, navigations, timers, streams, get uuidCalls() { return uuidCalls; },
+    byId, calls, navigations, timers, streams, setupStreams, get uuidCalls() { return uuidCalls; },
     cards: () => byId('portfolio-grid').children,
     async click(node: Node) { node.click(); await flush(); },
     async send(value: unknown, chunks = false) {
       const bytes = new TextEncoder().encode(`event: view\r\ndata: ${JSON.stringify(value)}\r\n\r\n`);
       if (chunks) { for (const byte of bytes) streams.at(-1)!.enqueue(Uint8Array.of(byte)); }
       else streams.at(-1)!.enqueue(bytes);
+      await flush();
+    },
+    async sendSetup(value: unknown, chunks = false) {
+      const bytes = new TextEncoder().encode(`event: setup\r\ndata: ${JSON.stringify(value)}\r\n\r\n`);
+      if (chunks) { for (const byte of bytes) setupStreams.at(-1)!.enqueue(Uint8Array.of(byte)); }
+      else setupStreams.at(-1)!.enqueue(bytes);
       await flush();
     },
     async hide() { for (const fn of lifecycle.get('pagehide') || []) fn(); await flush(); },
@@ -144,31 +151,62 @@ test('plain-text API rejection gives an actionable error without leaking a JSON 
   await page.hide();
 });
 
-test('setup submits only the selected signer once and reports queued without navigating or auto-selecting', async () => {
+const requestId = '00000000-0000-4000-8000-000000000001';
+const setupResult = (mode = 'privy', state = 'preparing', extra = {}) =>
+  ({ requestId, mode, state, message: 'Preparing your wallet…', tradingChanged: false, ...extra });
+const approval = { url: 'https://agents.privy.io/?user_code=ABC12-XYZ34', code: 'ABC12-XYZ34' };
+
+test('setup submits only the selected signer once and follows local progress without any model queue', async () => {
   for (const mode of ['private-key', 'privy', 'ledger']) {
     const page = await browser();
-    await page.click(page.cards().at(-1)!);
-    await page.click(page.byId(`setup-${mode}`));
+    await page.click(page.cards().at(-1)!); await page.click(page.byId(`setup-${mode}`));
     await page.click(page.byId(`setup-${mode}`));
     const setup = page.calls.filter(c => c.url === '/api/setup');
     assert.equal(setup.length, 1);
-    assert.deepEqual(setup[0]!.body, { token, mode, requestId: '00000000-0000-4000-8000-000000000001' });
+    assert.deepEqual(setup[0]!.body, { token, mode, requestId });
     assert.equal(page.uuidCalls, 1);
-    assert.match(page.byId('setup-status').textContent, /queued.*agent/);
-    assert.equal(page.navigations.length, 0);
+    assert.match(page.byId('setup-status').textContent, /Preparing your wallet/);
+    assert.equal(page.byId('retry-setup').hidden, true);
+    assert.equal(page.calls.filter(c => c.url === '/api/setup/events').length, 1);
+    assert.deepEqual(page.calls.find(c => c.url === '/api/setup/events')!.body, { token, requestId });
+    if (mode === 'privy') {
+      await page.sendSetup(setupResult(mode, 'awaiting-approval', { message: 'Approve the matching code in Privy.', approval }), true);
+      assert.equal(page.byId('setup-approval').hidden, false);
+      assert.equal(page.byId('setup-approval-code').textContent, approval.code);
+      assert.equal(page.byId('setup-approval-link').attrs.href, approval.url);
+    } else if (mode === 'ledger') {
+      await page.sendSetup(setupResult(mode, 'awaiting-device', { message: 'Unlock Ledger and open Ethereum.' }));
+      assert.match(page.byId('setup-status').textContent, /Unlock Ledger/);
+      assert.equal(page.byId('setup-approval').hidden, true);
+    }
+    assert.equal(page.navigations.length, 0); assert.equal(page.timers.size, 0);
     assert.equal(page.calls.some(c => c.url === '/api/connect'), false);
-    assert.equal(page.cards().length, 3);
     await page.hide();
   }
 });
 
-test('pending, uncertain and offline setup keep the same logical request on explicit retry', async () => {
-  for (const state of ['pending', 'uncertain', 'offline']) {
+test('Ledger physical address approval needs no Privy URL and does not imply a signing request', async () => {
+  const page = await browser();
+  await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-ledger'));
+  await page.sendSetup(setupResult('ledger', 'awaiting-approval', { message: 'Verify and approve this address on your Ledger.' }));
+  assert.match(page.byId('setup-status').textContent, /Verify and approve this address/);
+  assert.equal(page.byId('setup-approval').hidden, true);
+  assert.equal(page.byId('retry-setup').hidden, true);
+  assert.equal(page.calls.some(c => c.url === '/api/connect' || /sign|transaction/.test(c.url)), false);
+  await page.sendSetup(setupResult('ledger', 'awaiting-approval', { approval }));
+  assert.match(page.byId('setup-status').textContent, /progress is unavailable/);
+  assert.equal(page.byId('setup-approval').hidden, true, 'Ledger cannot supply a Privy approval link');
+  await page.hide();
+});
+
+test('failed, offline and unverified setup keep the exact same UUID and signer on explicit retry', async () => {
+  for (const state of ['failed', 'offline', 'uncertain']) {
     const page = await browser({ reply: async call => call.url === '/api/setup' ? state === 'offline'
-      ? { ok: false, status: 503, json: async () => ({ error: 'Agent is offline. Open your agent and check the request.' }) }
-      : ok({ state, requestId: call.body!.requestId, message: '' }) : undefined });
+      ? { ok: false, status: 503, json: async () => ({ error: 'PRIVATE native failure' }) }
+      : ok(setupResult('privy', state, { message: 'Complete sign-in or try again.' })) : undefined });
     await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-privy'));
-    assert.match(page.byId('setup-status').textContent, new RegExp(state === 'offline' ? 'offline' : state));
+    assert.match(page.byId('setup-status').textContent, state === 'failed' ? /Complete sign-in/ : /progress is unavailable/);
+    assert.doesNotMatch(page.byId('setup-status').textContent, /PRIVATE/);
     assert.equal(page.byId('retry-setup').hidden, false);
     await page.click(page.byId('retry-setup'));
     const requests = page.calls.filter(c => c.url === '/api/setup');
@@ -176,6 +214,142 @@ test('pending, uncertain and offline setup keep the same logical request on expl
     assert.equal(page.uuidCalls, 1); assert.equal(page.navigations.length, 0);
     await page.hide();
   }
+});
+
+test('ready setup connects through the existing path and navigates only after verified connection', async () => {
+  let finish!: (value: Reply) => void;
+  const page = await browser({ reply: async call => call.url === '/api/connect' ? new Promise(resolve => { finish = resolve; }) : undefined });
+  await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-privy'));
+  await page.sendSetup(setupResult('privy', 'awaiting-approval', { approval }));
+  await page.sendSetup(setupResult('privy', 'ready', { wallet: walletB, chartUrl: portfolios[1]!.chartUrl, reused: true }));
+  assert.equal(page.navigations.length, 0);
+  assert.deepEqual(page.calls.find(c => c.url === '/api/connect')!.body, { token, wallet: walletB });
+  assert.equal(page.byId('setup-dialog').open, false);
+  assert.equal(page.byId('setup-approval').hidden, true);
+  assert.equal(page.byId('setup-approval-link').attrs.href, undefined);
+  assert.equal(page.calls.find(c => c.url === '/api/setup/events')!.signal!.aborted, true);
+  finish(ok({ wallet: walletB, chartUrl: portfolios[1]!.chartUrl, tradingChanged: false })); await flush();
+  assert.deepEqual(page.navigations, [`http://127.0.0.1:4664/chart${fragment}`]);
+  await page.hide();
+});
+
+test('a ready initial response reuses the wallet without starting an unnecessary setup stream', async () => {
+  const page = await browser({ reply: async call => call.url === '/api/setup'
+    ? ok(setupResult('privy', 'ready', { wallet: walletB, chartUrl: portfolios[1]!.chartUrl, reused: true })) : undefined });
+  await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-privy'));
+  assert.equal(page.calls.some(c => c.url === '/api/setup/events'), false);
+  assert.deepEqual(page.navigations, [`http://127.0.0.1:4664/chart${fragment}`]);
+  await page.hide();
+});
+
+test('closing setup adds the ready wallet without changing attachment; reopening permits a new request', async () => {
+  const page = await browser();
+  await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-privy'));
+  await page.click(page.byId('close-setup'));
+  await page.sendSetup(setupResult('privy', 'ready', { wallet: walletB, chartUrl: portfolios[1]!.chartUrl }));
+  assert.equal(page.navigations.length, 0); assert.equal(page.calls.some(c => c.url === '/api/connect'), false);
+  assert.match(page.byId('setup-status').textContent, /Select it from the grid/);
+  await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-private-key'));
+  assert.equal(page.uuidCalls, 2);
+  assert.deepEqual(page.calls.filter(c => c.url === '/api/setup')[1]!.body,
+    { token, mode: 'private-key', requestId: '00000000-0000-4000-8000-000000000002' });
+  await page.hide();
+});
+
+test('later agent selection prevents setup completion from stealing attachment while dialog stays open', async () => {
+  const page = await browser();
+  await page.send(snapshot(walletA));
+  await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-privy'));
+  await page.send(snapshot(walletB));
+  assert.equal(page.byId('setup-dialog').open, true);
+  await page.sendSetup(setupResult('privy', 'ready', { wallet: walletC, chartUrl: 'http://127.0.0.1:4665/chart' }));
+  assert.equal(page.calls.some(c => c.url === '/api/connect'), false);
+  assert.deepEqual(page.navigations, [`http://127.0.0.1:4664/chart${fragment}`]);
+  assert.match(page.byId('setup-status').textContent, /Select it from the grid/);
+  await page.hide();
+});
+
+test('a changed first stream snapshot also wins over a delayed initial setup response', async () => {
+  let finish!: (value: Reply) => void;
+  const page = await browser({ reply: async call => call.url === '/api/setup' ? new Promise(resolve => { finish = resolve; }) : undefined });
+  await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-privy'));
+  await page.send(snapshot(walletB));
+  finish(ok(setupResult('privy', 'ready', { wallet: walletC, chartUrl: 'http://127.0.0.1:4665/chart' }))); await flush();
+  assert.equal(page.calls.some(c => c.url === '/api/connect'), false);
+  assert.equal(page.navigations.length, 0);
+  assert.match(page.byId('setup-status').textContent, /Select it from the grid/);
+  await page.hide();
+});
+
+test('invalid setup identities, states and ready destinations never connect or navigate', async () => {
+  for (const changed of [
+    { requestId: 'wrong-request' }, { mode: 'ledger' }, { tradingChanged: true }, { state: 'accepted' },
+    { state: 'awaiting-device' }, { state: 'awaiting-approval' }, { message: { private: true } },
+    { state: 'ready', wallet: walletB, chartUrl: 'https://example.com/chart' },
+    { state: 'ready', wallet: 'bad-wallet', chartUrl: portfolios[1]!.chartUrl },
+    { state: 'ready', wallet: walletB, chartUrl: portfolios[1]!.chartUrl, reused: 'yes' },
+  ]) {
+    const page = await browser({ reply: async call => call.url === '/api/setup' ? ok(setupResult('privy', 'preparing', changed)) : undefined });
+    await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-privy'));
+    assert.match(page.byId('setup-status').textContent, /progress is unavailable/);
+    assert.equal(page.byId('retry-setup').hidden, false);
+    assert.equal(page.navigations.length, 0); assert.equal(page.calls.some(c => c.url === '/api/connect'), false);
+    await page.hide();
+  }
+});
+
+test('only the matching official Privy code link can be shown in the approval dialog', async () => {
+  for (const changed of [
+    { url: 'https://agents.privy.io.attacker.invalid/?user_code=ABC12-XYZ34' },
+    { url: 'http://agents.privy.io/?user_code=ABC12-XYZ34' },
+    { url: 'https://agents.privy.io:8443/?user_code=ABC12-XYZ34' },
+    { url: 'https://name:secret@agents.privy.io/?user_code=ABC12-XYZ34' },
+    { url: 'https://agents.privy.io/other?user_code=ABC12-XYZ34' },
+    { url: 'https://agents.privy.io/?user_code=ABC12-XYZ34#secret' },
+    { url: 'https://agents.privy.io/?user_code=ABC12-XYZ34&user_code=ABC12-XYZ34' },
+    { url: 'https://agents.privy.io/?user_code=ABC12-XYZ34&access_token=secret' },
+    { code: 'WRONG-CODE' }, { code: '<script>secret</script>' },
+  ]) {
+    const page = await browser();
+    await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-privy'));
+    await page.sendSetup(setupResult('privy', 'awaiting-approval', { approval: { ...approval, ...changed } }));
+    assert.match(page.byId('setup-status').textContent, /progress is unavailable/);
+    assert.equal(page.byId('setup-approval').hidden, true);
+    assert.equal(page.byId('setup-approval-link').attrs.href, undefined);
+    assert.equal(page.calls.find(c => c.url === '/api/setup/events')!.signal!.aborted, true);
+    assert.equal(page.navigations.length, 0);
+    await page.hide();
+  }
+});
+
+test('failed or interrupted setup streams finish cleanly and retry the same request without healthy polling', async () => {
+  for (const failed of [true, false]) {
+    const page = await browser();
+    await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-ledger'));
+    if (failed) await page.sendSetup(setupResult('ledger', 'failed', { message: 'Unlock Ledger and try again.' }));
+    else { page.setupStreams.at(-1)!.close(); await flush(); }
+    assert.equal(page.byId('retry-setup').hidden, false);
+    assert.equal(page.calls.find(c => c.url === '/api/setup/events')!.signal!.aborted, true);
+    assert.equal(page.timers.size, 0);
+    await page.click(page.byId('retry-setup'));
+    const requests = page.calls.filter(c => c.url === '/api/setup');
+    assert.equal(requests.length, 2); assert.deepEqual(requests[0]!.body, requests[1]!.body);
+    await page.hide();
+  }
+});
+
+test('page suspension aborts setup streaming and restores its read-only stream without resubmitting or stealing selection', async () => {
+  const page = await browser();
+  await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-privy'));
+  await page.hide();
+  assert.equal(page.calls.find(c => c.url === '/api/setup/events')!.signal!.aborted, true);
+  await page.show();
+  assert.equal(page.calls.filter(c => c.url === '/api/setup').length, 1);
+  assert.equal(page.calls.filter(c => c.url === '/api/setup/events').length, 2);
+  await page.sendSetup(setupResult('privy', 'ready', { wallet: walletB, chartUrl: portfolios[1]!.chartUrl }));
+  assert.equal(page.calls.some(c => c.url === '/api/connect'), false);
+  assert.equal(page.navigations.length, 0); assert.equal(page.timers.size, 0);
+  await page.hide();
 });
 
 test('view stream updates cards and follows only subsequent selection changes, so Back stays on the grid', async () => {

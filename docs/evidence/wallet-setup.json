@@ -1,0 +1,16 @@
+{
+  "date": "2026-09-07",
+  "planCommit": "1e0857d",
+  "tests": { "total": 688, "passed": 688, "failed": 0, "cancelled": 0, "skipped": 0 },
+  "typecheck": "passed",
+  "skillValidation": "passed",
+  "whitespaceCheck": "passed",
+  "localDerivation": { "sharedSeed": true, "standard": "BIP-39/BIP-44", "addressPath": "m/44'/60'/0'/0/index", "fixtureIndexes": [0, 1], "requestReplay": "same account", "existingStandaloneFixture": "preserved" },
+  "setup": { "progress": "local file events to SSE", "modelQueueUsed": false, "tradingStarted": false, "transactionSigning": false, "existingProfileTargets": "preserved" },
+  "privy": { "cliVersion": "0.3.6", "browserApproval": "official CLI native opener", "liveLoginTested": false },
+  "ledger": { "accountPath": "44'/60'/index'/0/0", "firstNewIndex": 1, "nativeModuleLoad": "Node v24.18.0 on macOS arm64; CommonJS", "deviceDiscoveryPerformed": false, "hardwareVerificationTested": false, "transactionSigningTested": false },
+  "visualCheck": "existing narrow Codex companion: portfolio grid and direct setup dialog",
+  "chartServicesReloaded": 2,
+  "existingExecutionAndWalletRecordsUnchanged": true,
+  "redactions": "No seed, private key, credential, approval capability, user wallet, session identity, native process identity or local state snapshot is included."
+}

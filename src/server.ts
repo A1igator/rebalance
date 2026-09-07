@@ -5,7 +5,8 @@ import { mkdir, readFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import { portfolioRoot, connectionPath, resolveProfile } from '../scripts/profile-routing.mjs';
 import { portfolios } from './profiles.js';
-import { readView, viewState, connectView, requestWalletSetup } from './view-session.js';
+import { readView, viewState, connectView } from './view-session.js';
+import { WalletSetups } from './wallet-setup.js';
 import { ensurePortfolioChart } from './view.js';
 import { fileURLToPath } from 'node:url';
 import { DATA, loadConfig } from './config.js';
@@ -28,6 +29,7 @@ const assets = {
 } as const;
 
 type ChartDependencies = {
+  walletSetups: WalletSetups;
   dataDir: string;
   rootDir: string;
   ensureChart: typeof ensurePortfolioChart;
@@ -150,9 +152,46 @@ async function streamView(response: ServerResponse, deps: ChartDependencies, tok
   } catch { fail(); }
 }
 
+async function streamSetup(response: ServerResponse, deps: ChartDependencies, token: string, requestId: string) {
+  // Authorize before watching; install the directory watch before the first snapshot.
+  await deps.walletSetups.read(token, requestId);
+  let watcher: FSWatcher | undefined, closed = false, reading = false, dirty = true, writable = true;
+  let last: string | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const close = () => { if (closed) return; closed = true; clearTimeout(timer); watcher?.close(); };
+  const fail = () => { close(); response.destroy(); };
+  const schedule = () => {
+    if (closed || reading || !dirty || !writable || timer) return;
+    timer = setTimeout(() => { timer = undefined; void flush(); }, 20);
+  };
+  const flush = async () => {
+    if (closed || reading || !dirty || !writable) return;
+    reading = true; dirty = false;
+    try {
+      const result = await deps.walletSetups.read(token, requestId);
+      if (closed) return;
+      const payload = JSON.stringify(result);
+      if (payload !== last) { writable = response.write(`event: setup\ndata: ${payload}\n\n`); last = payload; }
+      if (result.state === 'ready' || result.state === 'failed') { close(); response.end(); }
+    } catch { fail(); }
+    finally { reading = false; schedule(); }
+  };
+  response.once('close', close); response.on('error', fail);
+  response.on('drain', () => { writable = true; schedule(); });
+  try {
+    watcher = deps.watchChanges(deps.walletSetups.directory, () => { dirty = true; schedule(); });
+    watcher.on('error', fail);
+    watcher.on('close', () => { if (!closed) fail(); });
+    if (response.destroyed) { close(); return; }
+    response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', Connection: 'keep-alive' });
+    response.flushHeaders(); await flush();
+  } catch { fail(); }
+}
+
 export async function serve(port = chartPort(), overrides: Partial<ChartDependencies> = {}) {
   if (!Number.isInteger(port) || port < 0 || port > 65_535) throw new Error('Invalid chart port.');
-  const deps: ChartDependencies = { dataDir: DATA, rootDir: overrides.dataDir ?? portfolioRoot(), ensureChart: ensurePortfolioChart, readStatus: status, readGas: createGasDisplayReader(), readConfig: loadConfig,
+  const rootDir = overrides.rootDir ?? overrides.dataDir ?? portfolioRoot();
+  const deps: ChartDependencies = { walletSetups: new WalletSetups(rootDir), dataDir: DATA, rootDir: overrides.dataDir ?? portfolioRoot(), ensureChart: ensurePortfolioChart, readStatus: status, readGas: createGasDisplayReader(), readConfig: loadConfig,
     watchChanges: (directory, listener) => watch(directory, listener), ...overrides };
   const server = createServer(async (request, response) => {
     response.setHeader('Cache-Control', 'no-store');
@@ -166,7 +205,7 @@ export async function serve(port = chartPort(), overrides: Partial<ChartDependen
         (request.headers.origin !== undefined && request.headers.origin !== `http://${host}`)) {
       response.writeHead(403).end('Local chart only'); return;
     }
-    if (['/api/view', '/api/connect', '/api/setup', '/api/view/events'].includes(request.url ?? '')) {
+    if (['/api/view', '/api/connect', '/api/setup', '/api/setup/status', '/api/setup/events', '/api/view/events'].includes(request.url ?? '')) {
       if (request.method !== 'POST') { response.writeHead(405, { Allow: 'POST' }).end('Use POST'); return; }
       if (request.headers.origin !== `http://${host}` || request.headers['content-type']?.split(';')[0]?.trim() !== 'application/json') {
         response.writeHead(403).end('Same-origin JSON required'); return;
@@ -180,13 +219,14 @@ export async function serve(port = chartPort(), overrides: Partial<ChartDependen
         let input: Record<string, unknown>;
         try { input = JSON.parse(body); } catch { response.writeHead(400).end('Invalid JSON'); return; }
         if (!input || typeof input !== 'object' || Array.isArray(input)) { response.writeHead(400).end('Invalid request'); return; }
-        const allowed = request.url === '/api/connect' ? ['token','wallet'] : request.url === '/api/setup' ? ['token','mode','requestId'] : ['token'];
+        const allowed = request.url === '/api/connect' ? ['token','wallet'] : request.url === '/api/setup' ? ['token','mode','requestId'] : request.url?.startsWith('/api/setup/') ? ['token','requestId'] : ['token'];
         if (Object.keys(input).some(key => !allowed.includes(key)) || allowed.some(key => typeof input[key] !== 'string')) {
           response.writeHead(400).end('Invalid request fields'); return;
         }
         try { await readView(deps.rootDir, input.token as string); }
         catch { response.writeHead(403).end('Open this view through the agent to reconnect it.'); return; }
         if (request.url === '/api/view/events') { await streamView(response, deps, input.token as string); return; }
+        if (request.url === '/api/setup/events') { await streamSetup(response, deps, input.token as string, input.requestId as string); return; }
         let result: unknown;
         if (request.url === '/api/view') result = await viewState(deps.rootDir, input.token as string);
         else if (request.url === '/api/connect') {
@@ -194,7 +234,8 @@ export async function serve(port = chartPort(), overrides: Partial<ChartDependen
           await deps.ensureChart(profile);
           const connected = await connectView(deps.rootDir, input.token as string, input.wallet as string);
           result = { wallet: connected.wallet, chartUrl: connected.chartUrl, tradingChanged: false };
-        } else result = await requestWalletSetup(deps.rootDir, input.token as string, input.mode as 'private-key' | 'privy' | 'ledger', input.requestId as string);
+        } else if (request.url === '/api/setup/status') result = await deps.walletSetups.read(input.token as string, input.requestId as string);
+        else result = await deps.walletSetups.begin( input.token as string, input.mode as 'private-key' | 'privy' | 'ledger', input.requestId as string);
         response.writeHead(200, { 'Content-Type': 'application/json' }).end(stringifyJson(result));
       } catch { if (!response.headersSent) response.writeHead(503, { 'Content-Type': 'application/json' }).end(stringifyJson({ error: 'The view request could not be verified. Reconnect through the agent before retrying.' })); else response.destroy(); }
       return;
@@ -246,11 +287,11 @@ export async function serve(port = chartPort(), overrides: Partial<ChartDependen
   });
   let closing: Promise<void> | undefined;
   return Object.assign(server, {
-    closeChart: () => closing ??= new Promise<void>((resolve, reject) => {
+    closeChart: () => closing ??= Promise.all([deps.walletSetups.close(), new Promise<void>((resolve, reject) => {
       server.close(error => error ? reject(error) : resolve());
       // SSE responses intentionally stay open. End their sockets on shutdown,
       // which also closes their file watchers through response cleanup.
       server.closeAllConnections();
-    }),
+    })]).then(() => {}),
   });
 }

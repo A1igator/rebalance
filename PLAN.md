@@ -130,3 +130,8 @@ Planned partners remain **Uniswap, Ledger and Privy**. Show substantive integrat
 ## User-defined risk allocation — September 7 update
 
 An optional per-wallet policy now derives target weights from the user's explicit horizon-dependent risk judgments and return assumptions. Standard Sharpe remains an explicitly chosen statistical alternative; other descriptive metrics are optional and do not redefine user risk. Policy edits are deterministic recalculation events, and the existing local graph maintains adopted targets without a chat connection or new scheduled model task. Manual target edits switch the wallet back to manual allocation. See [allocation semantics and data limits](docs/ALLOCATION.md) and the [pre-implementation prompt](docs/prompts/040-user-defined-risk-allocation.md). This implementation does not install a live policy, invent risk/return inputs, change the five-asset universe, or fetch historical market data.
+
+
+## Direct wallet setup and shared local seed — September 7 update
+
+[Prompt 047](docs/prompts/047-deterministic-wallet-onboarding.md) supersedes the model-directed New portfolio flow. The companion starts a local job for each signer choice: one shared local seed with consecutive browser-wallet accounts, the official Privy sign-in flow, or Ledger account-address verification on the existing device seed. File events deliver progress directly to the view. Repeated requests resume the same account; successful setup registers an unarmed portfolio and connects only the still-active conversation view. Existing portfolios and targets remain intact. See [setup semantics](docs/WALLET_SETUP.md); real Ledger hardware verification and new Privy login remain integration checks, not inferred test results.

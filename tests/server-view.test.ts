@@ -7,6 +7,8 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test, type TestContext } from 'node:test';
 import { connectionPath, type RoutedProfile } from '../scripts/profile-routing.mjs';
+import type { WalletSetupContext, SetupWallet } from '../src/wallet-setup-types.js';
+import { WalletSetups } from '../src/wallet-setup.js';
 import { serve } from '../src/server.js';
 import { issueView, pendingViewRequests } from '../src/view-session.js';
 import { atomicWriteJson, readJson } from '../src/storage.js';
@@ -17,18 +19,21 @@ const config = (wallet: string) => ({ version: 1, wallet, chainId: 4663, mode: '
   targets: { USDG: 500, AAPL: 2500, NVDA: 2500, MSFT: 2500, AMD: 2000 }, driftThresholdBps: 500,
   slippageBps: 50, deadlineSeconds: 120, pollSeconds: 30, rebalanceIntervalSeconds: 3600 });
 
-async function fixture(t: TestContext) {
+async function fixture(t: TestContext, setup?: (context: WalletSetupContext) => Promise<SetupWallet>) {
   const root = await mkdtemp(join(tmpdir(), 'rebalance-server-view-'));
   const ensured: RoutedProfile[] = [];
+  let setupCalls = 0;
+  const provider = async (context: WalletSetupContext) => { setupCalls++; return setup ? setup(context) : { address: walletB as `0x${string}` }; };
+  const walletSetups = new WalletSetups(root, { providers: { ledger: provider, privy: provider, 'private-key': provider } });
   let ensureFailure = false;
   const unexpectedRead = async (): Promise<never> => { throw new Error('View routes must not query chart balances, gas or process-global configuration'); };
-  const server = await serve(0, { dataDir: root, rootDir: root,
+  const server = await serve(0, { dataDir: root, rootDir: root, walletSetups,
     ensureChart: async profile => { ensured.push(profile); if (ensureFailure) throw new Error('Fixture chart unavailable'); return { state: 'ready', url: `http://127.0.0.1:${profile.chartPort}/chart` }; },
     readConfig: unexpectedRead, readGas: unexpectedRead, readStatus: unexpectedRead,
   });
   const address = server.address(); assert.ok(address && typeof address === 'object');
   t.after(async () => { await server.closeChart(); await rm(root, { recursive: true, force: true }); });
-  return { root, server, url: `http://127.0.0.1:${address.port}`, ensured,
+  return { root, server, walletSetups, setupCalls: () => setupCalls, url: `http://127.0.0.1:${address.port}`, ensured,
     failEnsure: () => { ensureFailure = true; },
     register: async () => {
       await atomicWriteJson(join(root, 'portfolios.json'), { version: 1, profiles: [
@@ -143,21 +148,34 @@ test('connect HTTP requests bind the capability conversation only after its char
   for (const name of protectedFiles) assert.equal(await readFile(join(f.root, name), 'utf8'), preserved.get(name));
 });
 
-test('setup HTTP accepts only a fixed signer intent and retains a Claude request offline without executing setup', async t => {
+test('setup HTTP creates a portfolio deterministically without a model request or changing trading', async t => {
   const f = await fixture(t), { token } = await issueView(f.root, sessionA), requestId = randomUUID();
   const body = { token, mode: 'ledger', requestId };
   const first = await call(f.url, '/api/setup', { body });
-  assert.equal(first.code, 200); assert.equal(JSON.parse(first.body).state, 'pending');
-  assert.match(JSON.parse(first.body).message, /waiting for this conversation’s Claude channel/);
-  assert.deepEqual(JSON.parse((await call(f.url, '/api/setup', { body })).body), JSON.parse(first.body));
+  assert.equal(first.code, 200); assert.equal(JSON.parse(first.body).state, 'preparing');
+  let result;
+  for (let i = 0; i < 100; i++) {
+    result = await f.walletSetups.read(token, requestId);
+    if (result.state === 'ready') break;
+    await delay(10);
+  }
+  assert.equal(result?.state, 'ready'); assert.equal(result?.wallet?.toLowerCase(), walletB);
+  const replay = await call(f.url, '/api/setup', { body });
+  assert.equal(JSON.parse(replay.body).state, 'ready'); assert.equal(f.setupCalls(), 1);
   assert.notEqual((await call(f.url, '/api/setup', { body: { ...body, mode: 'privy' } })).code, 200);
   assert.notEqual((await call(f.url, '/api/setup', { body: { ...body, mode: 'unknown', requestId: randomUUID() } })).code, 200);
   assert.notEqual((await call(f.url, '/api/setup', { body: { ...body, requestId: '../arbitrary' } })).code, 200);
-  const pending = await pendingViewRequests(f.root, sessionA);
-  assert.equal(pending.length, 1); assert.equal(pending[0].mode, 'ledger'); assert.equal(pending[0].requestId, requestId);
-  assert.deepEqual(await pendingViewRequests(f.root, sessionB), []);
-  assert.equal(f.ensured.length, 0); assert.equal(await readJson(join(f.root, 'config.json')), null);
-  assert.equal(await readJson(connectionPath(f.root, sessionA)), null, 'request acceptance does not claim wallet creation or connection');
+  assert.deepEqual(await pendingViewRequests(f.root, sessionA), []);
+  assert.equal(f.ensured.length, 0);
+  assert.equal(await readJson(connectionPath(f.root, sessionA)), null, 'completion does not steal the current conversation attachment');
+  for (const name of ['run.lock', 'pending.json', 'recovery.json', 'cycle.json', 'stop.json']) assert.equal(await readJson(join(f.root, name)), null);
+  const stream = await call(f.url, '/api/setup/events', { body: { token, requestId } });
+  assert.equal(stream.code, 200); assert.match(stream.headers['content-type'] ?? '', /text\/event-stream/);
+  assert.match(stream.body, /event: setup/); assert.match(stream.body, /"state":"ready"/);
+  assert.ok(!stream.body.includes(token)); assert.ok(!stream.body.includes(sessionA));
+  const other = await issueView(f.root, sessionB);
+  assert.notEqual((await call(f.url, '/api/setup/status', { body: { token: other.token, requestId } })).code, 200);
+  assert.equal((await call(f.url, '/api/setup', { body, headers: { Origin: undefined } })).code, 403);
 });
 
 test('view SSE reports session-scoped connection changes without leaking its token or following another chat', { timeout: 10_000 }, async t => {
@@ -179,4 +197,41 @@ test('view SSE reports session-scoped connection changes without leaking its tok
   const payload = JSON.stringify([first.events, second.events]);
   for (const privateContext of [a.token, b.token, sessionA, sessionB, f.root]) assert.ok(!payload.includes(privateContext));
   first.close(); second.close();
+});
+
+test('setup SSE sends file-driven progress and final completion without starting another provider', { timeout: 10_000 }, async t => {
+  let complete!: (wallet: SetupWallet) => void;
+  const f = await fixture(t, async context => {
+    await context.onProgress({ state: 'awaiting-device', message: 'Fixture device approval' });
+    return new Promise<SetupWallet>(resolve => { complete = resolve; });
+  });
+  const { token } = await issueView(f.root, sessionA), requestId = randomUUID();
+  assert.equal((await call(f.url, '/api/setup', { body: { token, mode: 'ledger', requestId } })).code, 200);
+  const events: {state: string}[] = [];
+  const req = request(f.url + '/api/setup/events', { method: 'POST', headers: { Origin: f.url, 'Content-Type': 'application/json' } });
+  t.after(() => req.destroy());
+  const ended = new Promise<void>((resolve, reject) => {
+    req.on('error', reject);
+    req.on('response', response => {
+      assert.equal(response.statusCode, 200);
+      let pending = '';
+      response.setEncoding('utf8');
+      response.on('data', chunk => {
+        pending += chunk;
+        let boundary;
+        while ((boundary = pending.indexOf('\n\n')) >= 0) {
+          const frame = pending.slice(0, boundary); pending = pending.slice(boundary + 2);
+          if (frame.startsWith('event: setup\n')) events.push(JSON.parse(frame.slice(frame.indexOf('data: ') + 6)));
+        }
+      });
+      response.on('error', reject); response.on('end', resolve);
+    });
+  });
+  req.end(JSON.stringify({ token, requestId }));
+  await until(() => events.some(event => event.state === 'awaiting-device'), 'device progress should reach its own view');
+  const count = events.length;
+  await delay(80); assert.equal(events.length, count, 'unchanged progress is not repeated');
+  complete({ address: walletB as `0x${string}` });
+  await ended;
+  assert.equal(events.at(-1)?.state, 'ready'); assert.equal(f.setupCalls(), 1);
 });

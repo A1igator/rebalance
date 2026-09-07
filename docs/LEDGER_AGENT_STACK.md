@@ -1,6 +1,6 @@
 # Ledger Agent Stack integration assessment
 
-Research: **2026-09-04**. No package installation, runtime probe, account discovery, hardware test or transaction has occurred. These are documentation/source findings, not a working integration. Read the [minimal-scope decisions](prompts/006-minimal-mvp.md) and [latest direct-signing decision](prompts/008-direct-signing-and-ledger-connect.md) alongside the current plan.
+Initial research: **2026-09-04**. The September 4 findings below preceded installation or device work. The [September 7 adoption record](#deterministic-account-onboarding--2026-09-07) adds a tested setup implementation and exact SDK dependencies; hardware verification and Ledger transaction execution remain untested. Read the [minimal-scope decisions](prompts/006-minimal-mvp.md) and [latest direct-signing decision](prompts/008-direct-signing-and-ledger-connect.md) alongside the current plan.
 
 The project's sole network is **Robinhood mainnet (4663)**. Other chain configurations cited below are source-comparison evidence from the earlier CLI investigation, not additional project targets or fallbacks. See [the network decision](prompts/010-robinhood-only.md).
 
@@ -41,6 +41,38 @@ The documented Ring lifecycle uses hardware for enrollment, then a local passwor
 Retain a small local broker for a credential the application actually needs, such as Privy or a quote service. Demonstrate private credential retrieval and an allowed service operation versus a denied unrelated request, using endpoint/method restrictions and redacted output. No amount limits or budget counters. The broker checks are our implementation. Claiming that an agent cannot extract secrets requires actual isolation; unrestricted same-user shell access defeats that claim. Implement only what the demonstrated boundary needs and state its limits. Ring network dependence remains explicit. Contributors without devices keep normal local secret references.
 
 For [Ledger judging](https://ethglobal.com/events/ethonline2026/prizes/ledger), demonstrate real device-confirmed rebalancing and rejection, plus a Ring-backed allowed/denied operation if adopted. Keep device feedback pending until tested. No installation count or speculative broker substitutes for working evidence.
+
+## Deterministic account onboarding — 2026-09-07
+
+[Prompt 047](prompts/047-deterministic-wallet-onboarding.md), committed as `1e0857d` before adoption, authorizes New portfolio → Ledger to run local setup without a model-directed dialogue. `src/ledger-onboarding.ts` uses the official DMK and Ethereum Signer Kit directly. It never initializes or resets the device seed, installs device apps, signs a message or transaction, fetches balances, broadcasts, or arms a runner. Unlocking the device, opening Ethereum and physically verifying the new address remain hardware interactions.
+
+Installed with `npm install --save-exact --ignore-scripts --no-audit --no-fund`; no dependency lifecycle script was executed. Exact package tarball URLs, integrity hashes and resolved transitive versions are retained in `package-lock.json`. No stock `wallet-cli` was installed and no CLI analytics entrypoint is used.
+
+| Direct dependency | Exact version | License | Primary provenance |
+| --- | --- | --- | --- |
+| `@ledgerhq/device-management-kit` | 1.9.0 | Apache-2.0 | [Published package](https://registry.npmjs.org/@ledgerhq/device-management-kit/1.9.0) |
+| `@ledgerhq/device-transport-kit-node-hid` | 1.0.1 | Apache-2.0 | [Published package](https://registry.npmjs.org/@ledgerhq/device-transport-kit-node-hid/1.0.1) |
+| `@ledgerhq/device-signer-kit-ethereum` | 1.18.0 | Apache-2.0 | [Published package](https://registry.npmjs.org/@ledgerhq/device-signer-kit-ethereum/1.18.0) |
+| `@ledgerhq/context-module` | 2.5.0 | Apache-2.0 | [Published package](https://registry.npmjs.org/@ledgerhq/context-module/2.5.0) |
+| `rxjs` | 7.8.2 | Apache-2.0 | [Published package](https://registry.npmjs.org/rxjs/7.8.2) |
+
+Ledger package source provenance is [LedgerHQ/device-sdk-ts](https://github.com/LedgerHQ/device-sdk-ts), including source maps shipped in these npm artifacts. Resolved native transitive packages are `node-hid@3.4.0` (`MIT OR X11`) and `usb@2.18.0` (MIT); the lockfile records the rest. Package licenses continue to apply independently of this repository's MIT license.
+
+### Public account derivation and replay
+
+The hardware path is lazy: loading the app, selecting a different signer, or replaying a completed Ledger request does not load the native SDK. Selecting Ledger connects through DMK Node HID, with no logger subscribers and no session background refresh. Device discovery waits for one available device; multiple exposed devices require the user to connect just the intended Ledger. The operation has a 120-second deadline and bounded two-second cleanup, with observable cancellation/unsubscription, DMK disconnection and native transport destruction. The pinned Node HID implementation also installs a process exit callback; the adapter removes only the callback installed by its own transport during cleanup.
+
+The app derives public account zero at `44'/60'/0'/0/0` without displaying or exporting a chain code, hashes the public address as a local seed identifier, then reserves the next index starting at **1**. Paths follow the Ledger Live account convention `44'/60'/index'/0/0`. The address action for that reserved path uses `checkOnDevice: true` and `returnChainCode: false`. Only a valid completed device response succeeds; pending, rejection, interruption, malformed output or timeout cannot create a completed wallet. A second public anchor read checks that the seed identity did not change during verification.
+
+The local `ledger-onboarding/accounts.json` journal stores the request key, public seed fingerprint, index/path and, after verification, public address/timestamp. It contains no secret, seed, chain code or public-key export. A Ledger-only process lock serializes reservations/device access, and atomic 0600 writes persist the reservation **before** requesting physical verification. Existing directory components are checked for aliases; journal/lock reads use no-follow file descriptors and reject linked files, oversized data and broad file permissions. The same request retains its original seed and index after rejection or interruption; completed requests return the saved public result without hardware access. New requests increment independently for each seed. Account zero remains reserved for the existing primary account. This means **new to Rebalance**, not a guarantee that an index has never been used in another app or on another chain.
+
+Ethereum addresses are chain-independent. Setup intentionally omits `chainId` from `getAddress`; the published signer would otherwise load dynamic network context while verifying. The screen verifies an Ethereum address, and the application separately binds the resulting portfolio to Robinhood 4663. This is not evidence of Robinhood-specific device labeling or Clear Signing. No telemetry/logging subscriber is enabled; broader Ledger signing, metadata and Ring operations may have external dependencies and are outside this setup-only path. [Ethereum signer API](https://developers.ledger.com/docs/device-interaction/dmk-ts/references/signers/eth)
+
+### Actual validation and remaining limits
+
+All four adopted Ledger package CommonJS entrypoints loaded on **Node v24.18.0, macOS arm64**, with lifecycle scripts still disabled. The verification only required modules: it did not construct DMK/transport, discover/connect a device, derive an address or make a device request. The packages' ESM entrypoints failed under native Node because they contain extensionless/directory imports. The adapter therefore uses their documented package `require` exports through lazy `createRequire`, and the published signer constructor `{ dmk, sessionId }`, rather than the website's older `{ sdk, sessionId }` example.
+
+`tests/ledger-onboarding.test.ts` passed **15/15** isolated fixtures, and project TypeScript checking passed. Fixtures cover completed-only output, durable reservation before verification, replay, per-seed index separation, cross-seed rejection, identity changes, malformed output, cancellation/timeouts, missing/multiple devices, late connection disposal, lock serialization, linked-storage rejection and unchanged existing profile/trading files. Native imports passing does not establish USB/device compatibility; the transport's own README reports testing on Node 20. Its current discovery implementation also deduplicates entries by device model, so only the intended Ledger should be connected; multiple devices of the same model are not reliably distinguishable through that interface. Ledger hardware confirmation, rejection, Robinhood signing and prize qualification remain pending actual tests.
 
 ## Current Ledger flow
 

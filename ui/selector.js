@@ -9,6 +9,7 @@
   const percent = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
   let portfolios = [], authorized = false, canSetup = false, connectedWallet = null;
   let viewReady = !token, connecting = false, setupBusy = false, setupRequest = null, streamed = false, connectionRevision = 0;
+  let setupState = null, setupController = null, setupGeneration = 0, setupSuspended = false, setupAttachmentAllowed = false;
 
   function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -55,7 +56,11 @@
     byId("retry-setup").disabled = setupBusy;
   }
   function openSetup() {
-    if (!setupRequest) byId("setup-status").textContent = canSetup ? "" : "Open this page through your agent to set up a wallet.";
+    if (setupState === "ready") { setupRequest = null; setupState = null; }
+    if (!setupRequest) {
+      byId("setup-status").textContent = canSetup ? "" : "Open this page through your agent to set up a wallet.";
+      clearApproval(); byId("retry-setup").hidden = true;
+    }
     setSetupButtons();
     byId("setup-dialog").showModal();
   }
@@ -65,7 +70,7 @@
     if (!url) { byId("portfolio-status").textContent = "This portfolio’s chart address is unavailable."; return; }
     if (!authorized) { window.location.assign(url); return; }
     connecting = true; render();
-    const revision = connectionRevision;
+    const revision = ++connectionRevision;
     byId("portfolio-status").textContent = "Connecting this portfolio to your chat…";
     try {
       const result = await request("/api/connect", { token, wallet: portfolio.wallet });
@@ -160,34 +165,132 @@
   function validPortfolios(values) {
     return values.filter((item) => item && typeof item.wallet === "string" && /^0x[0-9a-f]{40}$/i.test(item.wallet) && Number.isSafeInteger(item.chainId) && item.chainId > 0);
   }
+  function clearApproval() {
+    byId("setup-approval").hidden = true;
+    byId("setup-approval-code").textContent = "";
+    byId("setup-approval-link").removeAttribute("href");
+  }
+  function verifiedSetup(value, expected) {
+    if (!value || value.requestId !== expected.requestId || value.mode !== expected.mode || value.tradingChanged !== false ||
+        !["preparing", "awaiting-approval", "awaiting-device", "ready", "failed"].includes(value.state) ||
+        typeof value.message !== "string" || value.message.length > 300) throw new Error();
+    if (value.state === "awaiting-approval" && !["privy", "ledger"].includes(value.mode) || value.state === "awaiting-device" && value.mode !== "ledger") throw new Error();
+    if (value.approval !== undefined || value.state === "awaiting-approval" && value.mode === "privy") {
+      if (value.mode !== "privy" || value.state !== "awaiting-approval" || typeof value.approval?.url !== "string" ||
+          value.approval.url.length > 512 || typeof value.approval?.code !== "string" ||
+          !/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/.test(value.approval.code) || value.approval.code.length < 4 || value.approval.code.length > 32) throw new Error();
+      const url = new URL(value.approval.url);
+      if (url.origin !== "https://agents.privy.io" || url.username || url.password || url.pathname !== "/" || url.hash ||
+          [...url.searchParams.keys()].length !== 1 || url.searchParams.get("user_code") !== value.approval.code) throw new Error();
+    }
+    if (value.state === "ready") {
+      if (typeof value.wallet !== "string" || !/^0x[0-9a-f]{40}$/i.test(value.wallet) || !safeChartUrl(value.chartUrl) ||
+          value.reused !== undefined && typeof value.reused !== "boolean") throw new Error();
+    } else if (value.wallet !== undefined || value.chartUrl !== undefined) throw new Error();
+    return value;
+  }
+  function acceptSetup(value, expected) {
+    const result = verifiedSetup(value, expected);
+    if (setupRequest !== expected) return true;
+    setupState = result.state;
+    setupBusy = !["ready", "failed"].includes(result.state);
+    clearApproval();
+    byId("setup-status").textContent = result.message;
+    byId("retry-setup").hidden = result.state !== "failed";
+    if (result.approval) {
+      byId("setup-approval-code").textContent = result.approval.code;
+      byId("setup-approval-link").setAttribute("href", result.approval.url);
+      byId("setup-approval").hidden = false;
+    }
+    setSetupButtons();
+    if (result.state === "ready") {
+      const attach = !setupSuspended && setupAttachmentAllowed && byId("setup-dialog").open &&
+        connectionRevision === expected.revision && !connecting;
+      setupAttachmentAllowed = false;
+      byId("setup-status").textContent = attach ? "Portfolio ready. Opening it…" : "Portfolio ready. Select it from the grid.";
+      if (attach) { byId("setup-dialog").close(); void choose(result); }
+    }
+    return !setupBusy;
+  }
+  function setupUnavailable() {
+    setupBusy = false; clearApproval();
+    byId("setup-status").textContent = "Setup progress is unavailable. Try again to check the same request.";
+    byId("retry-setup").hidden = false;
+    setSetupButtons();
+  }
+  function stopSetupStream() {
+    setupGeneration++; setupController?.abort(); setupController = null;
+  }
+  async function watchSetup(expected) {
+    if (setupSuspended || setupRequest !== expected || ["ready", "failed"].includes(setupState)) return;
+    stopSetupStream();
+    const controller = new AbortController(), generation = setupGeneration;
+    setupController = controller;
+    let reader = null;
+    try {
+      const response = await fetch("/api/setup/events", { method: "POST", cache: "no-store",
+        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+        body: JSON.stringify({ token, requestId: expected.requestId }), signal: controller.signal });
+      if (!response.ok || !response.body) throw new Error();
+      reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let pending = "";
+      while (!controller.signal.aborted && generation === setupGeneration) {
+        const part = await reader.read();
+        if (controller.signal.aborted || generation !== setupGeneration) return;
+        if (part.done) throw new Error();
+        pending += decoder.decode(part.value, { stream: true });
+        if (pending.length > 65_536) throw new Error();
+        for (let boundary; (boundary = /\r?\n\r?\n/.exec(pending));) {
+          const frame = pending.slice(0, boundary.index); pending = pending.slice(boundary.index + boundary[0].length);
+          let event = "message";
+          const data = [];
+          for (const line of frame.split(/\r?\n/)) {
+            if (line.startsWith("event:")) event = line.slice(6).trim();
+            if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+          }
+          if (event === "setup" && data.length && acceptSetup(JSON.parse(data.join("\n")), expected)) return;
+        }
+      }
+    } catch {
+      if (!controller.signal.aborted && generation === setupGeneration && setupRequest === expected) setupUnavailable();
+    } finally {
+      void reader?.cancel().catch(() => {}); reader?.releaseLock(); controller.abort();
+      if (setupController === controller) setupController = null;
+    }
+  }
   async function submitSetup() {
     if (!setupRequest || setupBusy || !canSetup) return;
-    setupBusy = true; setSetupButtons();
+    const expected = setupRequest;
+    stopSetupStream(); setupBusy = true; setSetupButtons(); clearApproval();
     byId("retry-setup").hidden = true;
-    byId("setup-status").textContent = "Sending the setup request to your agent…";
+    byId("setup-status").textContent = "Preparing your wallet…";
     try {
-      const result = await request("/api/setup", { token, ...setupRequest });
-      if (result?.requestId !== setupRequest.requestId || !["accepted", "pending", "uncertain"].includes(result.state)) throw new Error("Setup status could not be verified. Check the request with your agent.");
-      const messages = { accepted: "Setup request queued. Continue in your agent.", pending: "Setup is pending. Check your agent for the next step.", uncertain: "Setup status is uncertain. Check with your agent before starting another request." };
-      byId("setup-status").textContent = typeof result.message === "string" && result.message ? result.message : messages[result.state];
-      byId("retry-setup").hidden = result.state === "accepted";
-    } catch (error) {
-      byId("setup-status").textContent = error instanceof Error ? error.message : "Setup status is unknown. Check the request with your agent.";
-      byId("retry-setup").hidden = false;
-    }
-    setupBusy = false; setSetupButtons();
+      const result = await request("/api/setup", { token, mode: expected.mode, requestId: expected.requestId });
+      if (setupRequest !== expected) return;
+      if (!acceptSetup(result, expected)) void watchSetup(expected);
+    } catch { if (setupRequest === expected) setupUnavailable(); }
   }
   for (const mode of Object.keys(modes)) byId(`setup-${mode}`).addEventListener("click", () => {
     if (!canSetup || setupBusy || setupRequest) return;
-    setupRequest = { mode, requestId: crypto.randomUUID() };
+    setupRequest = { mode, requestId: crypto.randomUUID(), revision: connectionRevision };
+    setupAttachmentAllowed = true;
     void submitSetup();
   });
   byId("retry-setup").addEventListener("click", () => { void submitSetup(); });
-  byId("close-setup").addEventListener("click", () => byId("setup-dialog").close());
+  byId("close-setup").addEventListener("click", () => { setupAttachmentAllowed = false; byId("setup-dialog").close(); });
+  byId("setup-dialog").addEventListener("close", () => { setupAttachmentAllowed = false; });
+  byId("setup-dialog").addEventListener("cancel", () => { setupAttachmentAllowed = false; });
+  window.addEventListener("pagehide", () => { setupSuspended = true; setupAttachmentAllowed = false; stopSetupStream(); });
+  window.addEventListener("pageshow", () => {
+    if (!setupSuspended) return;
+    setupSuspended = false;
+    if (setupRequest && !["ready", "failed"].includes(setupState)) void watchSetup(setupRequest);
+  });
   byId("reload-portfolios").addEventListener("click", () => { void loadPortfolios(); });
   window.rebalanceView?.subscribe((update) => {
     if (update.snapshot) {
-      if (streamed && connectedWallet?.toLowerCase() !== update.snapshot.connectedWallet?.toLowerCase()) connectionRevision++;
+      if ((streamed || authorized) && connectedWallet?.toLowerCase() !== update.snapshot.connectedWallet?.toLowerCase()) connectionRevision++;
       streamed = true; authorized = true; viewReady = true;
       canSetup = update.snapshot.canSetup; connectedWallet = update.snapshot.connectedWallet;
       portfolios = validPortfolios(update.snapshot.portfolios);
