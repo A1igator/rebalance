@@ -2,7 +2,7 @@
 * { box-sizing: border-box; }
 body { margin: 0; min-height: 100vh; min-height: 100dvh; }
 main { width: min(100%, 1060px); margin: 0 auto; padding: 20px; }
-.selector-feedback { margin-bottom: 12px; padding: 14px; border: 1px solid #26312a; border-radius: 14px; background: #111713; color: #a3afa6; font-size: 11px; line-height: 1.6; }
+.selector-feedback { position: fixed; z-index: 20; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%); width: max-content; max-width: min(440px, calc(100vw - 32px)); max-height: 40dvh; overflow: auto; margin: 0; padding: 12px 16px; border: 1px solid #304035; border-radius: 12px; background: #17211b; box-shadow: 0 8px 32px #0008; color: #b7c3ba; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .selector-feedback:not(:has(p:not(:empty), button:not([hidden]))) { display: none; }
 .selector-feedback p { margin: 0; }
 .selector-feedback p:empty { display: none; }
