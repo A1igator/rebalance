@@ -87,18 +87,38 @@ async function browser(options: { gas?: () => Promise<Response>; status?: () => 
   };
 }
 
+function assertSector(node: DisplayNode, startPercent: number, endPercent: number, innerRadius: number, outerRadius: number) {
+  assert.equal(node.tag, 'path', 'partial allocations use bounded filled sectors instead of repeating circle dashes');
+  assert.ok(node.attrs.fill && node.attrs.fill !== 'none');
+  for (const attribute of ['stroke', 'stroke-width', 'stroke-dasharray', 'stroke-dashoffset', 'pathLength']) {
+    assert.equal(node.attrs[attribute], undefined, 'colored sectors cannot paint beyond their geometric boundaries');
+  }
+  const parts = node.attrs.d!.match(/[MLAZ]|[-+]?(?:\d*\.?\d+)(?:e[-+]?\d+)?/gi)!;
+  assert.equal(parts.length, 23);
+  assert.deepEqual([parts[0], parts[3], parts[11], parts[14], parts[22]], ['M', 'A', 'L', 'A', 'Z']);
+  const largeArc = endPercent - startPercent > 50 ? 1 : 0;
+  assert.deepEqual(parts.slice(4, 9).map(Number), [outerRadius, outerRadius, 0, largeArc, 1], 'outer arc follows the full clockwise allocation');
+  assert.deepEqual(parts.slice(15, 20).map(Number), [innerRadius, innerRadius, 0, largeArc, 0], 'inner arc closes the same allocation counterclockwise');
+  for (const [index, radius, percent] of [[1, outerRadius, startPercent], [9, outerRadius, endPercent], [12, innerRadius, endPercent], [20, innerRadius, startPercent]]) {
+    const angle = percent! * Math.PI / 50;
+    assert.ok(Math.abs(Number(parts[index!]) - 270 - radius! * Math.cos(angle)) < 1e-8, 'sector endpoints stay on the exact allocation boundary');
+    assert.ok(Math.abs(Number(parts[index! + 1]) - 270 - radius! * Math.sin(angle)) < 1e-8, 'sector endpoints stay on the exact allocation boundary');
+  }
+}
+
 test('actual and target rings share stable colors/order despite different configuration insertion order', async () => {
   const page = await browser();
   page.source.send({ ...current, config: { targets: { AMD: 2375, MSFT: 2375, NVDA: 2375, AAPL: 2375, USDG: 500 } } });
   const actual = page.element('segments').children;
   const targets = page.element('target-segments').children;
   assert.equal(actual.length, 5); assert.equal(targets.length, 5);
-  assert.deepEqual(actual.map(node => node.attrs.stroke), targets.map(node => node.attrs.stroke));
-  assert.deepEqual(actual.map(node => node.attrs['stroke-dashoffset']), targets.map(node => node.attrs['stroke-dashoffset']));
-  assert.deepEqual(actual.map(node => node.attrs['stroke-dasharray']), targets.map(node => node.attrs['stroke-dasharray']));
-  assert.equal(Math.abs(Number(actual[0]!.attrs['stroke-dashoffset'])), 0, 'colored segments start at the true allocation boundary');
-  assert.equal(actual[0]!.attrs['stroke-dasharray'], '5 95', 'divider rendering does not subtract from the colored allocation share');
-  assert.ok(targets.every(node => Number(node.attrs.r) + Number(node.attrs['stroke-width']) / 2 < 125));
+  const palette = ['#b4cbb8', '#8dbafa', '#bad776', '#b5a1df', '#e3a37c'];
+  assert.deepEqual(actual.map(node => node.attrs.fill), palette);
+  assert.deepEqual(targets.map(node => node.attrs.fill), palette);
+  const boundaries = [0, 5, 28.75, 52.5, 76.25, 100];
+  actual.forEach((node, index) => assertSector(node, boundaries[index]!, boundaries[index + 1]!, 125, 203));
+  targets.forEach((node, index) => assertSector(node, boundaries[index]!, boundaries[index + 1]!, 103.5, 116.5));
+  assert.ok(targets.every(node => Number(node.attrs.d!.split(' ')[4]) < 125), 'target outer edges clear the actual ring');
   assert.equal(page.element('comparison').textContent, 'Outer actual · Inner target');
   assert.match(page.element('chart-description').textContent, /Inner ring, targets: USDG 5%/);
   assert.equal(page.element('labels').children.filter(node => node.attrs.class === 'target-weight').length, 5);
@@ -106,17 +126,24 @@ test('actual and target rings share stable colors/order despite different config
   page.hide();
 });
 
-test('ring dividers have parallel straight edges and equal pixel width at both radii', async () => {
+test('ring dividers keep parallel straight edges at the exact boundaries of dominant and narrow allocations', async () => {
   const page = await browser();
+  const targets = { USDG: 7100, AAPL: 1800, NVDA: 100, MSFT: 0, AMD: 1000 };
+  page.source.send({ ...current, config: { targets }, portfolio: { ...current.portfolio, positions: current.portfolio.positions.map(p => ({ ...p, weightBps: targets[p.id as keyof typeof targets] })) } });
   const outer = page.element('actual-dividers').children;
   const inner = page.element('target-dividers').children;
-  assert.equal(outer.length, 5); assert.equal(inner.length, 5);
-  const boundaries = [0, 5, 28.75, 52.5, 76.25];
-  for (const [cuts, radius, thickness] of [[outer, 164, 78], [inner, 110, 13]] as const) {
+  assert.equal(outer.length, 4); assert.equal(inner.length, 4);
+  const boundaries = [0, 71, 89, 90, 100];
+  for (const [cuts, segmentsId, radius, thickness] of [[outer, 'segments', 164, 78], [inner, 'target-segments', 110, 13]] as const) {
+    const segments = page.element(segmentsId).children;
+    assert.deepEqual(segments.map(node => node.attrs.fill), ['#b4cbb8', '#8dbafa', '#bad776', '#e3a37c']);
+    segments.forEach((node, index) => assertSector(node, boundaries[index]!, boundaries[index + 1]!, radius - thickness / 2, radius + thickness / 2));
     cuts.forEach((cut, index) => {
       assert.equal(cut.tag, 'line', 'SVG line strokes have constant-width parallel sides, unlike angular wedge cuts');
       assert.equal(cut.attrs['stroke-linecap'], 'butt');
-      assert.equal(Number(cut.attrs['stroke-width']), 4, 'ordinary dividers keep the same pixel width across both rings');
+      const gap = Number(cut.attrs['stroke-width']);
+      if (index < 2) assert.equal(gap, 4, 'ordinary dividers keep the same pixel width across both rings');
+      else assert.ok(gap > 0 && gap < 4, 'the one percent allocation keeps visible space between its neighboring cuts');
       const x1 = Number(cut.attrs.x1) - 270, y1 = Number(cut.attrs.y1) - 270;
       const x2 = Number(cut.attrs.x2) - 270, y2 = Number(cut.attrs.y2) - 270;
       const angle = boundaries[index]! * Math.PI / 50;
@@ -136,11 +163,11 @@ test('divider widths preserve a visible portion of a 0.01 percent slice without 
   const targets = Object.fromEntries(Object.keys(allocation).map((id, index) => [id, weights[index]]));
   page.source.send({ ...current, config: { targets }, portfolio: { ...current.portfolio, positions: current.portfolio.positions.map((p, index) => ({ ...p, weightBps: weights[index] })) } });
   const sliceAngle = 0.01 * Math.PI / 50;
-  for (const [segmentsId, dividersId, innerRadius] of [['segments', 'actual-dividers', 125], ['target-segments', 'target-dividers', 103.5]] as const) {
+  for (const [segmentsId, dividersId, innerRadius, outerRadius] of [['segments', 'actual-dividers', 125, 203], ['target-segments', 'target-dividers', 103.5, 116.5]] as const) {
     const segments = page.element(segmentsId).children;
     const cuts = page.element(dividersId).children;
     assert.equal(segments.length, 5); assert.equal(cuts.length, 5);
-    assert.ok(Math.abs(Number(segments[0]!.attrs['stroke-dasharray']!.split(' ')[0]) - 0.01) < 1e-12);
+    assertSector(segments[0]!, 0, 0.01, innerRadius, outerRadius);
     const leading = Number(cuts[0]!.attrs['stroke-width']), trailing = Number(cuts[1]!.attrs['stroke-width']);
     assert.ok(leading > 0 && leading < 4 && trailing > 0 && trailing < 4, 'only the cuts bordering the dust slice become narrower');
     const retainedAngle = sliceAngle - Math.asin(leading / (2 * innerRadius)) - Math.asin(trailing / (2 * innerRadius));
@@ -154,11 +181,16 @@ test('a single full allocation has no artificial seam and clears earlier divider
   const page = await browser();
   page.source.send({ ...current, portfolio: { ...current.portfolio, positions: current.portfolio.positions.map(p => ({ ...p, weightBps: p.id === 'AAPL' ? 10000 : 0 })) } });
   assert.equal(page.element('segments').children.length, 1);
-  assert.equal(page.element('segments').children[0]!.attrs['stroke-dasharray'], '100 0');
+  const fullActual = page.element('segments').children[0]!;
+  assert.equal(fullActual.tag, 'circle');
+  assert.deepEqual(fullActual.attrs, { cx: '270', cy: '270', r: '164', fill: 'none', 'stroke-width': '78', stroke: '#8dbafa' }, 'full allocation uses a continuous undashed circle');
   assert.equal(page.element('actual-dividers').children.length, 0);
   assert.equal(page.element('target-dividers').children.length, 5);
   page.source.send({ ...current, config: { targets: { USDG: 0, AAPL: 10000, NVDA: 0, MSFT: 0, AMD: 0 } } });
   assert.equal(page.element('target-segments').children.length, 1);
+  const fullTarget = page.element('target-segments').children[0]!;
+  assert.equal(fullTarget.tag, 'circle');
+  assert.deepEqual(fullTarget.attrs, { cx: '270', cy: '270', r: '110', fill: 'none', 'stroke-width': '13', stroke: '#8dbafa' });
   assert.equal(page.element('target-dividers').children.length, 0);
   assert.equal(page.element('actual-dividers').children.length, 5, 'actual holdings keep their own true boundaries');
   page.hide();

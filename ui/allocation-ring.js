@@ -23,10 +23,20 @@
     let offset = 0;
     entries.forEach((entry, index) => {
       const share = entry.weight / total * 100;
-      segments.append(svgElement("circle", {
-        cx, cy, r: radius, fill: "none", "stroke-width": width, pathLength: 100,
-        stroke: color(entry.id), "stroke-dasharray": `${share} ${100 - share}`, "stroke-dashoffset": -offset,
-      }));
+      if (entries.length === 1) {
+        segments.append(svgElement("circle", { cx, cy, r: radius, fill: "none", "stroke-width": width, stroke: color(entry.id) }));
+      } else {
+        // Solid sectors cannot wrap a dash past the closed-circle seam. Both
+        // edges end at the allocation angle, including dominant and tiny slices.
+        const start = offset / 100 * Math.PI * 2, end = (offset + share) / 100 * Math.PI * 2;
+        const point = (r, angle) => `${cx + r * Math.cos(angle)} ${cy + r * Math.sin(angle)}`;
+        const large = share > 50 ? 1 : 0;
+        segments.append(svgElement("path", {
+          d: `M ${point(outerRadius, start)} A ${outerRadius} ${outerRadius} 0 ${large} 1 ${point(outerRadius, end)} ` +
+            `L ${point(innerRadius, end)} A ${innerRadius} ${innerRadius} 0 ${large} 0 ${point(innerRadius, start)} Z`,
+          fill: color(entry.id),
+        }));
+      }
       if (entries.length > 1) {
         const previousShare = entries[(index + entries.length - 1) % entries.length].weight / total * 100;
         // Limit the two neighboring cuts to at most half of a tiny slice.

@@ -548,4 +548,8 @@ Validation: initial full suite **733/733 passed**. After the final stop-generati
 
 ## Clean ring boundaries — 2026-09-07
 
-The human reported color bleeding in the Privy chart. [Prompt 051](prompts/051-clean-ring-boundaries.md) records the visible preview seam and planned replacement of dashed strokes with solid annular sectors before implementation. Root will update the shared renderer and visually verify it; a parallel agent will review the boundary geometry and existing assertions. Results are pending.
+The human reported color bleeding in the Privy chart. [Prompt 051](prompts/051-clean-ring-boundaries.md) was committed as `0cb1eef` before implementation. Root replaced repeating wide dashed circles with filled annular sectors in `ui/allocation-ring.js`; the shared masks, adaptive straight gaps, palette and allocation calculations remain unchanged. A full allocation uses an undashed circle. A parallel agent reviewed the geometry and adapted existing rendering assertions.
+
+Before/after inspection in the actual in-app browser shows the small orange spill at the top of the Privy grid preview removed. The full chart also has clean boundaries, including its 1% Nvidia slice; the local-key preview remains intact. Verification refreshed static UI assets, opened the already-connected Privy chart and returned to the selector. No server or runner restart, allocation edit, wallet setup, signing, notification or transaction action occurred. No dependency was added.
+
+Validation: all **61 focused display/selector tests passed**, including exact Privy allocation boundaries, matching actual/target colors, parallel gaps, 0.01% slices and full-circle coverage. TypeScript, JavaScript syntax and whitespace checks passed.
