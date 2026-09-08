@@ -1,6 +1,6 @@
 ---
 name: rebalance
-description: "Launch and operate the local Rebalance app from one Codex or Claude Code conversation. A bare invocation requests setup and arming together; scoped requests handle allocations, holdings, monitoring or the view-only chart. Not for generic repository development."
+description: "Launch and operate the local Rebalance app from one Codex or Claude Code conversation. A bare invocation requests setup and arming together; scoped requests handle allocations, holdings, monitoring or the chart companion. Not for generic repository development."
 ---
 
 # Rebalance
@@ -101,7 +101,7 @@ The default drift trigger is five percentage points. A cycle with a successful s
 
 ## Report observations accurately
 
-Use `check` to inspect a plan without submitting a swap. After an authorized change or start, use `status` or `graph` to report the configuration, public wallet, runner status, and any pending operation. Open the chart at the local URL reported by `chart` when the user asks to view it. The chart is informational. Portfolio navigation and deterministic wallet-setup clicks are allowed; allocation edits and execution requests stay in this conversation.
+Use `check` to inspect a plan without submitting a swap. After an authorized change or start, use `status` or `graph` to report the configuration, public wallet, runner status, and any pending operation. Open the chart at the local URL reported by `chart` when the user asks to view it. The chart companion permits portfolio navigation, deterministic wallet setup, public funding-address copy and explicit Start/Stop clicks for the displayed wallet. Those Start/Stop clicks call the existing local launcher/control path without a model turn; allocation edits remain in this conversation. Do not click real-money controls as a validation step. A stopping runner may still be settling a submitted transaction; Ledger execution remains deferred.
 
 Valuations are USDG equivalents derived from fresh onchain DEX quotes, not a USD price oracle. These token quotes already price the actual ERC-20 amount; do not multiply them by the issuer's share multiplier. DEX prices may differ from underlying stock prices, including when stock markets are closed. Chain state and receipts currently come from RPC. Describe this as RPC mode, not consensus-verified or completely trustless operation. The local raw-key runner can keep working after this conversation closes while its process and computer remain running.
 

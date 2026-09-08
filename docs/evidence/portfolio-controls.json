@@ -1,0 +1,52 @@
+{
+  "date": "2026-09-07",
+  "scope": "Portfolio chart Start/Stop and public funding-address copy",
+  "chainId": 4663,
+  "planningCommit": "b35b519",
+  "validation": {
+    "initialFullSuite": {
+      "tests": 733,
+      "pass": 733,
+      "fail": 0
+    },
+    "finalFullSuite": {
+      "tests": 734,
+      "pass": 733,
+      "fail": 1
+    },
+    "finalFocusedWithHd": {
+      "tests": 61,
+      "pass": 61,
+      "fail": 0
+    },
+    "knownIntermittentFailure": "HD wallet separate processes serialize reservations and replay after process restart; passed in isolation, no HD code changed"
+  },
+  "liveView": {
+    "signer": "privy",
+    "runnerState": "stopped",
+    "startEnabled": true,
+    "copyEnabled": true,
+    "fundingNetworkLabel": "Robinhood chain 4663",
+    "viewportWidth": 508,
+    "controlsOverlap": false,
+    "horizontalOverflow": false
+  },
+  "preservation": {
+    "publicPortfolioRecordsUnchanged": true,
+    "portfoliosChecked": 2,
+    "records": [
+      "config.json",
+      "wallet.json",
+      "run.lock",
+      "cycle.json",
+      "pending.json",
+      "recovery.json",
+      "stop.json"
+    ],
+    "onlyChartServersReloaded": true
+  },
+  "liveFinancialActions": false,
+  "liveClipboardUsed": false,
+  "ledgerExecution": "deferred",
+  "newDependencies": []
+}

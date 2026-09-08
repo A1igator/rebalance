@@ -8,11 +8,23 @@
     <link rel="stylesheet" href="/style.css">
     <script src="/view-client.js" defer></script>
     <script src="/allocation-ring.js" defer></script>
+    <script src="/portfolio-controls.js" defer></script>
     <script src="/app.js" defer></script>
   </head>
   <body>
     <main class="chart-shell">
-    <nav class="chart-nav" aria-label="Portfolio navigation"><a id="portfolios-back" href="/">← Portfolios</a></nav>
+    <nav class="chart-nav" aria-label="Portfolio navigation">
+      <a id="portfolios-back" href="/">← Portfolios</a>
+      <div class="portfolio-actions">
+        <button id="copy-address" class="address-button" type="button" disabled>
+          <svg class="control-icon" viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M13 5V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h1"/></svg>
+          <span id="copy-address-label">Address</span>
+        </button>
+        <button id="portfolio-run" class="run-button" type="button" disabled>Unavailable</button>
+      </div>
+    </nav>
+    <div id="funding-fallback" class="funding-fallback" hidden><input id="funding-address" readonly aria-label="Funding address on Robinhood chain 4663" spellcheck="false"></div>
+    <p id="control-message" class="control-message" role="status" hidden></p>
     <svg id="allocation" viewBox="-15 0 570 620" role="img" aria-labelledby="chart-title chart-description">
       <title id="chart-title">Allocation unavailable</title>
       <desc id="chart-description">Connecting to the local app.</desc>

@@ -335,6 +335,8 @@
   }
 
   function show(snapshot, disconnected = false) {
+    // Controls must regain freshness after browser restoration even when the chart pixels are unchanged.
+    window.rebalanceControls?.updateStatus(snapshot, disconnected);
     const key = JSON.stringify([snapshot, disconnected]);
     if (key === lastRendered) return;
     lastRendered = key;
@@ -359,7 +361,12 @@
       const response = await fetch("/api/status", { cache: "no-store", signal: request.signal });
       if (!response.ok) throw new Error("Local status unavailable");
       const snapshot = await response.json();
-      if (!streamReady && !suspended && generation === streamGeneration) accept(snapshot);
+      if (!streamReady && !suspended && generation === streamGeneration) {
+        accept(snapshot);
+        if (window.rebalanceControls) {
+          await window.rebalanceControls.refreshRunner(snapshot.wallet);
+        }
+      }
     } catch {
       if (!streamReady && !suspended) show(lastSnapshot, true);
     } finally {
@@ -398,10 +405,17 @@
           fallback();
         }
       });
+      source.addEventListener("runner", (event) => {
+        if (stream !== source || suspended) return;
+        try { window.rebalanceControls?.updateRunner(JSON.parse(event.data)); }
+        catch { window.rebalanceControls?.updateRunner(null, true); }
+      });
       // EventSource reconnects itself; polling runs only until a valid event.
       source.onerror = () => {
         if (stream !== source || suspended) return;
-        streamReady = false; fallback();
+        streamReady = false;
+        window.rebalanceControls?.updateRunner(null, true);
+        fallback();
       };
     } catch { fallback(); }
   }

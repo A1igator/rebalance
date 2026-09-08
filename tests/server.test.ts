@@ -273,6 +273,10 @@ test('chart uses events while connected and one polling fallback only while disc
   let renders = 0;
   let deferFetch = false;
   let resolveFetch: (() => void) | undefined;
+  const controlStatus: { snapshot: Status | null; disconnected: boolean }[] = [];
+  const controlRunners: { value: unknown; disconnected: boolean }[] = [];
+  const controlReads: (string | null)[] = [];
+  const restoredSnapshot = { ...initial, wallet: `0x${'1'.repeat(40)}`, updatedAt: 'newer' };
   const lifecycle = new Map<string, () => void>();
   const elements = new Map<string, { textContent: string; replaceChildren: () => void; append: () => void; setAttribute: () => void }>();
   const statusTimers = () => [...timers.values()].filter(timer => timer.ms === 4500 || timer.fn.name === 'refresh');
@@ -296,7 +300,13 @@ test('chart uses events while connected and one polling fallback only while disc
       if (deferFetch) await new Promise<void>(resolve => { resolveFetch = resolve; });
       return { ok: true, json: async () => initial };
     },
-    window: { addEventListener: (name: string, fn: () => void) => lifecycle.set(name, fn) },
+    window: { addEventListener: (name: string, fn: () => void) => lifecycle.set(name, fn),
+      rebalanceControls: {
+        updateStatus: (snapshot: Status | null, disconnected = false) => controlStatus.push({ snapshot, disconnected }),
+        updateRunner: (value: unknown, disconnected = false) => controlRunners.push({ value, disconnected }),
+        refreshRunner: async (wallet: string | null) => { controlReads.push(wallet); },
+      },
+    },
     document: {
       getElementById: (id: string) => {
         if (!elements.has(id)) elements.set(id, { textContent: '', replaceChildren: () => { if (id === 'segments') renders++; }, append: () => {}, setAttribute: () => {} });
@@ -314,26 +324,40 @@ test('chart uses events while connected and one polling fallback only while disc
   assert.equal(renders, 1);
   source.send(initial);
   assert.equal(renders, 1, 'identical events do not redraw the pie');
+  assert.equal(controlStatus.length, 2, 'each accepted status event refreshes controls even when chart drawing is deduplicated');
   source.onerror!(); source.onerror!();
   await delay(0);
   assert.equal(fetches, 1, 'repeated errors share one fallback request');
+  assert.equal(controlRunners.at(-1)?.disconnected, true, 'stream failure invalidates runner freshness');
+  assert.deepEqual(controlReads, [initial.wallet], 'status fallback delegates a pinned runner read to the shared controls boundary');
   assert.equal([...timers.values()].filter(timer => timer.ms === 5000).length, 1);
   source.send({ ...initial, updatedAt: 'fresh' });
   assert.equal(statusTimers().length, 0, 'reconnection cancels the polling timeout');
   assert.equal(fetches, 1); assert.equal(renders, 2);
   deferFetch = true;
   source.onerror!();
-  source.send({ ...initial, updatedAt: 'newer' });
+  source.send(restoredSnapshot);
   source.onerror!();
   resolveFetch!();
   await delay(0);
   assert.equal(fetches, 2); assert.equal(renders, 3, 'a late fallback cannot overwrite a newer streamed observation');
-  source.send({ ...initial, updatedAt: 'newer' });
+  source.send(restoredSnapshot);
   lifecycle.get('pagehide')!();
   assert.equal(source.closed, true); assert.equal(timers.size, 0);
   lifecycle.get('pageshow')!();
   assert.equal(Source.instances.length, 2, 'restoring the page reconnects once');
+  const beforeRestore = controlStatus.length;
   source.send(initial); source.onerror!();
   assert.equal(renders, 3, 'events from the closed page connection are ignored');
+  assert.equal(controlStatus.length, beforeRestore, 'closed connections cannot restore control freshness');
+  const restored = Source.instances[1]!;
+  restored.send(restoredSnapshot);
+  assert.equal(renders, 3, 'restoring an identical status still skips unnecessary chart drawing');
+  assert.equal(controlStatus.length, beforeRestore + 1, 'the identical restored payload must still reach controls marked stale by pagehide');
+  assert.equal(controlStatus.at(-1)?.snapshot?.wallet, restoredSnapshot.wallet);
+  assert.equal(controlStatus.at(-1)?.snapshot?.updatedAt, restoredSnapshot.updatedAt);
+  assert.equal(controlStatus.at(-1)?.disconnected, false);
+  restored.handlers.get('runner')!({ data: JSON.stringify({ wallet: restoredSnapshot.wallet, state: 'running' }) });
+  assert.equal(JSON.stringify(controlRunners.at(-1)), JSON.stringify({ value: { wallet: restoredSnapshot.wallet, state: 'running' }, disconnected: false }));
   lifecycle.get('pagehide')!();
 });
