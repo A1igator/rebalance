@@ -16,7 +16,7 @@ function fixture(weights: Record<string, number> = targets) {
   // $10,000 total and differing stock prices exercise token precision/conversion.
   const prices = { USDG: 1n, AAPL: 25n, NVDA: 5n, MSFT: 125n, AMD: 19n };
   const snapshot: Status = { app: 'Rebalance', chain: { id: 4663, name: 'Robinhood' }, mode: config.mode,
-    wallet: wallet.toLowerCase(), config: { targets: { ...targets }, rebalanceIntervalSeconds: 3600 },
+    wallet: wallet.toLowerCase(), config: { targets: { ...targets }, rebalanceIntervalSeconds: 3600, driftThresholdBps: 500 },
     cycle: null, operation: null, updatedAt: new Date(now).toISOString(), error: null,
     graph: { node: 'wait', trace: ['config', 'observe', 'plan', 'wait'] }, armed: true,
     portfolio: evaluatePortfolio(Object.keys(targets).map(id => {

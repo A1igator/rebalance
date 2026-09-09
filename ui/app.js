@@ -153,33 +153,33 @@
     return element;
   }
 
-  function drawRing(entries, segmentsId, dividersId, radius, width) {
-    const segments = byId(segmentsId), dividers = byId(dividersId);
-    segments.replaceChildren(); dividers.replaceChildren();
+  const arcStore = new Map(), tgtStore = new Map();
+  function drawRing(entries, container, radius, width, cls, store) {
+    const parent = byId(container);
     const total = entries.reduce((sum, entry) => sum + entry.weight, 0);
-    const innerRadius = radius - width / 2, outerRadius = radius + width / 2;
+    const seen = new Set();
     let offset = 0;
-    entries.forEach((entry, index) => {
-      const share = entry.weight / total * 100;
-      segments.append(svgElement("circle", {
-        cx: 270, cy: 270, r: radius, fill: "none", "stroke-width": width, pathLength: 100,
-        stroke: color(entry.id), "stroke-dasharray": `${share} ${100 - share}`, "stroke-dashoffset": -offset,
-      }));
-      if (entries.length > 1) {
-        const previousShare = entries[(index + entries.length - 1) % entries.length].weight / total * 100;
-        // A straight masked stroke has parallel edges. Limit its width so the
-        // two neighboring cuts together remove at most half of a tiny slice.
-        const gap = Math.min(4, 2 * innerRadius * Math.sin(Math.min(previousShare, share) * Math.PI / 200));
-        const angle = offset / 100 * Math.PI * 2;
-        const cos = Math.cos(angle), sin = Math.sin(angle);
-        dividers.append(svgElement("line", {
-          x1: 270 + cos * (innerRadius - 2), y1: 270 + sin * (innerRadius - 2),
-          x2: 270 + cos * (outerRadius + 2), y2: 270 + sin * (outerRadius + 2),
-          stroke: "black", "stroke-width": gap, "stroke-linecap": "butt",
-        }));
+    for (const entry of entries) {
+      const share = total > 0 ? entry.weight / total * 100 : 0;
+      let node = store.get(entry.id);
+      if (!node) {
+        node = svgElement("circle", { cx: 190, cy: 190, r: radius, fill: "none", "stroke-width": width, pathLength: 100, class: cls });
+        store.set(entry.id, node);
       }
+      if (node.parentNode !== parent) parent.append(node);
+      // A hairline gap reads as a divider without a mask. The gap never exceeds a
+      // third of a slice, so at least half of even a dust slice survives, and the
+      // drawn arc is never longer than the true allocation share.
+      const gap = entries.length > 1 ? Math.min(0.6, share / 3) : 0;
+      const length = share > 0 ? Math.max(share - gap, share / 2) : 0;
+      node.setAttribute("data-asset", entry.id);
+      node.setAttribute("stroke", color(entry.id));
+      node.setAttribute("stroke-dasharray", `${length} ${100 - length}`);
+      node.setAttribute("stroke-dashoffset", -offset);
+      seen.add(entry.id);
       offset += share;
-    });
+    }
+    for (const [id, node] of store) if (!seen.has(id)) { node.remove(); store.delete(id); }
   }
 
   const modelNumber = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
@@ -231,92 +231,181 @@
     return detail;
   }
 
+  const usdFormat = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  function usdTotal(value) {
+    const amount = unsigned(value);
+    return amount === null ? null : usdFormat.format(Number(amount / 1000000n) / 100);
+  }
+  function shortHash(hash) {
+    return typeof hash === "string" && /^0x[0-9a-fA-F]{64}$/.test(hash) ? `${hash.slice(0, 8)}…` : null;
+  }
+  function duration(seconds) {
+    if (!Number.isSafeInteger(seconds) || seconds <= 0) return null;
+    if (seconds % 3600 === 0) { const hours = seconds / 3600; return `${hours} ${hours === 1 ? "hour" : "hours"}`; }
+    if (seconds % 60 === 0) return `${seconds / 60} min`;
+    return `${seconds}s`;
+  }
+
+  const holdingRows = new Map();
+  function element(tag, className, parent) {
+    const node = document.createElement(tag);
+    if (className) node.setAttribute("class", className);
+    if (parent) parent.append(node);
+    return node;
+  }
+  function buildRow(id) {
+    const el = element("button", "hrow");
+    el.setAttribute("type", "button");
+    const dot = element("span", "dot", el);
+    const name = element("span", "hname", el);
+    const tick = element("span", "htick", name);
+    const bar = element("span", "bar", name);
+    const fill = element("i", "", bar);
+    element("u", "", bar);
+    const nums = element("span", "hnums", el);
+    const act = element("span", "hact", nums);
+    const drift = element("span", "hdrift", nums);
+    const highlight = (on) => {
+      byId("ring").classList.toggle("dim", on);
+      const arc = arcStore.get(id);
+      if (arc) arc.classList.toggle("on", on);
+    };
+    for (const [event, on] of [["mouseenter", true], ["mouseleave", false], ["focus", true], ["blur", false]]) {
+      el.addEventListener(event, () => highlight(on));
+    }
+    return { el, dot, tick, bar: fill, act, drift };
+  }
+  function drawHoldings(entries, targetMap, bandBps, funded) {
+    const host = byId("holdings");
+    const seen = new Set();
+    for (const entry of entries) {
+      let row = holdingRows.get(entry.id);
+      if (!row) { row = buildRow(entry.id); holdingRows.set(entry.id, row); }
+      if (row.el.parentNode !== host) host.append(row.el);
+      const target = Object.hasOwn(targetMap, entry.id) ? targetMap[entry.id] : null;
+      const drift = funded && target !== null ? entry.weight - target : null;
+      row.dot.style.background = color(entry.id);
+      row.tick.textContent = entry.id;
+      row.act.textContent = `${percent.format(entry.weight / 100)}%`;
+      // Bars are comparable across assets: a full half-track is eight percentage points.
+      const magnitude = drift === null ? 0 : Math.min(Math.abs(drift) / 800, 1) * 50;
+      row.bar.style.width = `${magnitude}%`;
+      row.bar.style.left = `${drift !== null && drift < 0 ? 50 - magnitude : 50}%`;
+      row.el.classList.toggle("out", drift !== null && Math.abs(drift) >= bandBps);
+      row.drift.textContent = drift === null ? (funded ? "no target" : `target ${percent.format(entry.weight / 100)}%`)
+        : `${drift >= 0 ? "+" : "\u2212"}${percent.format(Math.abs(drift) / 100)}`;
+      row.el.setAttribute("aria-label", `${entry.id} ${percent.format(entry.weight / 100)} percent` +
+        (target === null ? "" : `, target ${percent.format(target / 100)} percent`) +
+        (drift === null ? "" : `, ${drift >= 0 ? "over" : "under"} by ${percent.format(Math.abs(drift) / 100)} points`));
+      seen.add(entry.id);
+    }
+    for (const [id, row] of holdingRows) if (!seen.has(id)) { row.el.remove(); holdingRows.delete(id); }
+  }
+
   function render(snapshot, disconnected = false) {
     const portfolio = snapshot?.portfolio;
     const positions = Array.isArray(portfolio?.positions) ? portfolio.positions : [];
     const holdings = rows(positions.map((p) => ({ id: String(p.symbol || p.id), weight: p.weightBps })));
-    const targets = rows(Object.entries(snapshot?.config?.targets || {}).map(([id, weight]) => ({ id, weight })));
+    const targetMap = snapshot?.config?.targets || {};
+    const targets = rows(Object.entries(targetMap).map(([id, weight]) => ({ id, weight })));
     const funded = positive(portfolio?.totalUsdE8) && holdings.length > 0;
     const failed = disconnected || Boolean(snapshot?.error);
     const receiptWait = { pending: "Waiting for receipt", unresolved: "Transaction unresolved", confirming: "Confirming transaction", "recovery-wait": "Automatic recovery waiting", "recovery-busy": "Recovery in progress" }[snapshot?.operation?.status];
     const entries = funded ? holdings : targets;
-    const total = entries.reduce((sum, row) => sum + row.weight, 0);
-    const retained = failed || receiptWait || snapshot?.operation?.status === "cooling-down";
-    const state = funded ? retained ? "Last known holdings" : "Current holdings" : targets.length ? "Targets" : "No allocation";
-    let note = "Set targets through your agent";
-    if (funded) {
-      const observed = new Date(snapshot.updatedAt);
-      note = Number.isFinite(observed.getTime()) ? `As of ${time.format(observed)}` : "Last observed allocation";
-    } else if (targets.length) {
-      note = portfolio ? positions.some((p) => positive(p.balance)) ? "Holdings below precision" : "Wallet empty" : "Holdings not checked";
+    const bandRaw = snapshot?.config?.driftThresholdBps;
+    const band = Number.isInteger(bandRaw) && bandRaw >= 0 && bandRaw <= 10000 ? bandRaw : null;
+    let worst = 0;
+    if (funded) for (const entry of holdings) {
+      const target = Object.hasOwn(targetMap, entry.id) ? targetMap[entry.id] : null;
+      if (target !== null && Math.abs(entry.weight - target) > Math.abs(worst)) worst = entry.weight - target;
     }
-    if (receiptWait) note = receiptWait;
-    if (failed) note = "Update unavailable";
-    byId("state").textContent = state;
-    byId("note").textContent = note;
-    byId("comparison").textContent = funded && targets.length ? "Outer actual · Inner target" : "";
+
+    let state = "No allocation", sub = "Set targets through your agent", value = "";
+    if (failed) { state = funded ? "Last known" : "Unavailable"; sub = "Update unavailable"; }
+    else if (receiptWait) { state = "Rebalancing"; sub = receiptWait; }
+    else if (funded) {
+      const off = `${percent.format(Math.abs(worst) / 100)}% off target`;
+      state = band === null ? "Holdings" : Math.abs(worst) >= band ? "Off target" : "On target";
+      sub = band === null ? "Drift band unavailable" : off;
+    } else if (targets.length) {
+      state = "Targets";
+      sub = portfolio ? positions.some((p) => positive(p.balance)) ? "Holdings below precision" : "Wallet empty" : "Holdings not checked";
+    }
+    if (funded) {
+      const total = usdTotal(portfolio?.totalUsdE8);
+      const observed = new Date(snapshot?.updatedAt);
+      const at = Number.isFinite(observed.getTime()) ? time.format(observed) : null;
+      value = [total, at ? `as of ${at}` : null].filter(Boolean).join(" · ");
+    }
+    byId("c-state").textContent = state;
+    byId("c-sub").textContent = sub;
+    byId("c-val").textContent = value;
+    byId("c-legend").textContent = funded && targets.length ? "Outer holdings · inner targets" : targets.length ? "Targets only" : "";
     byId("chart-title").textContent = state;
-    allocationDescription = `${state}. ${note}. ${funded ? "Outer ring, actual holdings" : "Targets only"}: ${entries.map((r) => `${r.id} ${percent.format(r.weight / 100)}%`).join(", ")}.${funded && targets.length ? ` Inner ring, targets: ${targets.map((r) => `${r.id} ${percent.format(r.weight / 100)}%`).join(", ")}.` : ""}`;
+
+    drawRing(entries, "arcs", 150, 44, "arc", arcStore);
+    drawRing(funded ? targets : [], "targets", 112, 5, "tgt", tgtStore);
+    drawHoldings(entries, targetMap, band === null ? 10001 : band, funded);
+
+    // Motion reports settlement: an unconfirmed swap gets a ghost, never a moved arc.
+    const moving = receiptWait ? snapshot?.proposal?.sellAssetId : null;
+    for (const [id, arc] of arcStore) arc.classList.toggle("active", id === moving);
+    const ghost = byId("ghost");
+    const ghostTarget = moving !== null && moving !== undefined && funded && Object.hasOwn(targetMap, moving) ? moving : null;
+    if (ghostTarget) {
+      const total = targets.reduce((sum, row) => sum + row.weight, 0) || 1;
+      let offset = 0;
+      for (const row of targets) { if (row.id === ghostTarget) break; offset += row.weight / total * 100; }
+      const share = targetMap[ghostTarget] / total * 100;
+      ghost.setAttribute("stroke", color(ghostTarget));
+      ghost.setAttribute("stroke-dasharray", `${share} ${100 - share}`);
+      ghost.setAttribute("stroke-dashoffset", -offset);
+    }
+    ghost.classList.toggle("show", Boolean(ghostTarget));
+
+    const armed = snapshot?.armed === true;
+    const hash = shortHash(snapshot?.operation?.hash);
+    let summary = "Not armed · start through your agent";
+    let pulse = "off";
+    if (failed) summary = "Update unavailable · showing last known";
+    else if (receiptWait) {
+      pulse = "";
+      summary = snapshot?.proposal?.reason ? `${snapshot.proposal.reason} · ${receiptWait.toLowerCase()}` : receiptWait;
+    } else if (armed) {
+      pulse = "idle";
+      const next = snapshot?.cycle?.nextEligibleAt ? new Date(snapshot.cycle.nextEligibleAt) : null;
+      const at = next && Number.isFinite(next.getTime()) ? ` · next check ${time.format(next)}` : "";
+      summary = funded && band !== null && Math.abs(worst) < band ? `Monitoring · within range${at}` : `Monitoring${at}`;
+    }
+    byId("stext").textContent = summary;
+    byId("pulse").className = `pulse${pulse ? ` ${pulse}` : ""}`;
+
+    const allocation = snapshot?.config?.allocation;
+    byId("why-ask").textContent = allocation
+      ? allocation.objective === "sharpe" ? "Best historical Sharpe" : "Best return for your risk level"
+      : targets.length ? "Targets set by hand" : "\u2014";
+    const trade = snapshot?.proposal?.reason;
+    byId("why-trade").textContent = trade || (funded ? "No trade needed" : "\u2014");
+    // An unconfirmed send never renders as a bare hash; uncertainty stays visible.
+    const receipt = byId("why-receipt");
+    if (hash) {
+      const block = snapshot?.operation?.blockNumber;
+      const confirmed = snapshot?.operation?.status === "confirmed";
+      receipt.textContent = `${confirmed ? "\u2713 " : ""}${hash}${block ? ` blk ${block}` : ""}${confirmed ? "" : " · unconfirmed"}`;
+    } else {
+      receipt.textContent = receiptWait ? "pending\u2026" : "\u2014";
+    }
+
+    byId("set-band").textContent = `Rebalance when off by · ${band === null ? "unavailable" : `\u00b1${percent.format(band / 100)}%`}`;
+    const every = duration(snapshot?.config?.rebalanceIntervalSeconds);
+    byId("set-every").textContent = `Check every · ${every || "unavailable"}`;
+    const modes = { "private-key": "Local key", privy: "Privy", ledger: "Ledger" };
+    byId("set-sign").textContent = `Signing · ${modes[snapshot?.mode] || "unavailable"}`;
+
+    allocationDescription = `${state}. ${sub}. ${funded ? "Outer ring, actual holdings" : "Targets only"}: ${entries.map((r) => `${r.id} ${percent.format(r.weight / 100)}%`).join(", ")}.${funded && targets.length ? ` Inner ring, targets: ${targets.map((r) => `${r.id} ${percent.format(r.weight / 100)}%`).join(", ")}.` : ""}`;
     allocationDescription += ` ${renderRisk(snapshot, disconnected)}`;
     statusDisconnected = disconnected;
     renderGas();
-    const labels = byId("labels");
-    labels.replaceChildren();
-    drawRing(entries, "segments", "actual-dividers", 164, 78);
-    drawRing(funded ? targets : [], "target-segments", "target-dividers", 110, 13);
-    let offset = 0;
-    const placed = [];
-    for (const entry of entries) {
-      const share = entry.weight / total * 100;
-      const angle = ((offset + share / 2) / 100 * 360 - 90) * Math.PI / 180;
-      placed.push({ ...entry, x: 270 + Math.cos(angle) * 235, y: 270 + Math.sin(angle) * 235 });
-      offset += share;
-    }
-    if (funded) {
-      const targetTotal = targets.reduce((sum, row) => sum + row.weight, 0);
-      let targetOffset = 0;
-      for (const target of targets) {
-        const share = target.weight / targetTotal * 100;
-        if (!holdings.some((holding) => holding.id === target.id)) {
-          const angle = ((targetOffset + share / 2) / 100 * 360 - 90) * Math.PI / 180;
-          placed.push({ id: target.id, weight: 0, x: 270 + Math.cos(angle) * 235, y: 270 + Math.sin(angle) * 235 });
-        }
-        targetOffset += share;
-      }
-    }
-    // Separate labels on each side when small holdings cluster together.
-    for (const side of [placed.filter((p) => p.x < 270), placed.filter((p) => p.x >= 270)]) {
-      side.sort((a, b) => a.y - b.y);
-      for (let i = 1; i < side.length; i++) side[i].y = Math.max(side[i].y, side[i - 1].y + 53);
-      if (side.length) {
-        side[side.length - 1].y = Math.min(483, side[side.length - 1].y);
-        for (let i = side.length - 2; i >= 0; i--) side[i].y = Math.min(side[i].y, side[i + 1].y - 53);
-      }
-    }
-    for (const entry of placed) {
-      let x = Math.min(485, Math.max(55, entry.x));
-      const target = targets.find((row) => row.id === entry.id);
-      // Center the whole label stack on its polar anchor, keeping the top labels outside the outer ring.
-      const y = entry.y - (funded && target ? 18 : 0);
-      const stack = [
-        svgElement("text", { x, y, class: "ticker" }, entry.id),
-        svgElement("text", { x, y: y + 20, class: "weight" }, `${percent.format(entry.weight / 100)}%`),
-      ];
-      if (funded && target) stack.push(svgElement("text", { x, y: y + 35, class: "target-weight" }, `Target ${percent.format(target.weight / 100)}%`));
-      for (const label of stack) labels.append(label);
-      // Keep the whole text rectangle outside the circle, including labels moved by collision spacing.
-      const measured = stack.map((label) => typeof label.getBBox === "function" ? label.getBBox() : null).filter((box) => box?.width > 0 && box?.height > 0);
-      const halfWidth = measured.length ? Math.max(...measured.map((box) => box.width / 2)) : 35;
-      const top = measured.length ? Math.min(...measured.map((box) => box.y)) : y - 15;
-      const bottom = measured.length ? Math.max(...measured.map((box) => box.y + box.height)) : y + (stack.length === 3 ? 38 : 23);
-      const verticalDistance = top > 270 ? top - 270 : bottom < 270 ? 270 - bottom : 0;
-      const clearanceRadius = 207;
-      if (verticalDistance < clearanceRadius) {
-        const distance = Math.sqrt(clearanceRadius ** 2 - verticalDistance ** 2) + halfWidth;
-        x = x < 270 ? Math.min(x, 270 - distance) : Math.max(x, 270 + distance);
-        for (const label of stack) label.setAttribute("x", x);
-      }
-    }
   }
 
   let stream = null;

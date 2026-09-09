@@ -17,7 +17,11 @@ const current = {
 const reference = { chainId: 4663, swapGas: '168785', approvalGas: '57976', swapHash: `0x${'1'.repeat(64)}`, approvalHash: `0x${'2'.repeat(64)}` };
 const projection = { swaps: 2, observedAt: observed, wallet, targets: allocation, balances: Object.fromEntries(Object.keys(allocation).map(id => [id, '1'])) };
 const quote = { gasPriceWei: '20000000', ethUsdE8: '200000000000', gasObservedAt: observed, usdObservedAt: observed, reference, rebalance: projection };
-type DisplayNode = { tag: string; textContent: string; attrs: Record<string, string>; children: DisplayNode[]; replaceChildren: () => void; append: (child: DisplayNode) => void; setAttribute: (key: string, value: string) => void };
+type DisplayNode = { tag: string; textContent: string; attrs: Record<string, string>; children: DisplayNode[];
+  classes: Set<string>; style: Record<string, string>; parentNode: DisplayNode | null; listeners: Map<string, () => void>;
+  classList: { add: (name: string) => void; remove: (name: string) => void; toggle: (name: string, on?: boolean) => void; contains: (name: string) => boolean };
+  replaceChildren: () => void; append: (child: DisplayNode) => void; remove: () => void;
+  addEventListener: (name: string, handler: () => void) => void; setAttribute: (key: string, value: string) => void };
 type Response = { ok: boolean; json: () => Promise<unknown> };
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
@@ -31,7 +35,22 @@ async function browser(options: { gas?: () => Promise<Response>; status?: () => 
   let getGas = options.gas || (async () => ({ ok: true, json: async () => quote }));
   const getStatus = options.status || (async () => ({ ok: true, json: async () => current }));
   function node(tag: string, id?: string): DisplayNode {
-    const item: DisplayNode = { tag, textContent: '', attrs: {}, children: [], replaceChildren: () => { item.children = []; if (id === 'segments') pieRenders++; }, append: child => item.children.push(child), setAttribute: (key, value) => { item.attrs[key] = value; } };
+    const item = {
+      tag, textContent: '', attrs: {} as Record<string, string>, children: [] as DisplayNode[],
+      classes: new Set<string>(), style: {} as Record<string, string>, parentNode: null as DisplayNode | null,
+      listeners: new Map<string, () => void>(),
+      replaceChildren: () => { item.children = []; },
+      append: (child: DisplayNode) => { if (child.parentNode) child.parentNode.children = child.parentNode.children.filter(c => c !== child); child.parentNode = item; item.children.push(child); },
+      remove: () => { if (item.parentNode) item.parentNode.children = item.parentNode.children.filter(c => c !== item); item.parentNode = null; },
+      addEventListener: (name: string, handler: () => void) => { item.listeners.set(name, handler); },
+      setAttribute: (key: string, value: string) => { item.attrs[key] = value; },
+    } as DisplayNode;
+    item.classList = {
+      add: (name: string) => { item.classes.add(name); },
+      remove: (name: string) => { item.classes.delete(name); },
+      toggle: (name: string, on?: boolean) => { const next = on === undefined ? !item.classes.has(name) : on; if (next) item.classes.add(name); else item.classes.delete(name); },
+      contains: (name: string) => item.classes.has(name),
+    };
     return item;
   }
   class ClockDate extends Date {
@@ -58,8 +77,9 @@ async function browser(options: { gas?: () => Promise<Response>; status?: () => 
     },
     window: { addEventListener: (name: string, handler: () => void) => lifecycle.set(name, handler) },
     document: {
-      getElementById: (id: string) => { if (!elements.has(id)) elements.set(id, node('text', id)); return elements.get(id); },
+      getElementById: (id: string) => { if (id === 'arcs') pieRenders++; if (!elements.has(id)) elements.set(id, node('text', id)); return elements.get(id); },
       createElementNS: (_namespace: string, tag: string) => node(tag),
+      createElement: (tag: string) => node(tag),
     },
   });
   const source = Source.instances[0]!;
@@ -87,131 +107,127 @@ async function browser(options: { gas?: () => Promise<Response>; status?: () => 
 test('actual and target rings share stable colors/order despite different configuration insertion order', async () => {
   const page = await browser();
   page.source.send({ ...current, config: { targets: { AMD: 2375, MSFT: 2375, NVDA: 2375, AAPL: 2375, USDG: 500 } } });
-  const actual = page.element('segments').children;
-  const targets = page.element('target-segments').children;
+  const actual = page.element('arcs').children;
+  const targets = page.element('targets').children;
   assert.equal(actual.length, 5); assert.equal(targets.length, 5);
   assert.deepEqual(actual.map(node => node.attrs.stroke), targets.map(node => node.attrs.stroke));
   assert.deepEqual(actual.map(node => node.attrs['stroke-dashoffset']), targets.map(node => node.attrs['stroke-dashoffset']));
   assert.deepEqual(actual.map(node => node.attrs['stroke-dasharray']), targets.map(node => node.attrs['stroke-dasharray']));
   assert.equal(Math.abs(Number(actual[0]!.attrs['stroke-dashoffset'])), 0, 'colored segments start at the true allocation boundary');
-  assert.equal(actual[0]!.attrs['stroke-dasharray'], '5 95', 'divider rendering does not subtract from the colored allocation share');
-  assert.ok(targets.every(node => Number(node.attrs.r) + Number(node.attrs['stroke-width']) / 2 < 125));
-  assert.equal(page.element('comparison').textContent, 'Outer actual · Inner target');
+  assert.ok(targets.every(node => Number(node.attrs.r) + Number(node.attrs['stroke-width']) / 2 < 128));
+  assert.equal(page.element('c-legend').textContent, 'Outer holdings · inner targets');
   assert.match(page.element('chart-description').textContent, /Inner ring, targets: USDG 5%/);
-  assert.equal(page.element('labels').children.filter(node => node.attrs.class === 'target-weight').length, 5);
   assert.ok(!actual.some(node => node.textContent.includes('ETH')));
   page.hide();
 });
 
-test('ring dividers have parallel straight edges and equal pixel width at both radii', async () => {
-  const page = await browser();
-  const outer = page.element('actual-dividers').children;
-  const inner = page.element('target-dividers').children;
-  assert.equal(outer.length, 5); assert.equal(inner.length, 5);
-  const boundaries = [0, 5, 28.75, 52.5, 76.25];
-  for (const [cuts, radius, thickness] of [[outer, 164, 78], [inner, 110, 13]] as const) {
-    cuts.forEach((cut, index) => {
-      assert.equal(cut.tag, 'line', 'SVG line strokes have constant-width parallel sides, unlike angular wedge cuts');
-      assert.equal(cut.attrs['stroke-linecap'], 'butt');
-      assert.equal(Number(cut.attrs['stroke-width']), 4, 'ordinary dividers keep the same pixel width across both rings');
-      const x1 = Number(cut.attrs.x1) - 270, y1 = Number(cut.attrs.y1) - 270;
-      const x2 = Number(cut.attrs.x2) - 270, y2 = Number(cut.attrs.y2) - 270;
-      const angle = boundaries[index]! * Math.PI / 50;
-      assert.ok(Math.abs(x1 * y2 - y1 * x2) < 1e-8, 'divider centerline follows the radial allocation boundary');
-      assert.ok(Math.abs(Math.hypot(x1, y1) - (radius - thickness / 2 - 2)) < 1e-8, 'cut starts inside the inner edge');
-      assert.ok(Math.abs(Math.hypot(x2, y2) - (radius + thickness / 2 + 2)) < 1e-8, 'cut finishes past the outer edge');
-      assert.ok(Math.abs(x2 / Math.hypot(x2, y2) - Math.cos(angle)) < 1e-8);
-      assert.ok(Math.abs(y2 / Math.hypot(x2, y2) - Math.sin(angle)) < 1e-8, 'equal actual/target allocations share exact divider centers');
-    });
-  }
-  page.hide();
-});
-
-test('divider widths preserve a visible portion of a 0.01 percent slice without enlarging its allocation', async () => {
+test('slice gaps never enlarge an allocation and always leave a dust slice visible', async () => {
   const page = await browser();
   const weights = [1, 2499, 2500, 2500, 2500];
   const targets = Object.fromEntries(Object.keys(allocation).map((id, index) => [id, weights[index]]));
   page.source.send({ ...current, config: { targets }, portfolio: { ...current.portfolio, positions: current.portfolio.positions.map((p, index) => ({ ...p, weightBps: weights[index] })) } });
-  const sliceAngle = 0.01 * Math.PI / 50;
-  for (const [segmentsId, dividersId, innerRadius] of [['segments', 'actual-dividers', 125], ['target-segments', 'target-dividers', 103.5]] as const) {
-    const segments = page.element(segmentsId).children;
-    const cuts = page.element(dividersId).children;
-    assert.equal(segments.length, 5); assert.equal(cuts.length, 5);
-    assert.ok(Math.abs(Number(segments[0]!.attrs['stroke-dasharray']!.split(' ')[0]) - 0.01) < 1e-12);
-    const leading = Number(cuts[0]!.attrs['stroke-width']), trailing = Number(cuts[1]!.attrs['stroke-width']);
-    assert.ok(leading > 0 && leading < 4 && trailing > 0 && trailing < 4, 'only the cuts bordering the dust slice become narrower');
-    const retainedAngle = sliceAngle - Math.asin(leading / (2 * innerRadius)) - Math.asin(trailing / (2 * innerRadius));
-    assert.ok(retainedAngle >= sliceAngle / 2 - 1e-12, 'at least half the tiny slice survives even at the narrower inner edge');
-    assert.equal(Number(cuts[2]!.attrs['stroke-width']), 4, 'unrelated larger slices retain ordinary divider width');
+  for (const container of ['arcs', 'targets'] as const) {
+    const segments = page.element(container).children;
+    assert.equal(segments.length, 5);
+    const shares = weights.map(weight => weight / 100);
+    segments.forEach((segment, index) => {
+      const drawn = Number(segment.attrs['stroke-dasharray']!.split(' ')[0]);
+      assert.ok(drawn <= shares[index]! + 1e-12, 'a gap never draws more than the true allocation share');
+      assert.ok(drawn >= shares[index]! / 2 - 1e-12, 'at least half of every slice survives its gap');
+    });
+    assert.ok(Number(segments[0]!.attrs['stroke-dasharray']!.split(' ')[0]) > 0, 'a 0.01 percent dust slice stays visible');
   }
   page.hide();
 });
 
-test('a single full allocation has no artificial seam and clears earlier divider cuts', async () => {
+test('a single full allocation is drawn without an artificial seam', async () => {
   const page = await browser();
   page.source.send({ ...current, portfolio: { ...current.portfolio, positions: current.portfolio.positions.map(p => ({ ...p, weightBps: p.id === 'AAPL' ? 10000 : 0 })) } });
-  assert.equal(page.element('segments').children.length, 1);
-  assert.equal(page.element('segments').children[0]!.attrs['stroke-dasharray'], '100 0');
-  assert.equal(page.element('actual-dividers').children.length, 0);
-  assert.equal(page.element('target-dividers').children.length, 5);
-  page.source.send({ ...current, config: { targets: { USDG: 0, AAPL: 10000, NVDA: 0, MSFT: 0, AMD: 0 } } });
-  assert.equal(page.element('target-segments').children.length, 1);
-  assert.equal(page.element('target-dividers').children.length, 0);
-  assert.equal(page.element('actual-dividers').children.length, 5, 'actual holdings keep their own true boundaries');
+  assert.equal(page.element('arcs').children.length, 1);
+  assert.equal(page.element('arcs').children[0]!.attrs['stroke-dasharray'], '100 0');
   page.hide();
 });
 
-test('label rectangles clear the outer ring even after vertical collision spacing', async () => {
+test('every asset gets one holdings row carrying its drift and out-of-band state', async () => {
   const page = await browser();
-  for (const weights of [[500, 2375, 2375, 2375, 2375], [100, 9400, 200, 100, 200], [0, 10000, 0, 0, 0]]) {
-    page.source.send({ ...current, portfolio: { ...current.portfolio, positions: current.portfolio.positions.map((p, i) => ({ ...p, weightBps: weights[i] })) } });
-    const labels = page.element('labels').children;
-    for (let index = 0; index < labels.length; index += 3) {
-      const ticker = labels[index]!;
-      const x = Number(ticker.attrs.x), y = Number(ticker.attrs.y);
-      const closestX = Math.max(0, Math.abs(x - 270) - 35);
-      const top = y - 15, bottom = y + 38;
-      const closestY = top > 270 ? top - 270 : bottom < 270 ? 270 - bottom : 0;
-      assert.ok(Math.hypot(closestX, closestY) >= 206.999, `${ticker.textContent} text must clear the 203px outer radius`);
-      assert.ok(x - 35 >= -15 && x + 35 <= 555, `${ticker.textContent} stays inside the SVG horizontal viewBox`);
-    }
-  }
+  const weights = [500, 2900, 2200, 2200, 2200];
+  page.source.send({ ...current, config: { targets: allocation, driftThresholdBps: 500 },
+    portfolio: { ...current.portfolio, positions: current.portfolio.positions.map((p, i) => ({ ...p, weightBps: weights[i] })) } });
+  const list = page.element('holdings').children;
+  assert.equal(list.length, 5, 'one row per asset, no radial labels');
+  const tickers = list.map(row => row.children[1]!.children[0]!.textContent);
+  assert.deepEqual(tickers, ['USDG', 'AAPL', 'NVDA', 'MSFT', 'AMD']);
+  const aapl = list[1]!;
+  assert.equal(aapl.children[2]!.children[0]!.textContent, '29%');
+  assert.equal(aapl.children[2]!.children[1]!.textContent, '+5.25');
+  assert.ok(aapl.classes.has('out'), 'a holding past the drift band is marked out of range');
+  assert.ok(!list[0]!.classes.has('out'), 'a holding inside the band is not');
+  assert.match(aapl.attrs['aria-label']!, /AAPL 29 percent, target 23.75 percent, over by 5.25 points/);
   page.hide();
 });
 
-test('a target with no holdings gets its own target slice and an explicit zero actual label', async () => {
+test('the centre states whether holdings are on target, and against which band', async () => {
+  const page = await browser();
+  page.source.send({ ...current, config: { targets: allocation, driftThresholdBps: 500 } });
+  assert.equal(page.element('c-state').textContent, 'On target');
+  assert.equal(page.element('c-sub').textContent, '0% off target');
+  assert.equal(page.element('set-band').textContent, 'Rebalance when off by · ±5%');
+  const weights = [500, 2900, 2200, 2200, 2200];
+  page.source.send({ ...current, config: { targets: allocation, driftThresholdBps: 500 },
+    portfolio: { ...current.portfolio, positions: current.portfolio.positions.map((p, i) => ({ ...p, weightBps: weights[i] })) } });
+  assert.equal(page.element('c-state').textContent, 'Off target');
+  assert.equal(page.element('c-sub').textContent, '5.25% off target');
+  page.source.send({ ...current, config: { targets: allocation } });
+  assert.equal(page.element('c-state').textContent, 'Holdings', 'no band means no on-target claim');
+  assert.equal(page.element('set-band').textContent, 'Rebalance when off by · unavailable');
+  page.hide();
+});
+
+test('an unconfirmed send never renders as a bare receipt hash', async () => {
+  const page = await browser();
+  const hash = `0x${'a'.repeat(64)}`;
+  page.source.send({ ...current, operation: { status: 'pending', hash }, proposal: { sellAssetId: 'AAPL', buyAssetId: 'USDG', amountIn: '1', reason: 'Sell overweight AAPL into USDG' } });
+  assert.equal(page.element('c-state').textContent, 'Rebalancing');
+  assert.match(page.element('why-receipt').textContent, /unconfirmed$/);
+  assert.equal(page.element('stext').textContent, 'Sell overweight AAPL into USDG · waiting for receipt');
+  assert.ok(page.element('ghost').classes.has('show'), 'a pending swap shows where the holding is heading');
+  page.source.send({ ...current, operation: { status: 'confirmed', hash, blockNumber: '55516741' } });
+  assert.equal(page.element('why-receipt').textContent, `✓ ${hash.slice(0, 8)}… blk 55516741`);
+  assert.ok(!page.element('ghost').classes.has('show'), 'a settled swap moves the arc instead of ghosting it');
+  page.hide();
+});
+
+test('a target with no holdings still gets its own target slice', async () => {
   const page = await browser();
   const positions = current.portfolio.positions.map(p => ({ ...p, weightBps: p.id === 'AAPL' ? 10000 : 0 }));
   page.source.send({ ...current, portfolio: { ...current.portfolio, positions } });
-  assert.equal(page.element('segments').children.length, 1);
-  assert.equal(page.element('target-segments').children.length, 5);
-  const labels = page.element('labels').children;
-  assert.equal(labels.filter(node => node.textContent === '0%').length, 4);
-  assert.equal(labels.filter(node => node.attrs.class === 'ticker').length, 5);
+  assert.equal(page.element('arcs').children.length, 1);
+  assert.equal(page.element('targets').children.length, 5);
   page.hide();
 });
 
 test('empty and unobserved wallets show only explicitly labeled targets', async () => {
   const page = await browser();
   page.source.send({ ...current, portfolio: { totalUsdE8: '0', positions: current.portfolio.positions.map(p => ({ ...p, balance: '0', weightBps: 0 })) } });
-  assert.equal(page.element('state').textContent, 'Targets');
-  assert.equal(page.element('note').textContent, 'Wallet empty');
-  assert.equal(page.element('comparison').textContent, '');
-  assert.equal(page.element('segments').children.length, 5);
-  assert.equal(page.element('target-segments').children.length, 0);
+  assert.equal(page.element('c-state').textContent, 'Targets');
+  assert.equal(page.element('c-sub').textContent, 'Wallet empty');
+  assert.equal(page.element('c-val').textContent, '');
+  assert.equal(page.element('c-legend').textContent, 'Targets only');
+  assert.equal(page.element('arcs').children.length, 5);
+  assert.equal(page.element('targets').children.length, 0);
   assert.match(page.element('chart-description').textContent, /Targets only/);
   page.source.send({ ...current, portfolio: null });
-  assert.equal(page.element('note').textContent, 'Holdings not checked');
-  assert.equal(page.element('target-segments').children.length, 0);
+  assert.equal(page.element('c-sub').textContent, 'Holdings not checked');
+  assert.equal(page.element('targets').children.length, 0);
   page.hide();
 });
 
 test('read failures preserve actual/target comparison as last known holdings', async () => {
   const page = await browser();
   page.source.send({ ...current, error: 'Read unavailable' });
-  assert.equal(page.element('state').textContent, 'Last known holdings');
-  assert.equal(page.element('note').textContent, 'Update unavailable');
-  assert.equal(page.element('target-segments').children.length, 5);
+  assert.equal(page.element('c-state').textContent, 'Last known');
+  assert.equal(page.element('c-sub').textContent, 'Update unavailable');
+  assert.equal(page.element('targets').children.length, 5);
   assert.match(page.element('gas').textContent, /last known/);
   page.hide();
 });

@@ -16,7 +16,7 @@ const targetText = 'USDG=5,AAPL=23.75,NVDA=23.75,MSFT=23.75,AMD=23.75';
 const wallet = '0x0000000000000000000000000000000000000001';
 function status(): Status {
   return { app: 'Rebalance', chain: { id: 4663, name: 'Robinhood' }, mode: 'private-key', wallet,
-    config: { targets, rebalanceIntervalSeconds: 3600 }, cycle: null, portfolio: null, operation: null,
+    config: { targets, rebalanceIntervalSeconds: 3600, driftThresholdBps: 500 }, cycle: null, portfolio: null, operation: null,
     updatedAt: null, error: null, graph: { node: 'wait', trace: [] }, armed: false };
 }
 async function fixture(t: TestContext) {
@@ -43,7 +43,7 @@ async function fixture(t: TestContext) {
       if (args[0] === 'status' || args[0] === 'check') return { ok: true, value: structuredClone(current) };
       if (args[0] === 'wallet') { current.wallet = wallet; return { ok: true, value: { address: wallet, created: true } }; }
       if (args[0] === 'configure') {
-        current.config = { targets, rebalanceIntervalSeconds: 3600 }; current.mode = 'private-key';
+        current.config = { targets, rebalanceIntervalSeconds: 3600, driftThresholdBps: 500 }; current.mode = 'private-key';
         return { ok: true, value: {} };
       }
       if (args[0] === 'chart') {

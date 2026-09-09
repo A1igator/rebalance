@@ -273,7 +273,7 @@ test('chart uses events while connected and one polling fallback only while disc
   let deferFetch = false;
   let resolveFetch: (() => void) | undefined;
   const lifecycle = new Map<string, () => void>();
-  const elements = new Map<string, { textContent: string; replaceChildren: () => void; append: () => void; setAttribute: () => void }>();
+  const elements = new Map<string, Record<string, unknown>>();
   const statusTimers = () => [...timers.values()].filter(timer => timer.ms === 4500 || timer.fn.name === 'refresh');
   class Source {
     static instances: Source[] = [];
@@ -298,10 +298,18 @@ test('chart uses events while connected and one polling fallback only while disc
     window: { addEventListener: (name: string, fn: () => void) => lifecycle.set(name, fn) },
     document: {
       getElementById: (id: string) => {
-        if (!elements.has(id)) elements.set(id, { textContent: '', replaceChildren: () => { if (id === 'segments') renders++; }, append: () => {}, setAttribute: () => {} });
+        if (id === 'arcs') renders++;
+        if (!elements.has(id)) elements.set(id, { textContent: '', style: {}, parentNode: null, children: [],
+          classList: { add: () => {}, remove: () => {}, toggle: () => {}, contains: () => false },
+          replaceChildren: () => {}, append: () => {}, remove: () => {}, addEventListener: () => {}, setAttribute: () => {} });
         return elements.get(id);
       },
-      createElementNS: () => ({ setAttribute: () => {}, textContent: '' }),
+      createElementNS: () => ({ setAttribute: () => {}, textContent: '', style: {}, parentNode: null,
+        classList: { add: () => {}, remove: () => {}, toggle: () => {}, contains: () => false },
+        append: () => {}, remove: () => {} }),
+      createElement: () => ({ setAttribute: () => {}, textContent: '', classes: new Set(), style: {}, parentNode: null,
+        classList: { add: () => {}, remove: () => {}, toggle: () => {}, contains: () => false },
+        children: [], append: () => {}, remove: () => {}, addEventListener: () => {} }),
     },
   });
   const source = Source.instances[0]!;
