@@ -115,7 +115,7 @@ test('actual and target rings share stable colors/order despite different config
   assert.deepEqual(actual.map(node => node.attrs['stroke-dasharray']), targets.map(node => node.attrs['stroke-dasharray']));
   assert.equal(Math.abs(Number(actual[0]!.attrs['stroke-dashoffset'])), 0, 'colored segments start at the true allocation boundary');
   assert.ok(targets.every(node => Number(node.attrs.r) + Number(node.attrs['stroke-width']) / 2 < 128));
-  assert.equal(page.element('c-legend').textContent, 'Outer holdings · inner targets');
+  assert.equal(page.element('c-legend').textContent, '', 'a funded ring needs no legend: every row names its own target');
   assert.match(page.element('chart-description').textContent, /Inner ring, targets: USDG 5%/);
   assert.ok(!actual.some(node => node.textContent.includes('ETH')));
   page.hide();

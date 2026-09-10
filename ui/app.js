@@ -340,7 +340,7 @@
     byId("c-state").textContent = state;
     byId("c-sub").textContent = sub;
     byId("c-val").textContent = value;
-    byId("c-legend").textContent = funded && targets.length ? "Outer holdings · inner targets" : targets.length ? "Targets only" : "";
+    byId("c-legend").textContent = funded || !targets.length ? "" : "Targets only";
     byId("chart-title").textContent = state;
 
     drawRing(entries, "arcs", 150, 44, "arc", arcStore);
@@ -542,6 +542,13 @@
   window.addEventListener("pageshow", () => {
     if (suspended) { suspended = false; connect(); renderGas(); void refreshGas(); }
   });
+  const summaryButton = byId("sum"), detailPanel = byId("panel");
+  summaryButton.addEventListener("click", () => {
+    const open = summaryButton.getAttribute("aria-expanded") === "true";
+    summaryButton.setAttribute("aria-expanded", String(!open));
+    detailPanel.classList.toggle("open", !open);
+  });
+
   connect();
   void refreshGas();
 })();
