@@ -241,14 +241,17 @@ test('missing, malformed and wrong-chain wallets remove any prior explorer desti
   assert.equal(page.calls.length, 0); assert.equal(page.uuidCalls, 0);
 });
 
-test('chart uses a native external link and Details contains only Fees and When it trades', async () => {
+test('chart uses native external links and a collapsed accessible Settings panel', async () => {
   const [html, app, controls] = await Promise.all(['index.html', 'app.js', 'portfolio-controls.js'].map(file => readFile(new URL(`../ui/${file}`, import.meta.url), 'utf8')));
   const anchor = html!.match(/<a\b[^>]*id="wallet-explorer"[^>]*>/)?.[0];
   assert.ok(anchor);
   assert.match(anchor, /target="_blank"/); assert.match(anchor, /rel="noopener noreferrer"/);
   assert.match(anchor, /referrerpolicy="no-referrer"/); assert.doesNotMatch(anchor, /\bhref=/);
   assert.doesNotMatch(html!, /copy-address|funding-fallback|funding-address|Latest trade|why-trade|why-receipt/);
-  assert.match(html!, />Fees</); assert.match(html!, />When it trades</);
+  assert.doesNotMatch(html!, />Details<|>Fees<|id="panel"|id="sum"/);
+  assert.match(html!, /id="settings-toggle"[^>]*aria-expanded="false"[^>]*aria-controls="settings-panel"/);
+  assert.match(html!, /id="settings-panel"[^>]*aria-hidden="true"[^>]*inert/);
+  assert.match(html!, /Drift trigger/); assert.match(html!, /Cycle interval/); assert.match(html!, /Fee target/);
   assert.doesNotMatch(controls!, /clipboard|window\.open/);
   assert.match(html!, /id="control-message"[^>]*role="status"/);
   assert.ok(html!.indexOf('/portfolio-controls.js') >= 0);

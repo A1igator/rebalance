@@ -9,69 +9,55 @@
 }
 * { box-sizing: border-box; }
 body { margin: 0; height: 100vh; height: 100dvh; display: flex; overflow: hidden; }
-/* The window is the app: full bleed, with only the content column measured.
-   The summary line stays reachable at the bottom edge, so opening the panel
-   never pushes it past the fold; the allocation area yields the space. */
-.chart-shell { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.measure { width: 100%; max-width: 54rem; margin: 0 auto; }
+/* The allocation ring and its centre share the available window. */
+.chart-shell { position: relative; padding-bottom: 46px; flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .main { flex: 1 1 auto; min-height: 0; display: grid; place-items: center; padding: clamp(8px, 2vh, 24px) clamp(12px, 3vw, 32px); }
-/* The panel scrolls on a short window without showing chrome over the art. */
-.panelin { scrollbar-width: none; }
-.panelin::-webkit-scrollbar { width: 0; height: 0; }
 
-svg.ring { fill: var(--ink); width: 100%; max-width: 40rem; max-height: 100%; height: auto; aspect-ratio: 560 / 480; display: block; }
+svg.ring { overflow: visible; fill: var(--ink); width: 100%; max-width: 40rem; max-height: 100%; height: auto; aspect-ratio: 560 / 480; display: block; }
 .track { stroke: var(--track); }
-.arc { fill: none; stroke-linecap: butt; transition: opacity .18s ease, stroke-dasharray .95s cubic-bezier(.32,.72,.24,1), stroke-dashoffset .95s cubic-bezier(.32,.72,.24,1); }
+.arc { stroke-linecap: butt; transition: opacity .18s ease, stroke-dasharray .95s cubic-bezier(.32,.72,.24,1), stroke-dashoffset .95s cubic-bezier(.32,.72,.24,1); }
 .arc.active { animation: seg 1.7s ease-in-out infinite; }
 @keyframes seg { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
-.tgt { fill: none; stroke-linecap: butt; opacity: .5; }
-.ghost { stroke-linecap: butt; opacity: 0; transition: opacity .45s ease; }
+.tgt { stroke-linecap: butt; opacity: .5; }
+.ghost { pointer-events: none; stroke-linecap: butt; opacity: 0; transition: opacity .45s ease; }
 .ghost.show { opacity: .22; }
 text { text-anchor: middle; }
-.ctr-state { font-size: 23px; font-weight: 500; letter-spacing: -.5px; fill: var(--ink); }
-.ctr-sub { font-size: 12px; fill: var(--mute); }
+.centre { height: 100%; display: flex; flex-direction: column; justify-content: center; text-align: center; }
+.centre p { margin: 0; }
+.ctr-state { font-size: 22px; line-height: 26px; font-weight: 500; letter-spacing: -.5px; color: var(--ink); }
+.ctr-state.compact { font-size: 16px; line-height: 23px; }
+.ctr-sub { margin-top: 4px !important; font-size: 12px; line-height: 15px; color: var(--mute); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .ctr-val { font-size: 10.5px; fill: var(--faint); }
+.centre .ctr-val { margin-top: 6px; line-height: 14px; color: var(--faint); }
+.centre .ctr-val:empty { display: none; }
+/* Reserve the closed bar once. Its panel grows over the chart, never through
+   the chart's layout, so opening and closing cannot move or resize the ring. */
+.settings { position: absolute; z-index: 10; left: 0; right: 0; bottom: 0; height: 46px; }
+.settings-toggle { display: flex; justify-content: space-between; align-items: center; width: 100%; height: 46px; padding: 0 clamp(20px, 5vw, 40px); border: 0; border-top: 1px solid var(--rule); background: var(--ground); color: var(--mute); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.settings-toggle::after { content: "+"; font-size: 16px; line-height: 12px; }
+.settings-toggle[aria-expanded="true"]::after { content: "−"; }
+.settings-toggle:hover { background: var(--lift); color: var(--ink); }
+.settings-toggle:focus-visible { outline: 2px solid #8dbafa; outline-offset: -2px; }
+.settings-panel { position: absolute; bottom: 100%; left: 0; right: 0; display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden; pointer-events: none; transition: grid-template-rows .28s ease, opacity .22s ease, visibility 0s .28s; }
+.settings-panel.open { grid-template-rows: 1fr; opacity: 1; visibility: visible; pointer-events: auto; transition-delay: 0s; }
+.settings-clip { min-height: 0; overflow: hidden; }
+.settings-content { max-height: 42dvh; overflow: auto; background: var(--lift); border-top: 1px solid var(--rule); padding: 18px clamp(20px, 5vw, 40px) 22px; }
+.settings-rows { display: grid; gap: 10px; max-width: 54rem; margin: 0 auto; }
+.settings-rows > div { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; line-height: 18px; }
+.settings-rows dt { font-size: 12px; color: var(--mute); }
+.settings-rows dd { margin: 0; font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; min-width: 0; text-align: right; }
 
 /* A label can sit far from its slice, so it carries the slice colour as a
    presentation attribute. No fill here, so that attribute applies; the
    out-of-band rule below is CSS and still overrides it. */
 .ticker { font-size: 14px; font-weight: 600; letter-spacing: .4px; }
+.label-leader { fill: none; stroke-width: 1; opacity: .5; pointer-events: none; }
 .weight { font-size: 12.5px; fill: var(--mute); font-variant-numeric: tabular-nums; }
 .label-out .ticker { fill: var(--alert); }
 .label-out .weight { fill: var(--alert); }
 
-.discl { border-top: 1px solid var(--rule); flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0; max-height: 62dvh; }
-.summary { display: flex; align-items: center; gap: 12px; width: 100%; padding: 15px clamp(20px, 5vw, 40px); background: none; border: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
-.summary:hover { background: var(--lift); }
-.summary:hover .stext, .summary[aria-expanded="true"] .stext { color: var(--mute); }
-.summary:focus-visible { outline: 2px solid #8dbafa; outline-offset: -2px; }
-.stext { font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--faint); }
-.chev { margin-left: auto; color: var(--faint); flex: none; transition: transform .22s cubic-bezier(.2,.8,.3,1); }
-.summary[aria-expanded="true"] .chev { transform: rotate(180deg); }
-
-.panel { display: grid; min-height: 0; grid-template-rows: 0fr; transition: grid-template-rows .28s cubic-bezier(.2,.8,.3,1); background: var(--lift); }
-.panel.open { grid-template-rows: 1fr; }
-.panelin { overflow: hidden auto; min-height: 0; }
-.panelpad { padding: 18px clamp(20px, 5vw, 40px) 22px; display: flex; flex-direction: column; gap: 18px; border-top: 1px solid var(--rule); }
-.panelpad section { display: flex; flex-direction: column; gap: 10px; }
-.cap { font-size: 9.5px; letter-spacing: .13em; text-transform: uppercase; color: var(--faint); margin: 0; }
-.chain { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-@media (max-width: 720px) { .chain { grid-template-columns: repeat(2, 1fr); } }
-.step { display: flex; flex-direction: column; gap: 7px; }
-.sval { font-size: 12.5px; color: var(--dim); line-height: 1.45; }
-.sval.mono { font-family: var(--mono); font-size: 11.5px; }
-.foot { font-size: 10.5px; color: var(--faint); line-height: 1.55; margin: 0; }
-/* Label left, value right, so four fees read as a column of numbers rather
-   than four sentences. */
-.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 22px 44px; }
-@media (max-width: 720px) { .pair { grid-template-columns: 1fr; } }
-.rows { display: grid; gap: 7px; margin: 0; }
-.rows > div { display: grid; grid-template-columns: minmax(0, auto) 1fr; gap: 18px; align-items: baseline; }
-.rows dt { font-size: 11.5px; color: var(--faint); white-space: nowrap; }
-.rows dd { margin: 0; font-size: 11.5px; color: var(--dim); font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
-
 @media (prefers-reduced-motion: reduce) {
-  .arc, .ghost, .chev, .panel { transition: none; }
+  .arc, .ghost, .settings-panel { transition: none; }
   .arc.active { animation: none; }
 }
 
@@ -91,7 +77,20 @@ text { text-anchor: middle; }
 .portfolio-actions .run-button { min-width: 68px; }
 .portfolio-actions .run-button[data-state="running"] { color: #d0decf; background: #1a2920; border-color: #365340; }
 .control-icon { width: 15px; height: 15px; max-height: none; fill: none; stroke: currentColor; stroke-width: 1.3; flex-shrink: 0; }
-/* Raised clear of the details bar, which main's layout did not have. */
-.control-message { position: fixed; z-index: 20; left: 50%; bottom: calc(60px + max(16px, env(safe-area-inset-bottom))); transform: translateX(-50%); width: max-content; max-width: min(440px, calc(100vw - 32px)); max-height: 40dvh; overflow: auto; margin: 0; padding: 12px 16px; border: 1px solid #304035; border-radius: 12px; background: #17211b; box-shadow: 0 8px 32px #0008; color: #b7c3ba; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.control-message { position: fixed; z-index: 20; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%); width: max-content; max-width: min(440px, calc(100vw - 32px)); max-height: 40dvh; overflow: auto; margin: 0; padding: 12px 16px; border: 1px solid #304035; border-radius: 12px; background: #17211b; box-shadow: 0 8px 32px #0008; color: #b7c3ba; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 [hidden] { display: none !important; }
 @media (max-width: 360px) { .chart-nav { gap: 4px; } .portfolio-actions { gap: 2px; } .portfolio-actions button, .portfolio-actions .address-link { padding: 8px; } .portfolio-actions .address-link { gap: 4px; } }
+
+/* Chart-only stock links. One asset highlights across both rings and its label. */
+.stock-link { cursor: pointer; fill: inherit; text-decoration: none; }
+.stock-link__visual { transform: translate(0, 0); transition: filter .18s ease, transform .2s ease; }
+.stock-link__hit { opacity: 0 !important; pointer-events: painted; }
+.stock-link.is-highlighted .stock-link__visual { filter: brightness(1.25); transform: translate(var(--stock-offset-x, 0px), var(--stock-offset-y, 0px)); }
+.stock-link.is-highlighted .arc, .stock-link.is-highlighted .tgt { opacity: 1; animation: none; }
+.stock-link.is-highlighted .stock-link__visual .ticker { font-weight: 800; text-decoration: underline; text-underline-offset: 3px; }
+.stock-link:focus-visible { outline: 2px solid var(--ink); outline-offset: 4px; }
+.stock-link:active .stock-link__visual { filter: brightness(1.1); }
+@media (prefers-reduced-motion: reduce) {
+  .stock-link__visual { transition: none; }
+  .stock-link.is-highlighted .stock-link__visual { transform: none; }
+}

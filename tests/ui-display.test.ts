@@ -15,18 +15,16 @@ const current = {
   config: { targets: allocation },
   portfolio: { totalUsdE8: '500000000', positions: Object.entries(allocation).map(([id, weightBps]) => ({ id, symbol: id, weightBps, balance: '1', valueUsdE8: String(weightBps * 50000) })) },
 };
-const reference = { chainId: 4663, swapGas: '168785', approvalGas: '57976', swapHash: `0x${'1'.repeat(64)}`, approvalHash: `0x${'2'.repeat(64)}` };
-const projection = { swaps: 2, observedAt: observed, wallet, targets: allocation, balances: Object.fromEntries(Object.keys(allocation).map(id => [id, '1'])) };
-const quote = { gasPriceWei: '20000000', ethUsdE8: '200000000000', gasObservedAt: observed, usdObservedAt: observed, reference, rebalance: projection };
 type DisplayNode = { tag: string; textContent: string; attrs: Record<string, string>; children: DisplayNode[];
   classes: Set<string>; style: Record<string, string>; parentNode: DisplayNode | null; listeners: Map<string, () => void>;
   classList: { add: (name: string) => void; remove: (name: string) => void; toggle: (name: string, on?: boolean) => void; contains: (name: string) => boolean };
-  replaceChildren: () => void; append: (child: DisplayNode) => void; remove: () => void;
+  cloneNode: (deep?: boolean) => DisplayNode; replaceChildren: () => void; append: (child: DisplayNode) => void; remove: () => void;
+  getAttribute: (key: string) => string | null; removeAttribute: (key: string) => void;
   addEventListener: (name: string, handler: () => void) => void; setAttribute: (key: string, value: string) => void };
 type Response = { ok: boolean; json: () => Promise<unknown> };
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
-async function browser(options: { gas?: () => Promise<Response>; status?: () => Promise<Response> } = {}) {
+async function browser(options: { status?: () => Promise<Response>; stockLinks?: boolean } = {}) {
   const [ringScript, script, html] = await Promise.all(['allocation-ring.js', 'app.js', 'index.html']
     .map(file => readFile(new URL(`../ui/${file}`, import.meta.url), 'utf8')));
   const htmlIds = new Set([...html!.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]));
@@ -35,7 +33,6 @@ async function browser(options: { gas?: () => Promise<Response>; status?: () => 
   const timers = new Map<number, { fn: () => void; at: number }>();
   const calls: { url: string; at: number; signal: AbortSignal }[] = [];
   let now = initialTime, nextTimer = 0, pieRenders = 0;
-  let getGas = options.gas || (async () => ({ ok: true, json: async () => quote }));
   const getStatus = options.status || (async () => ({ ok: true, json: async () => current }));
   function node(tag: string, id?: string): DisplayNode {
     const item = {
@@ -47,6 +44,14 @@ async function browser(options: { gas?: () => Promise<Response>; status?: () => 
       remove: () => { if (item.parentNode) item.parentNode.children = item.parentNode.children.filter(c => c !== item); item.parentNode = null; },
       addEventListener: (name: string, handler: () => void) => { item.listeners.set(name, handler); },
       setAttribute: (key: string, value: string) => { item.attrs[key] = value; },
+      getAttribute: (key: string) => item.attrs[key] ?? null,
+      removeAttribute: (key: string) => { delete item.attrs[key]; },
+      cloneNode: (deep = false) => {
+        const clone = node(tag); clone.attrs = { ...item.attrs }; clone.textContent = item.textContent;
+        for (const cls of item.classes) clone.classes.add(cls);
+        if (deep) for (const child of item.children) clone.append(child.cloneNode(true));
+        return clone;
+      },
     } as DisplayNode;
     item.classList = {
       add: (name: string) => { item.classes.add(name); },
@@ -76,7 +81,8 @@ async function browser(options: { gas?: () => Promise<Response>; status?: () => 
     clearTimeout: (id: number) => timers.delete(id),
     fetch: async (url: string, request: { signal: AbortSignal }) => {
       calls.push({ url, at: now, signal: request.signal });
-      return url === '/api/gas' ? getGas() : getStatus();
+      assert.equal(url, '/api/status', 'the chart has no independent gas quote requests');
+      return getStatus();
     },
     window: { addEventListener: (name: string, handler: () => void) => lifecycle.set(name, handler) },
     document: {
@@ -85,6 +91,7 @@ async function browser(options: { gas?: () => Promise<Response>; status?: () => 
     },
   });
   runInContext(ringScript, context);
+  if (options.stockLinks) runInContext(await readFile(new URL('../ui/stock-links.js', import.meta.url), 'utf8'), context);
   runInContext(script, context);
   const source = Source.instances[0]!;
   source.send(current);
@@ -93,7 +100,6 @@ async function browser(options: { gas?: () => Promise<Response>; status?: () => 
     element: (id: string) => elements.get(id)!,
     get renders() { return pieRenders; }, get now() { return now; },
     calls, timers, source,
-    setGas(fn: () => Promise<Response>) { getGas = fn; },
     hide() { lifecycle.get('pagehide')!(); },
     show() { lifecycle.get('pageshow')!(); },
     async advance(ms: number) {
@@ -108,66 +114,89 @@ async function browser(options: { gas?: () => Promise<Response>; status?: () => 
   };
 }
 
-function assertSector(node: DisplayNode, startPercent: number, endPercent: number, innerRadius: number, outerRadius: number) {
-  assert.equal(node.tag, 'path', 'partial allocations use bounded filled sectors instead of repeating circle dashes');
+type Point = [number, number];
+function sector(node: DisplayNode) {
+  assert.equal(node.tag, 'path');
   assert.ok(node.attrs.fill && node.attrs.fill !== 'none');
-  for (const attribute of ['stroke', 'stroke-width', 'stroke-dasharray', 'stroke-dashoffset', 'pathLength']) {
-    assert.equal(node.attrs[attribute], undefined, 'colored sectors cannot paint beyond their geometric boundaries');
-  }
+  for (const attr of ['stroke', 'stroke-width', 'stroke-dasharray', 'stroke-dashoffset', 'pathLength', 'mask', 'clip-path']) assert.equal(node.attrs[attr], undefined);
   const parts = node.attrs.d!.match(/[MLAZ]|[-+]?(?:\d*\.?\d+)(?:e[-+]?\d+)?/gi)!;
   assert.equal(parts.length, 23);
   assert.deepEqual([parts[0], parts[3], parts[11], parts[14], parts[22]], ['M', 'A', 'L', 'A', 'Z']);
-  const largeArc = endPercent - startPercent > 50 ? 1 : 0;
-  assert.deepEqual(parts.slice(4, 9).map(Number), [outerRadius, outerRadius, 0, largeArc, 1], 'outer arc follows the full clockwise allocation');
-  assert.deepEqual(parts.slice(15, 20).map(Number), [innerRadius, innerRadius, 0, largeArc, 0], 'inner arc closes the same allocation counterclockwise');
-  for (const [index, radius, percent] of [[1, outerRadius, startPercent], [9, outerRadius, endPercent], [12, innerRadius, endPercent], [20, innerRadius, startPercent]]) {
-    const angle = percent! * Math.PI / 50;
-    assert.ok(Math.abs(Number(parts[index!]) - 270 - radius! * Math.cos(angle)) < 1e-8, 'sector endpoints stay on the exact allocation boundary');
-    assert.ok(Math.abs(Number(parts[index! + 1]) - 270 - radius! * Math.sin(angle)) < 1e-8, 'sector endpoints stay on the exact allocation boundary');
-  }
+  const point = (i: number): Point => [Number(parts[i]) - 210, Number(parts[i + 1]) - 210];
+  return { outerStart: point(1), outerEnd: point(9), innerEnd: point(12), innerStart: point(20),
+    outer: Number(parts[4]), inner: Number(parts[15]), outerLarge: Number(parts[7]), innerLarge: Number(parts[18]) };
 }
+const dot = (point: Point, angle: number) => -point[0] * Math.sin(angle) + point[1] * Math.cos(angle);
+const angleOf = (point: Point, start: number) => {
+  let angle = Math.atan2(point[1], point[0]);
+  while (angle < start - 1e-12) angle += Math.PI * 2;
+  return angle;
+};
 
-test('actual and target rings share stable colors/order despite different configuration insertion order', async () => {
+test('actual and target rings share stable colors and exact boundary directions despite config order', async () => {
   const page = await browser();
   page.source.send({ ...current, config: { targets: { AMD: 2375, MSFT: 2375, NVDA: 2375, AAPL: 2375, USDG: 500 } } });
-  const actual = page.element('arcs').children;
-  const targets = page.element('targets').children;
+  const actual = page.element('arcs').children, targets = page.element('targets').children;
   assert.equal(actual.length, 5); assert.equal(targets.length, 5);
-  assert.deepEqual(actual.map(node => node.attrs.stroke), targets.map(node => node.attrs.stroke));
-  assert.deepEqual(actual.map(node => node.attrs['stroke-dashoffset']), targets.map(node => node.attrs['stroke-dashoffset']));
-  assert.deepEqual(actual.map(node => node.attrs['stroke-dasharray']), targets.map(node => node.attrs['stroke-dasharray']));
-  assert.equal(Math.abs(Number(actual[0]!.attrs['stroke-dashoffset'])), 0, 'colored segments start at the true allocation boundary');
-  assert.ok(targets.every(node => Number(node.attrs.r) + Number(node.attrs['stroke-width']) / 2 < 128));
-  assert.equal(page.element('c-legend').textContent, '', 'a funded ring needs no legend: every row names its own target');
+  assert.deepEqual(actual.map(node => node.attrs.fill), targets.map(node => node.attrs.fill));
+  let boundary = 0;
+  for (let index = 0; index < actual.length; index++) {
+    for (const node of [actual[index]!, targets[index]!]) {
+      const shape = sector(node);
+      assert.ok(Math.abs(dot(shape.outerStart, boundary) - 2) < 1e-9);
+      assert.ok(Math.abs(dot(shape.innerStart, boundary) - 2) < 1e-9, 'cut follows the exact allocation boundary at both radii');
+    }
+    boundary += Object.values(allocation)[index]! / 10000 * Math.PI * 2;
+  }
+  assert.ok(targets.every(node => sector(node).outer < 128));
+  assert.equal(page.element('c-legend').textContent, '');
   assert.match(page.element('chart-description').textContent, /Inner ring, targets: USDG 5%/);
-  assert.ok(!actual.some(node => node.textContent.includes('ETH')));
   page.hide();
 });
 
-test('slice gaps never enlarge an allocation and always leave a dust slice visible', async () => {
+test('neighboring gap edges are parallel with a shared width and never consume more than half a tiny slice', async () => {
   const page = await browser();
-  const weights = [1, 2499, 2500, 2500, 2500];
-  const targets = Object.fromEntries(Object.keys(allocation).map((id, index) => [id, weights[index]]));
-  page.source.send({ ...current, config: { targets }, portfolio: { ...current.portfolio, positions: current.portfolio.positions.map((p, index) => ({ ...p, weightBps: weights[index] })) } });
-  for (const container of ['arcs', 'targets'] as const) {
-    const segments = page.element(container).children;
-    assert.equal(segments.length, 5);
-    const shares = weights.map(weight => weight / 100);
-    segments.forEach((segment, index) => {
-      const drawn = Number(segment.attrs['stroke-dasharray']!.split(' ')[0]);
-      assert.ok(drawn <= shares[index]! + 1e-12, 'a gap never draws more than the true allocation share');
-      assert.ok(drawn >= shares[index]! / 2 - 1e-12, 'at least half of every slice survives its gap');
-    });
-    assert.ok(Number(segments[0]!.attrs['stroke-dasharray']!.split(' ')[0]) > 0, 'a 0.01 percent dust slice stays visible');
+  for (const weights of [[500, 2375, 2375, 2375, 2375], [1, 2499, 2500, 2500, 2500], [9996, 1, 1, 1, 1], [5000, 4997, 1, 1, 1]]) {
+    const targets = Object.fromEntries(Object.keys(allocation).map((id, index) => [id, weights[index]]));
+    page.source.send({ ...current, config: { targets }, portfolio: { ...current.portfolio,
+      positions: current.portfolio.positions.map((p, index) => ({ ...p, weightBps: weights[index] })) } });
+    for (const container of ['arcs', 'targets']) {
+      const shapes = page.element(container).children.map(sector);
+      let start = 0;
+      for (let index = 0; index < shapes.length; index++) {
+        const shape = shapes[index]!, previous = shapes[(index + shapes.length - 1) % shapes.length]!;
+        const sweep = weights[index]! / 10000 * Math.PI * 2, end = start + sweep;
+        for (const point of [shape.outerStart, shape.outerEnd]) assert.ok(Math.abs(Math.hypot(...point) - shape.outer) < 1e-9);
+        for (const point of [shape.innerStart, shape.innerEnd]) assert.ok(Math.abs(Math.hypot(...point) - shape.inner) < 1e-9);
+        const startCut = dot(shape.outerStart, start), endCut = dot(shape.outerEnd, end);
+        assert.ok(startCut > 0 && startCut <= 2 + 1e-9);
+        assert.ok(endCut < 0 && endCut >= -2 - 1e-9);
+        assert.ok(Math.abs(startCut - dot(shape.innerStart, start)) < 1e-9, 'start chord is parallel across both radii');
+        assert.ok(Math.abs(endCut - dot(shape.innerEnd, end)) < 1e-9, 'end chord is parallel across both radii');
+        assert.ok(Math.abs(startCut + dot(previous.outerEnd, start)) < 1e-9, 'adjacent cuts share one centered gap');
+        assert.ok(Math.abs(startCut + dot(previous.innerEnd, start)) < 1e-9, 'inner and outer gap widths agree');
+        const innerStart = angleOf(shape.innerStart, start), innerEnd = angleOf(shape.innerEnd, start);
+        assert.ok(innerStart >= start - 1e-12 && innerEnd <= end + 1e-12);
+        assert.ok(innerEnd - innerStart >= sweep / 2 - 1e-12, 'at least half the exact slice remains at the narrowest radius');
+        assert.equal(shape.innerLarge, innerEnd - innerStart > Math.PI ? 1 : 0);
+        start = end;
+      }
+    }
   }
   page.hide();
 });
 
-test('a single full allocation is drawn without an artificial seam', async () => {
+test('one full allocation uses a seamless annulus and preserves its geometry node as weights change', async () => {
   const page = await browser();
-  page.source.send({ ...current, portfolio: { ...current.portfolio, positions: current.portfolio.positions.map(p => ({ ...p, weightBps: p.id === 'AAPL' ? 10000 : 0 })) } });
+  const apple = page.element('arcs').children[1]!;
+  page.source.send({ ...current, portfolio: { ...current.portfolio,
+    positions: current.portfolio.positions.map(p => ({ ...p, weightBps: p.id === 'AAPL' ? 10000 : 0 })) } });
   assert.equal(page.element('arcs').children.length, 1);
-  assert.equal(page.element('arcs').children[0]!.attrs['stroke-dasharray'], '100 0');
+  assert.equal(page.element('arcs').children[0], apple);
+  assert.equal(apple.tag, 'path');
+  assert.equal((apple.attrs.d!.match(/ A /g) || []).length, 4, 'two complete circles close a seam-free annulus');
+  assert.equal(apple.attrs['stroke-dasharray'], undefined);
+  assert.equal(apple.attrs.mask, undefined, 'the whole annulus moves with its native link');
   page.hide();
 });
 
@@ -193,7 +222,7 @@ test('ring labels clear the ring and stay inside the viewBox after collision spa
       const [ticker, weight] = group.children;
       const x = Number(ticker!.attrs.x), y = Number(ticker!.attrs.y);
       // The whole two-line block, not just its first line, must clear the ring.
-      const top = y - 12, bottom = y + 42;
+      const top = y - 12, bottom = y + 21;
       const horizontal = Math.max(0, Math.abs(x - 210) - 40);
       const vertical = top > 210 ? top - 210 : bottom < 210 ? 210 - bottom : 0;
       assert.ok(Math.hypot(horizontal, vertical) >= 185.99, `${ticker!.textContent} text must clear the 172px outer ring`);
@@ -247,203 +276,8 @@ test('read failures preserve actual/target comparison as last known holdings', a
   const page = await browser();
   page.source.send({ ...current, error: 'Read unavailable' });
   assert.equal(page.element('c-state').textContent, 'Last known');
-  assert.equal(page.element('c-sub').textContent, 'Update unavailable');
+  assert.equal(page.element('c-sub').textContent, 'Read unavailable');
   assert.equal(page.element('targets').children.length, 5);
-  assert.match(page.element('gas').textContent, /last known/);
-  page.hide();
-});
-
-test('gas balance, dollar conversion and per-unit gas price use exact integer scaling', async () => {
-  const page = await browser();
-  assert.equal(page.element('gas').textContent, '0.0004 ETH · $0.80');
-  assert.equal(page.element('gas-price').textContent, '0.02 gwei');
-  assert.match(page.element('gas-price').attrs['aria-label']!, /\$0\.00000004 \/ gas/);
-  assert.equal(page.element('gas-estimate').textContent, '≈<$0.01 · +<$0.01 approval');
-  assert.equal(page.element('gas-rebalance').textContent, '≈$0.01–$0.02 · 2 swaps');
-  assert.match(page.element('gas').attrs['aria-label']!, /Coinbase ETH\/USD spot/);
-  assert.match(page.element('gas-price').attrs['aria-label']!, /Robinhood RPC eth_gasPrice/);
-  assert.match(page.element('gas-price').attrs['aria-label']!, /not a transaction fee/);
-  page.hide();
-});
-
-test('zero values stay zero and subprecision positive values are never rounded into zero', async () => {
-  const page = await browser({ gas: async () => ({ ok: true, json: async () => ({ ...quote, gasPriceWei: '1' }) }) });
-  page.source.send({ ...current, nativeBalance: '1' });
-  assert.match(page.element('gas').textContent, /0\.000000000000000001 ETH · <\$0\.01/);
-  assert.match(page.element('gas-price').textContent, /<0\.01 gwei/);
-  assert.match(page.element('gas-price').attrs['aria-label']!, /<\$0\.000000000001 \/ gas/);
-  page.source.send({ ...current, nativeBalance: '0' });
-  assert.equal(page.element('gas').textContent, '0 ETH · $0.00');
-  page.hide();
-});
-
-test('invalid or missing native balances and quote fields remain unavailable', async () => {
-  const page = await browser({ gas: async () => ({ ok: true, json: async () => ({ ...quote, gasPriceWei: '-1', ethUsdE8: '0' }) }) });
-  for (const nativeBalance of [null, undefined, 'invalid', '-1', 0, '1e18', '0'.repeat(79)]) {
-    page.source.send({ ...current, nativeBalance });
-    assert.equal(page.element('gas').textContent, 'unavailable');
-  }
-  assert.equal(page.element('gas-price').textContent, 'unavailable');
-  assert.equal(page.element('gas-estimate').textContent, 'unavailable');
-  page.hide();
-});
-
-test('quote refreshes are bounded to 30 seconds and only update gas labels', async () => {
-  const page = await browser();
-  assert.equal(page.renders, 1);
-  assert.equal(page.calls.filter(call => call.url === '/api/gas').length, 1);
-  page.setGas(async () => ({ ok: true, json: async () => ({ ...quote, gasPriceWei: '30000000', gasObservedAt: new Date(page.now).toISOString() }) }));
-  await page.advance(29999);
-  assert.equal(page.calls.length, 1);
-  await page.advance(1);
-  assert.equal(page.calls.length, 2);
-  assert.equal(page.renders, 1, 'gas quote update never redraws the rings');
-  assert.match(page.element('gas-price').textContent, /0\.03 gwei/);
-  page.hide();
-});
-
-test('HTTP quote failures retain prior values labeled last known', async () => {
-  const page = await browser();
-  page.setGas(async () => ({ ok: false, json: async () => null }));
-  await page.advance(30000);
-  assert.match(page.element('gas').textContent, /\$0\.80 · last known/);
-  assert.match(page.element('gas-price').textContent, /0\.02 gwei · last known/);
-  assert.match(page.element('gas-price').attrs['aria-label']!, /\$0\.00000004 \/ gas last known/);
-  assert.match(page.element('gas-estimate').textContent, /last known/);
-  assert.equal(page.renders, 1);
-  page.hide();
-});
-
-test('gas and USD observations expire independently even while the status stream stays healthy', async () => {
-  const page = await browser({ gas: async () => ({ ok: true, json: async () => ({ ...quote, usdObservedAt: new Date(initialTime - 60000).toISOString() }) }) });
-  await page.advance(30000);
-  page.source.send({ ...current, updatedAt: new Date(page.now).toISOString() });
-  assert.match(page.element('gas').textContent, /\$0\.80 · last known/);
-  assert.equal(page.element('gas-price').textContent, '0.02 gwei');
-  assert.match(page.element('gas-price').attrs['aria-label']!, /\/ gas last known/);
-  await page.advance(60000);
-  assert.match(page.element('gas-price').textContent, /0\.02 gwei · last known/);
-  page.hide();
-});
-
-test('partial malformed quote updates retain only the failed source as last known', async () => {
-  const page = await browser();
-  page.setGas(async () => ({ ok: true, json: async () => ({ ...quote, ethUsdE8: null, gasPriceWei: '30000000', gasObservedAt: new Date(page.now).toISOString() }) }));
-  await page.advance(30000);
-  assert.match(page.element('gas').textContent, /\$0\.80 · last known/);
-  assert.equal(page.element('gas-price').textContent, '0.03 gwei');
-  assert.match(page.element('gas-price').attrs['aria-label']!, /\$0\.00000006 \/ gas last known/);
-  page.hide();
-});
-
-test('suspending the page aborts quotes and ignores late responses across restoration', async () => {
-  let resolveQuote: ((value: Response) => void) | undefined;
-  const page = await browser({ gas: () => new Promise<Response>(resolve => { resolveQuote = resolve; }) });
-  const first = page.calls[0]!;
-  page.hide();
-  assert.equal(first.signal.aborted, true);
-  assert.equal(page.timers.size, 0);
-  page.show();
-  assert.equal(page.calls.filter(call => call.url === '/api/gas').length, 1, 'restoring cannot exceed the quote refresh rate');
-  resolveQuote!({ ok: true, json: async () => quote });
-  await flush();
-  assert.match(page.element('gas').textContent, /USD unavailable/);
-  page.setGas(async () => ({ ok: true, json: async () => ({ ...quote, ethUsdE8: '300000000000', usdObservedAt: new Date(page.now).toISOString() }) }));
-  await page.advance(30000);
-  assert.match(page.element('gas').textContent, /\$1\.20/);
-  page.hide();
-});
-
-test('a hanging gas request has a five-second abort deadline and no concurrent retries', async () => {
-  const page = await browser({ gas: () => new Promise<Response>(() => {}) });
-  await page.advance(5000);
-  assert.equal(page.calls[0]!.signal.aborted, true);
-  await page.advance(30000);
-  assert.equal(page.calls.filter(call => call.url === '/api/gas').length, 1);
-  page.hide();
-  assert.equal(page.timers.size, 0);
-});
-
-test('transaction estimates multiply the observed rate by historical swap and approval gas', async () => {
-  const page = await browser({ gas: async () => ({ ok: true, json: async () => ({ ...quote, gasPriceWei: '417860000', ethUsdE8: '250205000000' }) }) });
-  assert.equal(page.element('gas-price').textContent, '0.42 gwei');
-  assert.equal(page.element('gas-estimate').textContent, '≈$0.18 · +$0.06 approval');
-  assert.equal(page.element('gas-rebalance').textContent, '≈$0.35–$0.47 · 2 swaps');
-  assert.match(page.element('gas-estimate').attrs['aria-label']!, /historical single-pool receipts/);
-  assert.match(page.element('gas-rebalance').attrs['aria-label']!, /zero to one approval per swap leg/);
-  assert.match(page.element('gas-rebalance').attrs['aria-label']!, /exclude market movement, liquidity-provider fees and slippage/);
-  page.hide();
-});
-
-test('a fresh matching zero-swap projection costs zero even when price sources are unavailable', async () => {
-  const page = await browser({ gas: async () => ({ ok: true, json: async () => ({ ...quote, gasPriceWei: null, ethUsdE8: null, rebalance: { ...projection, swaps: 0 } }) }) });
-  assert.equal(page.element('gas-estimate').textContent, 'unavailable');
-  assert.equal(page.element('gas-rebalance').textContent, '$0 · on target');
-  page.hide();
-});
-
-test('a changed wallet, target allocation or holding balance invalidates an earlier projection immediately', async () => {
-  const page = await browser({ gas: async () => ({ ok: true, json: async () => ({ ...quote, rebalance: { ...projection, swaps: 0 } }) }) });
-  for (const next of [
-    { ...current, wallet: '0x2222222222222222222222222222222222222222' },
-    { ...current, chain: { id: 1 } },
-    { ...current, config: { targets: { ...allocation, USDG: 600, AAPL: 2275 } } },
-    { ...current, portfolio: { ...current.portfolio, positions: current.portfolio.positions.map((p, i) => ({ ...p, balance: i === 0 ? '2' : p.balance })) } },
-  ]) {
-    page.source.send(next);
-    assert.equal(page.element('gas-rebalance').textContent, 'unavailable');
-  }
-  page.source.send({ ...current, config: { targets: { AMD: 2375, MSFT: 2375, NVDA: 2375, AAPL: 2375, USDG: 500 } }, portfolio: { ...current.portfolio, positions: [...current.portfolio.positions].reverse() } });
-  assert.equal(page.element('gas-rebalance').textContent, '$0 · on target', 'insertion order does not invalidate matching projection content');
-  page.hide();
-});
-
-test('fresh null projections clear retained estimates instead of preserving an old zero cost', async () => {
-  const page = await browser({ gas: async () => ({ ok: true, json: async () => ({ ...quote, rebalance: { ...projection, swaps: 0 } }) }) });
-  assert.equal(page.element('gas-rebalance').textContent, '$0 · on target');
-  page.setGas(async () => ({ ok: true, json: async () => ({ ...quote, rebalance: null }) }));
-  await page.advance(30000);
-  assert.equal(page.element('gas-rebalance').textContent, 'unavailable');
-  page.hide();
-});
-
-test('stale projections are labeled last known independently of fresh price sources', async () => {
-  const page = await browser({ gas: async () => ({ ok: true, json: async () => ({ ...quote, rebalance: { ...projection, swaps: 0 } }) }) });
-  page.setGas(async () => ({ ok: true, json: async () => ({ ...quote, gasObservedAt: new Date(page.now).toISOString(), usdObservedAt: new Date(page.now).toISOString(), rebalance: { ...projection, swaps: 0 } }) }));
-  await page.advance(90000);
-  page.source.send({ ...current, updatedAt: new Date(page.now).toISOString() });
-  assert.equal(page.element('gas-rebalance').textContent, '$0 · on target · last known');
-  assert.doesNotMatch(page.element('gas-price').textContent, /last known/);
-  page.hide();
-});
-
-test('invalid historical references or malformed projections cannot manufacture transaction estimates', async () => {
-  const page = await browser({ gas: async () => ({ ok: true, json: async () => ({ ...quote, reference: { ...reference, chainId: 1 }, rebalance: { ...projection, swaps: -1 } }) }) });
-  assert.equal(page.element('gas-estimate').textContent, 'unavailable');
-  assert.equal(page.element('gas-rebalance').textContent, 'unavailable');
-  page.setGas(async () => ({ ok: true, json: async () => ({ ...quote, reference: { ...reference, swapGas: '0' }, rebalance: { ...projection, balances: {} } }) }));
-  await page.advance(30000);
-  assert.equal(page.element('gas-estimate').textContent, 'unavailable');
-  assert.equal(page.element('gas-rebalance').textContent, 'unavailable');
-  page.hide();
-});
-
-test('new transaction or recovery states invalidate an old on-target projection before quotes refresh', async () => {
-  const page = await browser({ gas: async () => ({ ok: true, json: async () => ({ ...quote, rebalance: { ...projection, swaps: 0 } }) }) });
-  assert.equal(page.element('gas-rebalance').textContent, '$0 · on target');
-  for (const status of ['pending', 'unresolved', 'confirming', 'reverted', 'recovery-wait', 'recovery-busy']) {
-    page.source.send({ ...current, operation: { status } });
-    assert.equal(page.element('gas-rebalance').textContent, 'unavailable', status);
-  }
-  for (const node of ['execute', 'reconcile', 'recover', 'receipt', 'error']) {
-    page.source.send({ ...current, graph: { node } });
-    assert.equal(page.element('gas-rebalance').textContent, 'unavailable', node);
-  }
-  page.source.send({ ...current, error: 'Read unavailable' });
-  assert.equal(page.element('gas-rebalance').textContent, 'unavailable');
-  page.source.send({ ...current, operation: { status: 'cancelled' } });
-  assert.equal(page.element('gas-rebalance').textContent, '$0 · on target', 'a settled operation with the same basis remains usable');
-  assert.equal(page.calls.filter(call => call.url === '/api/gas').length, 1, 'status events invalidate display without extra quote fetches');
   page.hide();
 });
 
@@ -579,14 +413,6 @@ test('a stopped runner is the headline, without hiding the drift reading', async
   page.hide();
 });
 
-test('a gas rate below the displayed place shows as a bound, never as zero', async () => {
-  const page = await browser({ gas: async () => ({ ok: true, json: async () => ({ ...quote, gasPriceWei: '1' }) }) });
-  await page.advance(0);
-  assert.equal(page.element('gas-price').textContent, '<0.01 gwei', 'one wei is positive, so it must not read as 0.00');
-  assert.match(page.element('gas-price').attrs['aria-label']!, /Robinhood RPC eth_gasPrice/);
-  page.hide();
-});
-
 test('a label near a canvas edge slides its stack instead of collapsing the side', async () => {
   const page = await browser();
   // USDG's slice sits at twelve o'clock, so its label lands just above the top
@@ -687,5 +513,316 @@ test('Ledger receipt barriers override signing intent and distinguish approvals 
   assert.equal(page.element('c-state').textContent, 'Transaction reverted');
   assert.equal(page.element('c-sub').textContent, 'Receipt recovery required');
   assert.ok(!page.element('ghost').classes.has('show'));
+  page.hide();
+});
+
+
+test('a collapsed Settings overlay keeps settings outside the centre with no gas fetches', async () => {
+  const page = await browser();
+  const markup = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  assert.doesNotMatch(markup, />Details<|id="panel"|id="sum"|>Fees<|id="gas(?:-|"|\s)/);
+  const centre = markup.match(/<foreignObject[^>]*>([\s\S]*?)<\/foreignObject>/)?.[1];
+  assert.ok(centre);
+  for (const id of ["c-state", "c-sub", "c-val"]) assert.ok(centre.includes(`id="${id}"`));
+  const settings = markup.match(/<section class="settings"[^>]*>([\s\S]*?)<\/section>/)?.[1];
+  assert.ok(settings); assert.match(settings, /id="settings-toggle"[^>]*aria-expanded="false"/);
+  for (const id of ["set-band", "set-every", "set-fee-target"]) {
+    assert.ok(!centre.includes(`id="${id}"`)); assert.ok(settings.includes(`id="${id}"`));
+  }
+  assert.match(markup, /Fee target/);
+  assert.equal(page.element('set-fee-target').textContent, 'Not set');
+  await page.advance(180000);
+  assert.deepEqual(page.calls, [], 'healthy SSE is sufficient for the chart');
+  assert.doesNotMatch(page.element('chart-description').textContent, /gwei|Coinbase|Gas price/);
+  page.hide();
+});
+
+test('all settings follow the displayed wallet and current config even while stopped', async () => {
+  const page = await browser();
+  const cases = [
+    { wallet, rebalanceFeeTargetUsdE8: '125000000', expected: '$1.25', driftThresholdBps: 500, rebalanceIntervalSeconds: 3600, band: '±5%', interval: '1 hour' },
+    { wallet: `0x${'2'.repeat(40)}`, rebalanceFeeTargetUsdE8: '1', expected: '$0.00000001', driftThresholdBps: 250, rebalanceIntervalSeconds: 1800, band: '±2.5%', interval: '30 min' },
+    { wallet, rebalanceFeeTargetUsdE8: undefined, expected: 'Not set', driftThresholdBps: 500, rebalanceIntervalSeconds: 7200, band: '±5%', interval: '2 hours' },
+  ];
+  for (const item of cases) {
+    const { rebalanceFeeTargetUsdE8, driftThresholdBps, rebalanceIntervalSeconds } = item;
+    page.source.send({ ...current, wallet: item.wallet, armed: false, config: { targets: allocation, driftThresholdBps, rebalanceIntervalSeconds, rebalanceFeeTargetUsdE8 } });
+    assert.equal(page.element('set-fee-target').textContent, item.expected);
+    assert.equal(page.element('set-band').textContent, item.band);
+    assert.equal(page.element('set-every').textContent, item.interval);
+    assert.ok(page.element('chart-description').textContent.includes(`Rebalance trigger: ${item.band}. Cycle interval: ${item.interval}. Target rebalance fee: ${item.expected}.`));
+    assert.equal(page.element('c-state').textContent, 'Paused');
+    assert.doesNotMatch(page.element('c-val').textContent, /gwei/);
+  }
+  page.hide();
+});
+
+const feeSnapshot = { ...current, config: { targets: allocation, driftThresholdBps: 500, rebalanceFeeTargetUsdE8: '10000000' },
+  graph: { node: 'wait', trace: ['config', 'observe', 'plan', 'quote', 'wait'] }, operation: { status: 'fee-target' },
+  feeCheck: { targetUsdE8: '10000000', estimatedUsdE8: '25000000', gasPriceWei: '417860000', ethUsdE8: '250205000000', observedAt: observed, state: 'above-target' } };
+
+test('a fee-blocked rebalance shows only its estimated cost, target and observed gas rate in the centre', async () => {
+  const page = await browser();
+  page.source.send(feeSnapshot);
+  assert.equal(page.element('c-state').textContent, 'Gas above target');
+  assert.equal(page.element('c-sub').textContent, '≈$0.25 · target $0.10');
+  assert.equal(page.element('c-val').textContent, '0.42 gwei');
+  page.source.send({ ...feeSnapshot, feeCheck: { ...feeSnapshot.feeCheck, gasPriceWei: '1' } });
+  assert.equal(page.element('c-val').textContent, '<0.01 gwei');
+  page.source.send({ ...feeSnapshot, operation: null, feeCheck: { ...feeSnapshot.feeCheck, state: 'within-target' } });
+  assert.equal(page.element('c-state').textContent, 'On target');
+  assert.doesNotMatch(page.element('c-val').textContent, /gwei/);
+  page.hide();
+});
+
+test('an unavailable, stale or mismatched fee estimate cannot retain earlier blocked prices', async () => {
+  const page = await browser();
+  page.source.send(feeSnapshot);
+  for (const feeCheck of [
+    { ...feeSnapshot.feeCheck, state: 'unavailable' },
+    { ...feeSnapshot.feeCheck, gasPriceWei: null },
+    { ...feeSnapshot.feeCheck, estimatedUsdE8: undefined },
+    { ...feeSnapshot.feeCheck, observedAt: new Date(initialTime - 90000).toISOString() },
+    { ...feeSnapshot.feeCheck, observedAt: new Date(initialTime + 1).toISOString() },
+    { ...feeSnapshot.feeCheck, targetUsdE8: '5000000' },
+  ]) {
+    page.source.send({ ...feeSnapshot, feeCheck });
+    assert.equal(page.element('c-state').textContent, 'Fee estimate unavailable');
+    assert.equal(page.element('c-sub').textContent, 'Waiting for a fresh estimate');
+    assert.equal(page.element('c-val').textContent, '');
+  }
+  page.source.send({ ...feeSnapshot, armed: false, config: { ...feeSnapshot.config, rebalanceFeeTargetUsdE8: '30000000' } });
+  assert.equal(page.element('set-fee-target').textContent, '$0.30');
+  assert.equal(page.element('c-state').textContent, 'Paused');
+  assert.doesNotMatch(page.element('c-val').textContent, /gwei/);
+  page.hide();
+});
+
+test('armed quote and execution stages show progress while receipts and Ledger requests retain priority', async () => {
+  const page = await browser();
+  for (const [node, message] of [['quote', 'Preparing a fresh quote'], ['execute', 'Preparing the transaction']]) {
+    page.source.send({ ...current, graph: { node } });
+    assert.equal(page.element('c-state').textContent, 'Rebalancing');
+    assert.equal(page.element('c-sub').textContent, message);
+  }
+  page.source.send({ ...current, graph: { node: 'execute' }, operation: { status: 'pending', kind: 'approval' } });
+  assert.equal(page.element('c-state').textContent, 'Approval pending');
+  page.source.send({ ...ledgerSnapshot, graph: { node: 'execute' }, ledgerRequest: { ...ledgerRequest, state: 'consumed' } });
+  assert.equal(page.element('c-state').textContent, 'Ledger request');
+  page.source.send({ ...current, armed: false, graph: { node: 'execute' }, config: { targets: allocation, driftThresholdBps: 500 } });
+  assert.equal(page.element('c-state').textContent, 'Paused');
+  page.hide();
+});
+
+test('rebalance failures retain bounded public error text and differ from observation failures', async () => {
+  const page = await browser();
+  const error = 'Sender simulation failed. ' + 'More detail. '.repeat(40);
+  for (const phase of ['quote', 'execute']) {
+    page.source.send({ ...current, error, graph: { node: 'error', trace: ['config', 'observe', phase, 'error'] } });
+    assert.equal(page.element('c-state').textContent, 'Rebalance failed');
+    assert.equal(page.element('c-sub').textContent, error.slice(0, 400).trim());
+    assert.equal(page.element('c-val').textContent, '', 'the total does not overlap the wrapped error');
+    assert.ok(page.element('chart-description').textContent.includes(error.slice(0, 400).trim()));
+  }
+  page.source.send({ ...current, error: 'Could not read current balances.', graph: { node: 'error', trace: ['config', 'observe', 'error'] } });
+  assert.equal(page.element('c-state').textContent, 'Last known');
+  assert.equal(page.element('c-sub').textContent, 'Could not read current balances.');
+  page.source.send({ ...current, error: { providerPayload: 'must not be displayed' }, graph: { node: 'error', trace: ['execute', 'error'] } });
+  assert.equal(page.element('c-sub').textContent, 'Update unavailable');
+  assert.doesNotMatch(page.element('chart-description').textContent, /must not be displayed/);
+  page.hide();
+});
+
+
+test('a blocked gas label expires without additional network requests or status events', async () => {
+  const page = await browser();
+  page.source.send(feeSnapshot);
+  await page.advance(89999);
+  assert.equal(page.element('c-state').textContent, 'Gas above target');
+  await page.advance(1);
+  assert.equal(page.element('c-state').textContent, 'Fee estimate unavailable');
+  assert.equal(page.element('c-val').textContent, '');
+  assert.deepEqual(page.calls, []);
+  page.hide();
+});
+
+test('cooldown outranks Ledger drift and fee history without hiding pending receipts', async () => {
+  const page = await browser();
+  const cooling = { ...ledgerSnapshot, feeCheck: feeSnapshot.feeCheck, operation: { status: 'cooling-down' },
+    cycle: { nextEligibleAt: new Date(initialTime + 3600000).toISOString() } };
+  page.source.send(cooling);
+  assert.equal(page.element('c-state').textContent, 'Cooling down');
+  assert.match(page.element('c-sub').textContent, /Next cycle after/);
+  assert.doesNotMatch(page.element('c-val').textContent, /gwei/);
+  page.source.send({ ...cooling, operation: { status: 'pending', kind: 'swap' } });
+  assert.equal(page.element('c-state').textContent, 'Rebalancing');
+  assert.equal(page.element('c-val').textContent, 'Waiting for receipt');
+  page.source.send({ ...cooling, armed: false });
+  assert.equal(page.element('c-state').textContent, 'Paused');
+  page.hide();
+});
+
+
+test('chart stock links wrap actual, target and ticker geometry and remove obsolete assets', async () => {
+  const page = await browser({ stockLinks: true });
+  const markup = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  assert.ok(markup.indexOf('/stock-links.js') < markup.indexOf('/app.js'));
+  assert.match(markup, /id="ring"[^>]*role="group"/);
+  assert.match(markup, /<meta name="referrer" content="no-referrer">/);
+  const oldLinks = [];
+  for (const [container, kind, geometry] of [['arcs', 'actual', 'path'], ['targets', 'target', 'path'], ['labels', 'label', 'g']]) {
+    const links = page.element(container!).children;
+    assert.equal(links.length, 5);
+    assert.ok(links.every(link => link.tag === 'a' && link.attrs.class === `stock-link stock-link--${kind}`));
+    assert.ok(links.every(link => link.children.length === 2 && link.children[0]!.attrs.class === 'stock-link__visual' && link.children[0]!.children[0]!.tag === geometry));
+    assert.ok(links.every(link => link.children[1]!.attrs.class === 'stock-link__hit'));
+    const apple = links.find(link => link.attrs.href === 'https://www.google.com/search?q=AAPL%20stock%20chart')!;
+    assert.equal(apple.attrs.target, '_blank'); assert.equal(apple.attrs.rel, 'noopener noreferrer');
+    oldLinks.push(apple);
+  }
+  const originalUsdLink = page.element('arcs').children[0]!;
+  const originalUsdPath = originalUsdLink.children[0]!.children[0]!;
+  const onlyCash = { USDG: 10000, AAPL: 0, NVDA: 0, MSFT: 0, AMD: 0 };
+  page.source.send({ ...current, config: { targets: onlyCash, driftThresholdBps: 500 },
+    portfolio: { ...current.portfolio, positions: Object.keys(onlyCash).map(id => ({ id, symbol: id,
+      weightBps: id === 'USDG' ? 10000 : 0, balance: id === 'USDG' ? '1' : '0', valueUsdE8: id === 'USDG' ? current.portfolio.totalUsdE8 : '0' })) } });
+  for (const container of ['arcs', 'targets', 'labels']) {
+    assert.equal(page.element(container).children.length, 1);
+    assert.equal(page.element(container).children[0]!.attrs.href, 'https://www.google.com/search?q=USDG%20stablecoin%20chart');
+  }
+  assert.equal(page.element('arcs').children[0], originalUsdLink, 'updates reuse the native link');
+  assert.equal(originalUsdLink.children[0]!.children[0], originalUsdPath, 'updates preserve the allocation geometry node');
+  assert.ok(oldLinks.every(link => link.parentNode === null), 'removed arc wrappers cannot remain clickable');
+  assert.deepEqual(page.calls, [], 'rendering links never follows them or triggers a control request');
+  page.hide();
+});
+
+
+test('one asset shares outward movement and highlight across actual, target and stable label links', async () => {
+  const page = await browser({ stockLinks: true });
+  const links = ['arcs', 'targets', 'labels'].map(id => page.element(id).children.find(link => link.attrs['data-stock-asset'] === 'AAPL')!);
+  const label = links[2]!, geometry = links[0]!.children[0]!.children[0]!;
+  const originalPath = geometry.attrs.d;
+  label.listeners.get('focusin')!();
+  assert.ok(links.every(link => link.attrs.class!.includes('is-highlighted')));
+  const components = (link: DisplayNode) => [...link.attrs.style!.matchAll(/:([-\d.e]+)px/g)].map(match => Number(match[1]));
+  const [x, y] = components(label), [arcX, arcY] = components(links[0]!);
+  assert.ok(Math.abs(Math.hypot(x!, y!) - 14) < 1e-9);
+  assert.ok(Math.abs(arcX! + y!) < 1e-9 && Math.abs(arcY! - x!) < 1e-9, 'parent rotation yields one shared screen direction');
+  assert.equal(links[0]!.attrs.style, links[1]!.attrs.style, 'actual and target travel together even with different radii');
+  const oldHit = links[0]!.children[1]!;
+  page.source.send({ ...current, config: { ...current.config, driftThresholdBps: 500 } });
+  assert.equal(page.element('labels').children[1], label, 'status updates preserve keyboard focus on the same label');
+  assert.ok(links.every(link => link.attrs.class!.includes('is-highlighted')));
+  assert.equal(geometry.attrs.d, originalPath, 'hover does not reshape allocation or its parallel cuts');
+  assert.notEqual(links[0]!.children[1], oldHit);
+  assert.equal(links[0]!.children[1]!.attrs.d, originalPath, 'stationary hit area tracks the latest complete segment');
+  label.listeners.get('focusout')!();
+  assert.ok(links.every(link => !link.attrs.class!.includes('is-highlighted')));
+  assert.deepEqual(page.calls, []);
+  page.hide();
+});
+
+
+test('Settings opens and closes accessibly without redrawing or changing the chart layout', async () => {
+  const page = await browser();
+  const css = await readFile(new URL('../ui/style.css', import.meta.url), 'utf8');
+  const button = page.element('settings-toggle'), panel = page.element('settings-panel');
+  const ring = page.element('arcs').children, draws = page.renders;
+  for (const open of [true, false, true, false]) {
+    button.listeners.get('click')!();
+    assert.equal(button.attrs['aria-expanded'], String(open));
+    assert.equal(panel.attrs['aria-hidden'], String(!open));
+    assert.equal(panel.classes.has('open'), open);
+    assert.equal(Object.hasOwn(panel.attrs, 'inert'), !open);
+    assert.equal(page.renders, draws); assert.equal(page.element('arcs').children, ring);
+  }
+  assert.match(css, /\.settings \{[^}]*position: absolute/);
+  assert.match(css, /\.settings-panel \{[^}]*position: absolute[^}]*transition: grid-template-rows/);
+  assert.match(css, /prefers-reduced-motion: reduce[\s\S]*?\.settings-panel[^}]*transition: none/);
+  assert.deepEqual(page.calls, []);
+  page.hide();
+});
+
+test('a quiet configuration refresh never calls the previous allocation on target', async () => {
+  const page = await browser();
+  page.source.send({ ...current, config: { targets: allocation, driftThresholdBps: 500 },
+    operation: { status: 'configuration-changed' }, graph: { node: 'wait' } });
+  assert.equal(page.element('c-state').textContent, 'Updating settings…');
+  assert.equal(page.element('c-sub').textContent, 'Checking the current allocation');
+  assert.equal(page.element('c-val').textContent, '');
+  page.source.send({ ...current, config: { targets: allocation, driftThresholdBps: 500 } });
+  assert.equal(page.element('c-state').textContent, 'On target');
+  page.hide();
+});
+
+
+test('ordinary label centres stay on their own actual segment midpoint rather than shifting toward the next asset', async () => {
+  const page = await browser();
+  for (const weights of [[500, 2375, 2375, 2375, 2375], [459, 3000, 2180, 2180, 2181]]) {
+    page.source.send({ ...current, config: { targets: allocation, driftThresholdBps: 500 },
+      portfolio: { ...current.portfolio, positions: current.portfolio.positions.map((p, index) =>
+        ({ ...p, weightBps: weights[index], valueUsdE8: String(weights[index]! * 50000) })) } });
+    let offset = 0;
+    for (const [index, group] of page.element('labels').children.entries()) {
+      const angle = (offset + weights[index]! / 2) / 10000 * Math.PI * 2 - Math.PI / 2;
+      const x = Number(group.children[0]!.attrs.x) - 210;
+      const y = Number(group.children[0]!.attrs.y) + 4.5 - 210;
+      assert.ok(Math.abs(-x * Math.sin(angle) + y * Math.cos(angle)) < 1e-6, `${group.attrs['data-asset']} remains on its actual midpoint ray`);
+      assert.equal(group.children[2]!.attrs.visibility, 'hidden', 'uncrowded labels need no connector');
+      offset += weights[index]!;
+    }
+  }
+  page.hide();
+});
+
+test('crowded labels never overlap and their connector begins at the exact visible segment midpoint', async () => {
+  const page = await browser();
+  for (const weights of [[1, 9996, 1, 1, 1], [1, 1, 1, 1, 9996], [100, 9400, 200, 100, 200], [9996, 1, 1, 1, 1]]) {
+    page.source.send({ ...current, portfolio: { ...current.portfolio, positions: current.portfolio.positions.map((p, index) =>
+      ({ ...p, weightBps: weights[index], valueUsdE8: String(weights[index]! * 50000) })) } });
+    const labels = page.element('labels').children;
+    let offset = 0;
+    for (const [index, label] of labels.entries()) {
+      const angle = (offset + weights[index]! / 2) / 10000 * Math.PI * 2 - Math.PI / 2;
+      const leader = label.children[2]!;
+      const start = /^M ([^ ]+) ([^ ]+)/.exec(leader.attrs.d)!;
+      assert.ok(Math.abs(Number(start[1]) - 210 - 174 * Math.cos(angle)) < 1e-9);
+      assert.ok(Math.abs(Number(start[2]) - 210 - 174 * Math.sin(angle)) < 1e-9);
+      assert.equal(leader.attrs.stroke, page.element('arcs').children[index]!.attrs.fill);
+      assert.doesNotMatch(leader.attrs.d!, /NaN|Infinity/);
+      offset += weights[index]!;
+      const x = Number(label.children[0]!.attrs.x), y = Number(label.children[0]!.attrs.y);
+      for (const other of labels.slice(index + 1)) {
+        const dx = Math.abs(x - Number(other.children[0]!.attrs.x));
+        const dy = Math.abs(y - Number(other.children[0]!.attrs.y));
+        assert.ok(dx >= 80 - 1e-9 || dy >= 42 - 1e-9, 'text boxes keep distinct rows or columns');
+      }
+    }
+  }
+  page.hide();
+});
+
+test('empty-wallet label anchors follow displayed targets and linked highlights keep the connector attached', async () => {
+  const page = await browser({ stockLinks: true });
+  const changedTargets = { USDG: 3000, AAPL: 1000, NVDA: 2000, MSFT: 2000, AMD: 2000 };
+  page.source.send({ ...current, config: { targets: changedTargets }, portfolio: null });
+  const labels = page.element('labels').children;
+  let offset = 0;
+  for (const [index, link] of labels.entries()) {
+    const group = link.children[0]!.children[0]!;
+    const weight = Object.values(changedTargets)[index]!;
+    const angle = (offset + weight / 2) / 10000 * Math.PI * 2 - Math.PI / 2;
+    const start = /^M ([^ ]+) ([^ ]+)/.exec(group.children[2]!.attrs.d)!;
+    assert.ok(Math.abs(Number(start[1]) - 210 - 174 * Math.cos(angle)) < 1e-9);
+    assert.ok(Math.abs(Number(start[2]) - 210 - 174 * Math.sin(angle)) < 1e-9);
+    const before = group.children[2]!.attrs.d;
+    link.listeners.get('focusin')!();
+    assert.ok(link.attrs.class!.includes('is-highlighted'));
+    assert.equal(group.children[2]!.attrs.d, before, 'the label and connector share the visual wrapper');
+    link.listeners.get('focusout')!();
+    offset += weight;
+  }
+  assert.deepEqual(page.calls, []);
   page.hide();
 });

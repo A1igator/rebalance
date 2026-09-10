@@ -10,151 +10,36 @@
   // One palette for the whole app: the selector tiles and this chart must never
   // disagree about what colour an asset is.
   const { assetOrder, color } = window.rebalanceRing;
-  // Match the display-only projection gate in src/fee-projection.ts when a newer status event arrives.
-  const projectionNodes = new Set(["intent", "config", "observe", "plan", "interval", "quote", "wait"]);
-  const projectionOperations = new Set(["confirmed", "cancelled", "recovered-revert", "needs-rebalance", "cooling-down", "waiting-ledger", "waiting-privy", "stopping"]);
   let lastSnapshot = null;
-  let statusDisconnected = false;
-  let allocationDescription = "Connecting to the local app.";
-  const quoteMaxAgeMs = 90000;
-  const quoteIntervalMs = 30000;
-  let gasQuote = { gas: null, usd: null };
-  let gasReference = null;
-  let rebalanceProjection = null;
-  let gasRequestFailed = false;
-  let gasController = null;
-  let gasTimeout = null;
-  let gasTimer = null;
-  let gasStaleTimer = null;
-  let gasGeneration = 0;
-  let lastGasFetchAt = null;
-
   function positive(value) {
     try { return BigInt(value) > 0n; } catch { return false; }
   }
   function unsigned(value) {
     return typeof value === "string" && /^\d{1,78}$/.test(value) ? BigInt(value) : null;
   }
-  function units(value, decimals) {
-    const unit = 10n ** BigInt(decimals);
-    const fraction = (value % unit).toString().padStart(decimals, "0").replace(/0+$/, "");
-    return `${value / unit}${fraction ? `.${fraction}` : ""}`;
+  function feeDollars(value) {
+    const amount = unsigned(value);
+    if (amount === null) return null;
+    const fraction = (amount % 100000000n).toString().padStart(8, "0").replace(/0+$/, "").padEnd(2, "0");
+    return `$${amount / 100000000n}.${fraction}`;
   }
-  function dollars(wei, ethUsdE8, decimals) {
-    const numerator = wei * ethUsdE8;
-    const denominator = 10n ** 26n;
-    const scale = 10n ** BigInt(decimals);
-    if (numerator > 0n && numerator * scale < denominator) return `<$${units(1n, decimals)}`;
-    const rounded = (numerator * scale + denominator / 2n) / denominator;
-    if (decimals === 2) return `$${rounded / 100n}.${(rounded % 100n).toString().padStart(2, "0")}`;
-    return `$${units(rounded, decimals)}`;
-  }
-  /** Two decimals of gwei. A positive rate below the last place shows as a
-      bound rather than rounding down to zero, matching dollars() above. */
   function gwei(wei) {
     const place = 10n ** 7n;
     if (wei > 0n && wei * 2n < place) return "<0.01";
     const hundredths = (wei + place / 2n) / place;
     return `${hundredths / 100n}.${(hundredths % 100n).toString().padStart(2, "0")}`;
   }
-  function observedAt(value) {
-    const timestamp = typeof value === "string" ? Date.parse(value) : NaN;
-    return Number.isFinite(timestamp) && timestamp <= Date.now() ? timestamp : null;
-  }
-  function quotePart(value, at, previous, allowZero) {
-    const amount = unsigned(value);
-    const timestamp = observedAt(at);
-    if (amount !== null && (allowZero || amount > 0n) && timestamp !== null) {
-      return { amount, timestamp, failed: false };
+  function feeState(snapshot) {
+    if (!snapshot?.armed || snapshot.operation?.status !== "fee-target") return null;
+    const check = snapshot.feeCheck, target = unsigned(snapshot.config?.rebalanceFeeTargetUsdE8);
+    const estimate = unsigned(check?.estimatedUsdE8), gas = unsigned(check?.gasPriceWei), eth = unsigned(check?.ethUsdE8);
+    const at = typeof check?.observedAt === "string" ? Date.parse(check.observedAt) : NaN;
+    if (target !== null && target === unsigned(check?.targetUsdE8) && check?.state === "above-target" &&
+        estimate !== null && estimate > target && gas !== null && gas > 0n && eth !== null && eth > 0n &&
+        Number.isFinite(at) && at <= Date.now() && Date.now() - at < 90000) {
+      return { state: "Gas above target", sub: `≈${feeDollars(check.estimatedUsdE8)} · target ${feeDollars(check.targetUsdE8)}`, value: `${gwei(gas)} gwei` };
     }
-    return previous ? { ...previous, failed: true } : null;
-  }
-  function stale(part) {
-    return !part || gasRequestFailed || part.failed || Date.now() - part.timestamp >= quoteMaxAgeMs;
-  }
-  function sourceNote(part, source) {
-    return part ? `${source}, observed ${new Date(part.timestamp).toISOString()}${stale(part) ? "; last known, current quote unavailable" : ""}` : `${source} unavailable`;
-  }
-  function referenceOf(value) {
-    const swapGas = unsigned(value?.swapGas), approvalGas = unsigned(value?.approvalGas);
-    const hash = (input) => typeof input === "string" && /^0x[0-9a-fA-F]{64}$/.test(input);
-    return value?.chainId === 4663 && swapGas > 0n && approvalGas > 0n && hash(value.swapHash) && hash(value.approvalHash) ? { ...value, swapGas, approvalGas } : null;
-  }
-  function projectionOf(value) {
-    const timestamp = observedAt(value?.observedAt);
-    if (!value || !Number.isInteger(value.swaps) || value.swaps < 0 || value.swaps > 16 || timestamp === null || typeof value.wallet !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(value.wallet)) return null;
-    const targets = value.targets, balances = value.balances;
-    if (!targets || !balances || typeof targets !== "object" || typeof balances !== "object" || Array.isArray(targets) || Array.isArray(balances)) return null;
-    const entries = Object.entries(targets);
-    if (!entries.length || entries.some(([id, weight]) => !Number.isInteger(weight) || weight < 0 || weight > 10000 || unsigned(balances[id]) === null) || entries.reduce((sum, [, weight]) => sum + weight, 0) !== 10000) return null;
-    return { ...value, timestamp };
-  }
-  function projectionMatches(projection) {
-    if (!projection || lastSnapshot?.chain?.id !== 4663 || typeof lastSnapshot?.wallet !== "string" || lastSnapshot.wallet.toLowerCase() !== projection.wallet.toLowerCase()) return false;
-    if (lastSnapshot.error !== null || !projectionNodes.has(lastSnapshot.graph?.node)) return false;
-    const operation = lastSnapshot.operation;
-    if (operation !== null && (!operation || !projectionOperations.has(operation.status) || operation.sendFailure !== undefined ||
-        (operation.chainId !== undefined && operation.chainId !== 4663) ||
-        (operation.wallet !== undefined && (typeof operation.wallet !== "string" || operation.wallet.toLowerCase() !== projection.wallet.toLowerCase())))) return false;
-    const targets = lastSnapshot?.config?.targets;
-    if (!targets || Object.keys(targets).length !== Object.keys(projection.targets).length) return false;
-    const positions = lastSnapshot?.portfolio?.positions;
-    if (!Array.isArray(positions)) return false;
-    return Object.entries(projection.targets).every(([id, target]) => {
-      const position = positions.find((item) => (item.id || item.symbol) === id);
-      return targets[id] === target && position && unsigned(position.balance) !== null && unsigned(position.balance) === unsigned(projection.balances[id]);
-    });
-  }
-  function renderGas() {
-    clearTimeout(gasStaleTimer); gasStaleTimer = null;
-    const balance = unsigned(lastSnapshot?.nativeBalance);
-    const gas = gasQuote.gas;
-    const usd = gasQuote.usd;
-    const balanceAt = observedAt(lastSnapshot?.updatedAt);
-    const balanceStale = statusDisconnected || Boolean(lastSnapshot?.error) || balanceAt === null || Date.now() - balanceAt >= quoteMaxAgeMs;
-    const balanceLabel = balance === null ? "ETH gas · unavailable" : `Gas · ${units(balance, 18)} ETH`;
-    const balanceUsd = balance !== null && usd ? `${dollars(balance, usd.amount, 2)}${stale(usd) || balanceStale ? " last known" : ""}` : "USD unavailable";
-    const gasLabel = gas ? `${gwei(gas.amount)} gwei${stale(gas) ? " last known" : ""}` : "unavailable";
-    const gasUsd = gas && usd ? `${dollars(gas.amount, usd.amount, 12)} / gas${stale(gas) || stale(usd) ? " last known" : ""}` : "USD unavailable";
-    // Values only; the labels are static markup, so the numbers line up in a
-    // column instead of hiding inside four sentences. Staleness is said once
-    // per row rather than after every fragment it touches.
-    const known = (text, isStale) => `${text}${isStale ? " · last known" : ""}`;
-    // A missing conversion is stated, never silently dropped: an ETH figure with
-    // no dollar figure beside it would read as if none was expected.
-    byId("gas").textContent = balance === null ? "unavailable"
-      : known(`${units(balance, 18)} ETH · ${usd ? dollars(balance, usd.amount, 2) : "USD unavailable"}`,
-          balanceStale || (usd ? stale(usd) : false));
-    byId("gas-price").textContent = gas ? known(`${gwei(gas.amount)} gwei`, stale(gas)) : "unavailable";
-    const reference = lastSnapshot?.chain?.id === 4663 ? gasReference : null;
-    const costReady = reference && gas && usd;
-    const costsStale = stale(gas) || stale(usd);
-    byId("gas-estimate").textContent = costReady
-      ? known(`≈${dollars(gas.amount * reference.swapGas, usd.amount, 2)} · +${dollars(gas.amount * reference.approvalGas, usd.amount, 2)} approval`, costsStale)
-      : "unavailable";
-    const projection = projectionMatches(rebalanceProjection) ? rebalanceProjection : null;
-    const projectionStale = projection && (gasRequestFailed || statusDisconnected || Boolean(lastSnapshot?.error) || Date.now() - projection.timestamp >= quoteMaxAgeMs);
-    let rebalanceLabel = "unavailable";
-    if (projection?.swaps === 0) {
-      rebalanceLabel = known("$0 · on target", Boolean(projectionStale));
-    } else if (projection && costReady) {
-      const legs = BigInt(projection.swaps);
-      const low = dollars(gas.amount * reference.swapGas * legs, usd.amount, 2);
-      const high = dollars(gas.amount * (reference.swapGas + reference.approvalGas) * legs, usd.amount, 2);
-      rebalanceLabel = known(`≈${low}–${high} · ${projection.swaps} ${projection.swaps === 1 ? "swap" : "swaps"}`, Boolean(projectionStale) || costsStale);
-    }
-    byId("gas-rebalance").textContent = rebalanceLabel;
-    const balanceDetails = `${balanceLabel}; ${balanceAt === null ? "observation time unavailable" : `balance observed ${new Date(balanceAt).toISOString()}`}; ${balanceUsd}; ${sourceNote(usd, "Coinbase ETH/USD spot")}. ETH gas is excluded from portfolio allocation.`;
-    const priceDetails = `Gas price ${gasLabel}; ${sourceNote(gas, "Robinhood RPC eth_gasPrice")}; ${gasUsd}; ${sourceNote(usd, "Coinbase ETH/USD spot")}. USD amount is per gas unit, not a transaction fee; a full transaction uses multiple gas units.`;
-    const referenceDetails = reference ? `Approximate transaction costs use verified historical single-pool receipts on Robinhood 4663: swap ${reference.swapHash}, ${reference.swapGas} gas; approval ${reference.approvalHash}, ${reference.approvalGas} gas. Gas usage of a new transaction may differ.` : "Historical transaction gas reference unavailable.";
-    const projectionDetails = `Approximate cost of a full rebalance: ${rebalanceLabel}. ${projection ? `Fixed-price projection observed ${new Date(projection.timestamp).toISOString()}; matching wallet, targets and balances. The range assumes zero to one approval per swap leg.` : "A fresh projection matching this wallet, allocation and holdings is unavailable."} Estimates exclude market movement, liquidity-provider fees and slippage; they are not a measured rebalance cycle cost.`;
-    byId("gas").setAttribute("aria-label", balanceDetails);
-    byId("gas-price").setAttribute("aria-label", priceDetails);
-    byId("gas-estimate").setAttribute("aria-label", `Approximate cost of one swap: ${byId("gas-estimate").textContent}. ${referenceDetails}`);
-    byId("gas-rebalance").setAttribute("aria-label", projectionDetails);
-    byId("chart-description").textContent = `${allocationDescription} ${balanceDetails} ${priceDetails} ${referenceDetails} ${projectionDetails}`;
-    const deadlines = [gas?.timestamp, usd?.timestamp, balanceAt, projection?.timestamp].filter((timestamp) => timestamp !== null && timestamp !== undefined).map((timestamp) => timestamp + quoteMaxAgeMs).filter((deadline) => deadline > Date.now());
-    if (!suspended && deadlines.length) gasStaleTimer = setTimeout(renderGas, Math.min(...deadlines) - Date.now());
+    return { state: "Fee estimate unavailable", sub: "Waiting for a fresh estimate", value: "" };
   }
   function rows(values) {
     return values.filter(({ weight }) => Number.isInteger(weight) && weight > 0 && weight <= 10000).sort((a, b) => {
@@ -170,38 +55,54 @@
     return element;
   }
 
-  const CENTRE = 210, LABEL_RADIUS = 200, ROW_GAP = 42, HALF_WIDTH = 40, CLEARANCE = 186;
-  // A label is always pushed at least this far off the vertical axis, so a pair
-  // that straddles 12 or 6 o'clock lands in different columns instead of on top
-  // of each other: per-side spacing alone never compares them.
-  const MIN_OFFSET = HALF_WIDTH + 46, TOP_Y = 14, BOTTOM_Y = 414;
-  const arcStore = new Map(), tgtStore = new Map();
+  const CENTRE = 210, LABEL_RADIUS = 200, ROW_GAP = 42, HALF_WIDTH = 40, HALF_HEIGHT = 16.5, CLEARANCE = 186;
+  const LABEL_MIN_Y = -3.5, LABEL_MAX_Y = 443.5;
+  const arcStore = new Map(), tgtStore = new Map(), labelStore = new Map();
+  function ringPath(radius, width, start, sweep, startGap, endGap) {
+    const inner = radius - width / 2, outer = radius + width / 2;
+    const point = (r, angle) => `${CENTRE + r * Math.cos(angle)} ${CENTRE + r * Math.sin(angle)}`;
+    if (sweep >= Math.PI * 2) {
+      return `M ${point(outer, 0)} A ${outer} ${outer} 0 1 1 ${point(outer, Math.PI)} ` +
+        `A ${outer} ${outer} 0 1 1 ${point(outer, 0)} L ${point(inner, 0)} ` +
+        `A ${inner} ${inner} 0 1 0 ${point(inner, Math.PI)} A ${inner} ${inner} 0 1 0 ${point(inner, 0)} Z`;
+    }
+    // Each cut is parallel to the true allocation boundary and displaced by
+    // half its gap. Circle intersections, rather than equal angular insets,
+    // keep the two neighboring edges parallel across the entire ring width.
+    const outerStart = start + Math.asin(startGap / outer), outerEnd = start + sweep - Math.asin(endGap / outer);
+    const innerStart = start + Math.asin(startGap / inner), innerEnd = start + sweep - Math.asin(endGap / inner);
+    return `M ${point(outer, outerStart)} A ${outer} ${outer} 0 ${outerEnd - outerStart > Math.PI ? 1 : 0} 1 ${point(outer, outerEnd)} ` +
+      `L ${point(inner, innerEnd)} A ${inner} ${inner} 0 ${innerEnd - innerStart > Math.PI ? 1 : 0} 0 ${point(inner, innerStart)} Z`;
+  }
+  function removeStored(store, seen) {
+    for (const [id, node] of store) if (!seen.has(id)) {
+      if (window.rebalanceStockLinks) window.rebalanceStockLinks.remove(node); else node.remove();
+      store.delete(id);
+    }
+  }
   function drawRing(entries, container, radius, width, cls, store) {
     const parent = byId(container);
     const total = entries.reduce((sum, entry) => sum + entry.weight, 0);
     const seen = new Set();
+    const sweeps = entries.map(entry => entry.weight / total * Math.PI * 2);
+    const inner = radius - width / 2;
+    // Both segments share each boundary's width. Cap small-slice cuts so at
+    // least half of their angular span remains visible at the inner edge.
+    const gaps = sweeps.map((sweep, i) => entries.length === 1 ? 0
+      : Math.min(2, inner * Math.sin(Math.min(sweep, sweeps[(i + sweeps.length - 1) % sweeps.length]) / 4)));
     let offset = 0;
-    for (const entry of entries) {
-      const share = total > 0 ? entry.weight / total * 100 : 0;
+    entries.forEach((entry, index) => {
       let node = store.get(entry.id);
-      if (!node) {
-        node = svgElement("circle", { cx: CENTRE, cy: CENTRE, r: radius, fill: "none", "stroke-width": width, pathLength: 100, class: cls });
-        store.set(entry.id, node);
-      }
-      if (node.parentNode !== parent) parent.append(node);
-      // A hairline gap reads as a divider without a mask. The gap never exceeds a
-      // third of a slice, so at least half of even a dust slice survives, and the
-      // drawn arc is never longer than the true allocation share.
-      const gap = entries.length > 1 ? Math.min(0.6, share / 3) : 0;
-      const length = share > 0 ? Math.max(share - gap, share / 2) : 0;
+      if (!node) { node = svgElement("path", { class: cls }); store.set(entry.id, node); }
       node.setAttribute("data-asset", entry.id);
-      node.setAttribute("stroke", color(entry.id));
-      node.setAttribute("stroke-dasharray", `${length} ${100 - length}`);
-      node.setAttribute("stroke-dashoffset", -offset);
+      node.setAttribute("fill", color(entry.id));
+      node.setAttribute("d", ringPath(radius, width, offset, sweeps[index], gaps[index], gaps[(index + 1) % gaps.length]));
+      const linked = window.rebalanceStockLinks?.wrap(node, entry.id, cls === "arc" ? "actual" : "target") || node;
+      if (linked.parentNode !== parent) parent.append(linked);
       seen.add(entry.id);
-      offset += share;
-    }
-    for (const [id, node] of store) if (!seen.has(id)) { node.remove(); store.delete(id); }
+      offset += sweeps[index];
+    });
+    removeStored(store, seen);
   }
 
   const modelNumber = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
@@ -303,57 +204,90 @@
     return null;
   }
 
-  /** Ticker and weight only. Targets live on the inner ring; the drift that
-      matters is named in the centre, so a label never carries three lines. */
+  /** Labels begin on their visible segment's midpoint ray. Only collisions
+      move them off that ray; a leader then preserves the segment association. */
   function drawLabels(entries, outside) {
-    const labels = byId("labels");
-    labels.replaceChildren();
+    const labels = byId("labels"), seen = new Set();
     const total = entries.reduce((sum, entry) => sum + entry.weight, 0);
-    if (total <= 0) return;
+    if (total <= 0) { removeStored(labelStore, seen); return; }
     let offset = 0;
-    const placed = [];
-    for (const entry of entries) {
-      const share = entry.weight / total * 100;
-      const angle = ((offset + share / 2) / 100 * 360 - 90) * Math.PI / 180;
-      placed.push({ ...entry, x: CENTRE + Math.cos(angle) * LABEL_RADIUS, y: CENTRE + Math.sin(angle) * LABEL_RADIUS });
-      offset += share;
-    }
-    // Separate labels on each side when small holdings cluster together.
-    for (const side of [placed.filter((p) => p.x < CENTRE), placed.filter((p) => p.x >= CENTRE)]) {
-      if (!side.length) continue;
-      side.sort((a, b) => a.y - b.y);
-      for (let i = 1; i < side.length; i++) side[i].y = Math.max(side[i].y, side[i - 1].y + ROW_GAP);
-      // A stack that overhangs an edge is slid back whole, which keeps every
-      // label beside the slice it names. Compressing to minimum gaps here would
-      // collapse well separated labels because one of them sits a few pixels
-      // past the margin. Clamping a single end instead would reopen a gap the
-      // pass just closed, and shifting each end in turn oscillates.
-      const spread = side[side.length - 1].y - side[0].y;
-      if (spread <= BOTTOM_Y - TOP_Y) {
-        const shift = side[0].y < TOP_Y ? TOP_Y - side[0].y
-          : side[side.length - 1].y > BOTTOM_Y ? BOTTOM_Y - side[side.length - 1].y : 0;
-        if (shift !== 0) for (const label of side) label.y += shift;
-      } else {
-        // Genuinely taller than the canvas: minimum gaps, centred on the group.
-        const span = (side.length - 1) * ROW_GAP;
-        const middle = side.reduce((sum, label) => sum + label.y, 0) / side.length;
-        const start = Math.min(Math.max(middle - span / 2, TOP_Y), Math.max(TOP_Y, BOTTOM_Y - span));
-        side.forEach((label, index) => { label.y = start + index * ROW_GAP; });
+    const placed = entries.map(entry => {
+      const sweep = entry.weight / total * Math.PI * 2;
+      const angle = offset + sweep / 2 - Math.PI / 2;
+      offset += sweep;
+      const cos = Math.cos(angle), sin = Math.sin(angle);
+      // Find the nearest point on this ray where the real two-line text box
+      // clears the ring. A blanket horizontal shove mislabels top/bottom slices.
+      let low = LABEL_RADIUS, high = 270;
+      for (let step = 0; step < 32; step++) {
+        const radius = (low + high) / 2;
+        const clearance = Math.hypot(Math.max(0, Math.abs(cos * radius) - HALF_WIDTH), Math.max(0, Math.abs(sin * radius) - HALF_HEIGHT));
+        if (clearance < CLEARANCE) low = radius; else high = radius;
+      }
+      const x = CENTRE + cos * high, y = CENTRE + sin * high;
+      return { ...entry, angle, x, y, idealX: x, idealY: y, side: cos < 0 ? -1 : 1 };
+    });
+    // Pool only overlapping neighbors, minimizing displacement rather than
+    // pushing an entire side into a stack because one label touches an edge.
+    for (const side of [-1, 1]) {
+      const members = placed.filter(entry => entry.side === side).sort((a, b) => a.y - b.y);
+      const blocks = [];
+      members.forEach((entry, index) => {
+        blocks.push({ start: index, count: 1, sum: entry.y - index * ROW_GAP });
+        while (blocks.length > 1) {
+          const right = blocks.at(-1), left = blocks.at(-2);
+          if (left.sum / left.count <= right.sum / right.count) break;
+          blocks.splice(-2, 2, { start: left.start, count: left.count + right.count, sum: left.sum + right.sum });
+        }
+      });
+      for (const block of blocks) {
+        const mean = Math.max(LABEL_MIN_Y, Math.min(LABEL_MAX_Y - (members.length - 1) * ROW_GAP, block.sum / block.count));
+        for (let index = block.start; index < block.start + block.count; index++) members[index].y = mean + index * ROW_GAP;
       }
     }
     for (const entry of placed) {
-      // Push the whole two-line block clear of the ring, including after spacing.
-      const top = entry.y - 12, bottom = entry.y + 42;
-      const vertical = top > CENTRE ? top - CENTRE : bottom < CENTRE ? CENTRE - bottom : 0;
-      const clear = vertical < CLEARANCE ? Math.sqrt(CLEARANCE ** 2 - vertical ** 2) + HALF_WIDTH : 0;
-      const distance = Math.max(clear, MIN_OFFSET);
-      let x = entry.x < CENTRE ? Math.min(entry.x, CENTRE - distance) : Math.max(entry.x, CENTRE + distance);
-      x = Math.min(440, Math.max(-20, x));
-      const group = svgElement("g", outside?.has(entry.id) ? { class: "label-out" } : {});
-      group.append(svgElement("text", { x, y: entry.y, class: "ticker", fill: color(entry.id) }, entry.id));
-      group.append(svgElement("text", { x, y: entry.y + 18, class: "weight" }, `${percent.format(entry.weight / 100)}%`));
-      labels.append(group);
+      const vertical = Math.max(0, Math.abs(entry.y - CENTRE) - HALF_HEIGHT);
+      const required = vertical < CLEARANCE ? Math.sqrt(CLEARANCE ** 2 - vertical ** 2) + HALF_WIDTH : 0;
+      entry.x = CENTRE + entry.side * Math.max(Math.abs(entry.x - CENTRE), required);
     }
+    // Labels across twelve/six o'clock may share a row. Separate only those
+    // actual text boxes, not every label near the vertical axis.
+    for (const left of placed.filter(entry => entry.side < 0)) {
+      for (const right of placed.filter(entry => entry.side > 0)) {
+        if (Math.abs(left.y - right.y) < ROW_GAP && right.x - left.x < HALF_WIDTH * 2 + 8) {
+          left.x = Math.min(left.x, CENTRE - HALF_WIDTH - 4);
+          right.x = Math.max(right.x, CENTRE + HALF_WIDTH + 4);
+        }
+      }
+    }
+    const point = (radius, angle) => `${CENTRE + radius * Math.cos(angle)} ${CENTRE + radius * Math.sin(angle)}`;
+    for (const entry of placed) {
+      let group = labelStore.get(entry.id);
+      if (!group) {
+        group = svgElement("g", {});
+        group.append(svgElement("text", { class: "ticker", fill: color(entry.id) }, entry.id));
+        group.append(svgElement("text", { class: "weight" }));
+        group.append(svgElement("path", { class: "label-leader", stroke: color(entry.id), "aria-hidden": "true" }));
+        labelStore.set(entry.id, group);
+      }
+      group.setAttribute("class", outside?.has(entry.id) ? "label-out" : "");
+      group.setAttribute("data-asset", entry.id);
+      const [ticker, weight, leader] = group.children;
+      const baseline = entry.y - 4.5;
+      ticker.setAttribute("x", entry.x); ticker.setAttribute("y", baseline);
+      weight.setAttribute("x", entry.x); weight.setAttribute("y", baseline + 18);
+      weight.textContent = `${percent.format(entry.weight / 100)}%`;
+      const labelAngle = Math.atan2(entry.y - CENTRE, entry.x - CENTRE);
+      const distance = Math.hypot(entry.x - CENTRE, entry.y - CENTRE);
+      const edge = Math.min((HALF_WIDTH + 3) / Math.abs(Math.cos(labelAngle)), (HALF_HEIGHT + 3) / Math.abs(Math.sin(labelAngle)));
+      const turn = Math.atan2(Math.sin(labelAngle - entry.angle), Math.cos(labelAngle - entry.angle));
+      leader.setAttribute("d", `M ${point(174, entry.angle)} L ${point(180, entry.angle)} A 180 180 0 0 ${turn >= 0 ? 1 : 0} ${point(180, labelAngle)} L ${point(distance - edge, labelAngle)}`);
+      leader.setAttribute("visibility", Math.hypot(entry.x - entry.idealX, entry.y - entry.idealY) > 1 ? "visible" : "hidden");
+      const linked = window.rebalanceStockLinks?.wrap(group, entry.id, "label") || group;
+      if (linked.parentNode !== labels) labels.append(linked);
+      seen.add(entry.id);
+    }
+    removeStored(labelStore, seen);
   }
 
   function render(snapshot, disconnected = false) {
@@ -363,7 +297,11 @@
     const targetMap = snapshot?.config?.targets || {};
     const targets = rows(Object.entries(targetMap).map(([id, weight]) => ({ id, weight })));
     const funded = positive(portfolio?.totalUsdE8) && holdings.length > 0;
-    const failed = disconnected || Boolean(snapshot?.error);
+    const error = typeof snapshot?.error === "string" ? snapshot.error.slice(0, 400).trim()
+      : snapshot?.error ? "Update unavailable" : "";
+    const trace = Array.isArray(snapshot?.graph?.trace) ? snapshot.graph.trace : [];
+    const phase = trace.filter(node => node !== "error").at(-1) || snapshot?.graph?.node;
+    const rebalanceFailed = ["quote", "execute"].includes(phase);
     const receiptWait = { pending: "Waiting for receipt", unresolved: "Transaction unresolved", confirming: "Confirming transaction", "recovery-wait": "Automatic recovery waiting", "recovery-busy": "Recovery in progress" }[snapshot?.operation?.status];
     const entries = funded ? holdings : targets;
     const bandRaw = snapshot?.config?.driftThresholdBps;
@@ -373,12 +311,12 @@
     // Conversion is display-only; the threshold and label flags stay exact.
     const worst = deviation ? Number(deviation.worst) / Number(deviation.total) : 0;
     const ledger = ledgerState(snapshot);
+    const fee = feeState(snapshot);
     const reverted = snapshot?.operation?.status === "reverted";
     const kind = snapshot?.operation?.kind;
     const transaction = kind === "approval" ? "Approval" : kind === "swap" ? "Swap" : "Transaction";
 
-    // One status, in the middle. The summary line below is a disclosure
-    // affordance only, so nothing is said twice in two places.
+    // Execution and drift share the centre; settings remain in the disclosure.
     let state = "No allocation", sub = "Set targets through your agent", value = "";
     const armed = snapshot?.armed === true;
     const drift = deviation
@@ -392,8 +330,11 @@
       const at = Number.isFinite(observed.getTime()) ? time.format(observed) : null;
       value = [total, at ? `as of ${at}` : null].filter(Boolean).join(" · ");
     }
-    if (failed) { state = funded ? "Last known" : "Unavailable"; sub = "Update unavailable"; }
-    else if (reverted) {
+    if (disconnected) { state = funded ? "Last known" : "Unavailable"; sub = "Connection unavailable"; }
+    else if (error) {
+      state = rebalanceFailed ? "Rebalance failed" : funded ? "Last known" : "Unavailable";
+      sub = error; value = "";
+    } else if (reverted) {
       state = "Transaction reverted";
       sub = "Receipt recovery required";
     } else if (receiptWait) {
@@ -403,8 +344,20 @@
         : plan?.sellAssetId && plan?.buyAssetId ? `${plan.sellAssetId} \u2192 ${plan.buyAssetId}` : `${transaction} in progress`;
       // Mid-trade, how the send is going matters more than the portfolio total.
       value = receiptWait;
+    } else if (snapshot?.operation?.status === "configuration-changed") {
+      state = "Updating settings…"; sub = "Checking the current allocation"; value = "";
+    } else if (armed && snapshot?.operation?.status === "cooling-down") {
+      state = "Cooling down";
+      const eligible = new Date(snapshot?.cycle?.nextEligibleAt);
+      sub = Number.isFinite(eligible.getTime()) && eligible.getTime() > Date.now()
+        ? `Next cycle after ${time.format(eligible)}` : "Waiting for the next cycle";
+    } else if (fee) {
+      state = fee.state; sub = fee.sub; value = fee.value;
     } else if (ledger) {
       state = ledger.state; sub = ledger.sub;
+    } else if (armed && ["quote", "execute"].includes(snapshot?.graph?.node)) {
+      state = "Rebalancing";
+      sub = snapshot.graph.node === "quote" ? "Preparing a fresh quote" : "Preparing the transaction";
     } else if (funded) {
       state = !armed ? "Paused" : !deviation ? "Holdings" : outside ? "Off target" : "On target";
       // A stopped runner is the headline, in the word people use for it,
@@ -415,11 +368,29 @@
       sub = portfolio ? positions.some((p) => positive(p.balance)) ? "Holdings below precision" : "Wallet empty" : "Holdings not checked";
     }
     byId("c-state").textContent = state;
+    byId("c-state").classList.toggle("compact", state.length > 18);
     byId("c-sub").textContent = sub ?? "";
+    byId("c-sub").setAttribute("title", sub ?? "");
     byId("c-val").textContent = value;
     byId("c-legend").textContent = funded || !targets.length ? "" : "Targets only";
     byId("chart-title").textContent = state;
 
+    if (window.rebalanceStockLinks?.setOffset) {
+      const assigned = new Set();
+      for (const candidates of [entries, targets]) {
+        const total = candidates.reduce((sum, entry) => sum + entry.weight, 0);
+        let offset = 0;
+        for (const entry of candidates) {
+          const sweep = entry.weight / total * Math.PI * 2;
+          if (!assigned.has(entry.id)) {
+            const angle = offset + sweep / 2 - Math.PI / 2;
+            window.rebalanceStockLinks.setOffset(entry.id, 14 * Math.cos(angle), 14 * Math.sin(angle));
+            assigned.add(entry.id);
+          }
+          offset += sweep;
+        }
+      }
+    }
     drawRing(entries, "arcs", 150, 44, "arc", arcStore);
     drawRing(funded ? targets : [], "targets", 112, 5, "tgt", tgtStore);
     drawLabels(entries, deviation?.outside);
@@ -440,67 +411,40 @@
     }
     ghost.classList.toggle("show", Boolean(ghostTarget));
 
-    byId("set-band").textContent = band === null ? "unavailable" : `\u00b1${percent.format(band / 100)}%`;
+    byId("set-band").textContent = band === null ? "Unavailable" : `\u00b1${percent.format(band / 100)}%`;
     const every = duration(snapshot?.config?.rebalanceIntervalSeconds);
-    byId("set-every").textContent = every || "unavailable";
+    byId("set-every").textContent = every || "Unavailable";
+    const configuredFee = snapshot?.config?.rebalanceFeeTargetUsdE8;
+    const feeTarget = configuredFee === undefined ? "Not set" : feeDollars(configuredFee) || "Unavailable";
+    byId("set-fee-target").textContent = feeTarget;
 
-    allocationDescription = `${state}. ${sub}. ${funded ? "Outer ring, actual holdings" : "Targets only"}: ${entries.map((r) => `${r.id} ${percent.format(r.weight / 100)}%`).join(", ")}.${funded && targets.length ? ` Inner ring, targets: ${targets.map((r) => `${r.id} ${percent.format(r.weight / 100)}%`).join(", ")}.` : ""}`;
+    let allocationDescription = `${state}. ${sub}.${value ? ` ${value}.` : ""} ${funded ? "Outer ring, actual holdings" : "Targets only"}: ${entries.map((r) => `${r.id} ${percent.format(r.weight / 100)}%`).join(", ")}.${funded && targets.length ? ` Inner ring, targets: ${targets.map((r) => `${r.id} ${percent.format(r.weight / 100)}%`).join(", ")}.` : ""}`;
     allocationDescription += ` ${renderRisk(snapshot, disconnected)}`;
-    statusDisconnected = disconnected;
-    renderGas();
+    byId("chart-description").textContent = `${allocationDescription} Rebalance trigger: ${byId("set-band").textContent}. Cycle interval: ${every || "unavailable"}. Target rebalance fee: ${feeTarget}. ETH is excluded from allocation.`;
   }
 
   let stream = null;
   let streamReady = false;
   let refreshTimer = null;
   let initialTimer = null;
+  let feeExpiryTimer = null;
   let controller = null;
   let refreshing = false;
   let suspended = false;
   let lastRendered = null;
   let streamGeneration = 0;
 
-  async function refreshGas() {
-    clearTimeout(gasTimer); gasTimer = null;
-    if (suspended || gasController) return;
-    const remaining = lastGasFetchAt === null ? 0 : quoteIntervalMs - (Date.now() - lastGasFetchAt);
-    if (remaining > 0) { gasTimer = setTimeout(refreshGas, remaining); return; }
-    const request = new AbortController();
-    gasController = request;
-    lastGasFetchAt = Date.now();
-    const generation = gasGeneration;
-    const timeout = setTimeout(() => request.abort(), 5000);
-    gasTimeout = timeout;
-    try {
-      const response = await fetch("/api/gas", { cache: "no-store", signal: request.signal });
-      if (!response.ok) throw new Error("Local gas quote unavailable");
-      const quote = await response.json();
-      if (!quote || typeof quote !== "object" || Array.isArray(quote)) throw new Error("Invalid gas quote");
-      if (!suspended && generation === gasGeneration) {
-        gasQuote = {
-          gas: quotePart(quote.gasPriceWei, quote.gasObservedAt, gasQuote.gas, true),
-          usd: quotePart(quote.ethUsdE8, quote.usdObservedAt, gasQuote.usd, false),
-        };
-        gasReference = referenceOf(quote.reference);
-        rebalanceProjection = projectionOf(quote.rebalance);
-        gasRequestFailed = false;
-        renderGas();
-      }
-    } catch {
-      if (!suspended && generation === gasGeneration) { gasRequestFailed = true; renderGas(); }
-    } finally {
-      clearTimeout(timeout);
-      if (gasController === request) {
-        gasController = null;
-        gasTimeout = null;
-        if (!suspended) gasTimer = setTimeout(refreshGas, Math.max(0, quoteIntervalMs - (Date.now() - lastGasFetchAt)));
-      }
-    }
-  }
-
   function show(snapshot, disconnected = false) {
     // Controls must regain freshness after browser restoration even when the chart pixels are unchanged.
     window.rebalanceControls?.updateStatus(snapshot, disconnected);
+    clearTimeout(feeExpiryTimer); feeExpiryTimer = null;
+    const feeAt = Date.parse(snapshot?.feeCheck?.observedAt ?? "");
+    if (!disconnected && snapshot?.armed && snapshot.operation?.status === "fee-target" && Number.isFinite(feeAt) && feeAt <= Date.now() && feeAt + 90000 > Date.now()) {
+      feeExpiryTimer = setTimeout(() => {
+        feeExpiryTimer = null;
+        if (!suspended && lastSnapshot === snapshot) { lastRendered = null; render(snapshot); }
+      }, feeAt + 90000 - Date.now());
+    }
     const key = JSON.stringify([snapshot, disconnected]);
     if (key === lastRendered) return;
     lastRendered = key;
@@ -586,23 +530,20 @@
     suspended = true; streamReady = false;
     stream?.close(); stream = null;
     clearTimeout(initialTimer); clearTimeout(refreshTimer); refreshTimer = null;
+    clearTimeout(feeExpiryTimer); feeExpiryTimer = null;
     controller?.abort();
-    gasGeneration++;
-    gasController?.abort(); gasController = null;
-    clearTimeout(gasTimeout); gasTimeout = null;
-    clearTimeout(gasTimer); gasTimer = null;
-    clearTimeout(gasStaleTimer); gasStaleTimer = null;
   });
   window.addEventListener("pageshow", () => {
-    if (suspended) { suspended = false; connect(); renderGas(); void refreshGas(); }
+    if (suspended) { suspended = false; connect(); }
   });
-  const summaryButton = byId("sum"), detailPanel = byId("panel");
-  summaryButton.addEventListener("click", () => {
-    const open = summaryButton.getAttribute("aria-expanded") === "true";
-    summaryButton.setAttribute("aria-expanded", String(!open));
-    detailPanel.classList.toggle("open", !open);
+  const settingsToggle = byId("settings-toggle"), settingsPanel = byId("settings-panel");
+  settingsToggle.addEventListener("click", () => {
+    const open = settingsToggle.getAttribute("aria-expanded") !== "true";
+    settingsToggle.setAttribute("aria-expanded", String(open));
+    settingsPanel.setAttribute("aria-hidden", String(!open));
+    if (open) settingsPanel.removeAttribute("inert"); else settingsPanel.setAttribute("inert", "");
+    settingsPanel.classList.toggle("open", open);
   });
 
   connect();
-  void refreshGas();
 })();

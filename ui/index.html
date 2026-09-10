@@ -4,11 +4,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="dark">
+    <meta name="referrer" content="no-referrer">
     <title>Rebalance · Allocation</title>
     <link rel="stylesheet" href="/style.css">
     <script src="/view-client.js" defer></script>
     <script src="/allocation-ring.js" defer></script>
     <script src="/portfolio-controls.js" defer></script>
+    <script src="/stock-links.js" defer></script>
     <script src="/app.js" defer></script>
   </head>
   <body>
@@ -25,7 +27,7 @@
       </nav>
 
       <div class="main">
-        <svg class="ring" id="ring" viewBox="-60 -20 560 480" role="img" aria-labelledby="chart-title chart-description">
+        <svg class="ring" id="ring" viewBox="-60 -20 560 480" role="group" aria-labelledby="chart-title chart-description">
           <defs>
             <title id="chart-title">Allocation unavailable</title>
             <desc id="chart-description">Connecting to the local app.</desc>
@@ -37,39 +39,29 @@
             <circle class="ghost" id="ghost" cx="210" cy="210" r="150" fill="none" stroke-width="44" pathLength="100"/>
           </g>
           <g id="labels"></g>
-          <text class="ctr-state" id="c-state" x="210" y="202">Connecting</text>
-          <text class="ctr-sub" id="c-sub" x="210" y="226">Local allocation</text>
-          <text class="ctr-val" id="c-val" x="210" y="249"></text>
+          <foreignObject x="121" y="120" width="178" height="180">
+            <div xmlns="http://www.w3.org/1999/xhtml" class="centre">
+              <p class="ctr-state" id="c-state">Connecting</p>
+              <p class="ctr-sub" id="c-sub">Local allocation</p>
+              <p class="ctr-val" id="c-val"></p>
+            </div>
+          </foreignObject>
           <text class="ctr-val" id="c-legend" x="210" y="444"></text>
         </svg>
       </div>
 
-      <div class="discl">
-        <div class="measure"><button class="summary" id="sum" aria-expanded="false" aria-controls="panel">
-          <span class="stext">Details</span>
-          <svg class="chev" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </button></div>
-        <div class="panel" id="panel"><div class="panelin"><div class="panelpad measure">
-          <div class="pair">
-            <section>
-              <p class="cap">Fees</p>
-              <dl class="rows">
-                <div><dt>Balance</dt><dd id="gas">unavailable</dd></div>
-                <div><dt>Gas price</dt><dd id="gas-price">unavailable</dd></div>
-                <div><dt>One swap</dt><dd id="gas-estimate">unavailable</dd></div>
-                <div><dt>Full rebalance</dt><dd id="gas-rebalance">unavailable</dd></div>
-              </dl>
-            </section>
-            <section>
-              <p class="cap">When it trades</p>
-              <dl class="rows">
-                <div><dt>Rebalance when off by</dt><dd id="set-band">unavailable</dd></div>
-                <div><dt>Cycle interval</dt><dd id="set-every">unavailable</dd></div>
-              </dl>
-            </section>
-          </div>
-        </div></div></div>
-      </div>
+      <section class="settings" aria-label="Portfolio settings">
+        <button class="settings-toggle" id="settings-toggle" type="button" aria-expanded="false" aria-controls="settings-panel">Settings</button>
+        <div class="settings-panel" id="settings-panel" role="region" aria-labelledby="settings-toggle" aria-hidden="true" inert>
+          <div class="settings-clip"><div class="settings-content">
+            <dl class="settings-rows" aria-label="Rebalance settings">
+              <div><dt>Drift trigger</dt><dd id="set-band">Unavailable</dd></div>
+              <div><dt>Cycle interval</dt><dd id="set-every">Unavailable</dd></div>
+              <div><dt>Fee target</dt><dd id="set-fee-target">Not set</dd></div>
+            </dl>
+          </div></div>
+        </div>
+      </section>
     </main>
     <p id="control-message" class="control-message" role="status" hidden></p>
   </body>
