@@ -10,7 +10,7 @@ const wallet = '0x1111111111111111111111111111111111111111';
 const current = {
   app: 'Rebalance', nativeBalance: '400000000000000', updatedAt: observed,
   chain: { id: 4663 }, wallet,
-  graph: { node: 'plan' }, error: null, operation: null,
+  graph: { node: 'plan' }, error: null, operation: null, armed: true,
   config: { targets: allocation },
   portfolio: { totalUsdE8: '500000000', positions: Object.entries(allocation).map(([id, weightBps]) => ({ id, symbol: id, weightBps, balance: '1' })) },
 };
@@ -187,7 +187,8 @@ test('an unconfirmed send never renders as a bare receipt hash', async () => {
   page.source.send({ ...current, operation: { status: 'pending', hash }, proposal: { sellAssetId: 'AAPL', buyAssetId: 'USDG', amountIn: '1', reason: 'Sell overweight AAPL into USDG' } });
   assert.equal(page.element('c-state').textContent, 'Rebalancing');
   assert.match(page.element('why-receipt').textContent, /unconfirmed$/);
-  assert.equal(page.element('stext').textContent, 'Sell overweight AAPL into USDG · waiting for receipt');
+  assert.equal(page.element('c-sub').textContent, 'AAPL → USDG', 'the centre names the pair, not a second copy of the state');
+  assert.equal(page.element('c-val').textContent, 'Waiting for receipt', 'mid-trade the send state replaces the portfolio total');
   assert.ok(page.element('ghost').classes.has('show'), 'a pending swap shows where the holding is heading');
   page.source.send({ ...current, operation: { status: 'confirmed', hash, blockNumber: '55516741' } });
   assert.equal(page.element('why-receipt').textContent, `✓ ${hash.slice(0, 8)}… blk 55516741`);
@@ -602,5 +603,13 @@ test('a zero drift band does not invert the display', async () => {
   page.source.send({ ...current, config: { targets: allocation, driftThresholdBps: 0 } });
   assert.equal(page.element('c-state').textContent, 'On target');
   assert.equal(page.element('labels').children.filter(g => g.attrs.class === 'label-out').length, 0);
+  page.hide();
+});
+
+test('an unarmed runner is the headline, without hiding the drift reading', async () => {
+  const page = await browser();
+  page.source.send({ ...current, armed: false, config: { targets: allocation, driftThresholdBps: 500 } });
+  assert.equal(page.element('c-state').textContent, 'Not armed');
+  assert.equal(page.element('c-sub').textContent, '0% off target', 'a stopped runner still reports where the portfolio stands');
   page.hide();
 });

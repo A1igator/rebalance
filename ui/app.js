@@ -321,28 +321,38 @@
       if (Math.abs(drift) > Math.abs(worst)) { worst = drift; worstId = id; }
     }
 
+    // One status, in the middle. The summary line below is a disclosure
+    // affordance only, so nothing is said twice in two places.
     let state = "No allocation", sub = "Set targets through your agent", value = "";
-    if (failed) { state = funded ? "Last known" : "Unavailable"; sub = "Update unavailable"; }
-    else if (receiptWait) { state = "Rebalancing"; sub = receiptWait; }
-    else if (funded) {
-      const off = band !== null && Math.abs(worst) > band;
-      state = band === null ? "Holdings" : off ? "Off target" : "On target";
-      // Name the holding that is actually driving it, rather than five numbers.
-      sub = band === null ? "Drift band unavailable"
-        : off && worstId ? `${worstId} ${worst >= 0 ? "+" : "\u2212"}${percent.format(Math.abs(worst) / 100)}%`
-        : `${percent.format(Math.abs(worst) / 100)}% off target`;
-    } else if (targets.length) {
-      state = "Targets";
-      sub = portfolio ? positions.some((p) => positive(p.balance)) ? "Holdings below precision" : "Wallet empty" : "Holdings not checked";
-    }
+    const armed = snapshot?.armed === true;
+    const drift = funded && band !== null
+      ? worstId && Math.abs(worst) > band
+        ? `${worstId} ${worst >= 0 ? "+" : "\u2212"}${percent.format(Math.abs(worst) / 100)}%`
+        : `${percent.format(Math.abs(worst) / 100)}% off target`
+      : null;
     if (funded) {
       const total = usdTotal(portfolio?.totalUsdE8);
       const observed = new Date(snapshot?.updatedAt);
       const at = Number.isFinite(observed.getTime()) ? time.format(observed) : null;
       value = [total, at ? `as of ${at}` : null].filter(Boolean).join(" · ");
     }
+    if (failed) { state = funded ? "Last known" : "Unavailable"; sub = "Update unavailable"; }
+    else if (receiptWait) {
+      const plan = snapshot?.proposal;
+      state = "Rebalancing";
+      sub = plan?.sellAssetId && plan?.buyAssetId ? `${plan.sellAssetId} \u2192 ${plan.buyAssetId}` : "Swap in progress";
+      // Mid-trade, how the send is going matters more than the portfolio total.
+      value = receiptWait;
+    } else if (funded) {
+      state = band === null ? "Holdings" : !armed ? "Not armed" : Math.abs(worst) > band ? "Off target" : "On target";
+      // "Not armed" is the headline, but the drift reading is not lost with it.
+      sub = band === null ? "Drift band unavailable" : drift;
+    } else if (targets.length) {
+      state = "Targets";
+      sub = portfolio ? positions.some((p) => positive(p.balance)) ? "Holdings below precision" : "Wallet empty" : "Holdings not checked";
+    }
     byId("c-state").textContent = state;
-    byId("c-sub").textContent = sub;
+    byId("c-sub").textContent = sub ?? "";
     byId("c-val").textContent = value;
     byId("c-legend").textContent = funded || !targets.length ? "" : "Targets only";
     byId("chart-title").textContent = state;
@@ -367,23 +377,7 @@
     }
     ghost.classList.toggle("show", Boolean(ghostTarget));
 
-    const armed = snapshot?.armed === true;
     const hash = shortHash(snapshot?.operation?.hash);
-    let summary = "Not armed · start through your agent";
-    let pulse = "off";
-    if (failed) summary = "Update unavailable · showing last known";
-    else if (receiptWait) {
-      pulse = "";
-      summary = snapshot?.proposal?.reason ? `${snapshot.proposal.reason} · ${receiptWait.toLowerCase()}` : receiptWait;
-    } else if (armed) {
-      pulse = "idle";
-      const next = snapshot?.cycle?.nextEligibleAt ? new Date(snapshot.cycle.nextEligibleAt) : null;
-      const at = next && Number.isFinite(next.getTime()) ? ` · next check ${time.format(next)}` : "";
-      summary = funded && band !== null && Math.abs(worst) <= band ? `Monitoring · within range${at}` : `Monitoring${at}`;
-    }
-    byId("stext").textContent = summary;
-    byId("pulse").className = `pulse${pulse ? ` ${pulse}` : ""}`;
-
     const allocation = snapshot?.config?.allocation;
     byId("why-ask").textContent = allocation
       ? allocation.objective === "sharpe" ? "Best historical Sharpe" : "Best return for your risk level"
