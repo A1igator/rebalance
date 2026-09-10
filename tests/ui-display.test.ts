@@ -594,3 +594,14 @@ test('the off-target boundary matches the engine, which trades above the band', 
   assert.equal(page.element('c-state').textContent, 'Off target');
   page.hide();
 });
+
+test('a zero drift band does not invert the display', async () => {
+  const page = await browser();
+  // src/config.ts accepts driftThresholdBps 0. With a `>=` comparison every
+  // asset would read as out of band and a perfect portfolio would render
+  // "Off target" with every label flagged.
+  page.source.send({ ...current, config: { targets: allocation, driftThresholdBps: 0 } });
+  assert.equal(page.element('c-state').textContent, 'On target');
+  assert.equal(page.element('labels').children.filter(g => g.attrs.class === 'label-out').length, 0);
+  page.hide();
+});

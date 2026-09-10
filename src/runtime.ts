@@ -124,6 +124,7 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
     const retained = withCurrentTargets(previous.portfolio, configured);
     Object.assign(state, {
       wallet: configured.wallet, mode: configured.mode, config: { targets: configured.targets, rebalanceIntervalSeconds: configured.rebalanceIntervalSeconds,
+        driftThresholdBps: configured.driftThresholdBps,
         ...(configured.allocation ? { allocation: allocationSummary(configured) } : {}) },
       cycle: previous.cycle ?? null,
       portfolio: retained, updatedAt: retained ? previous.updatedAt : null,
