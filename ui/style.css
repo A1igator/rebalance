@@ -61,8 +61,14 @@ text { text-anchor: middle; }
 .sval { font-size: 12.5px; color: var(--dim); line-height: 1.45; }
 .sval.mono { font-family: var(--mono); font-size: 11.5px; }
 .foot { font-size: 10.5px; color: var(--faint); line-height: 1.55; margin: 0; }
-.kv { display: flex; flex-direction: column; gap: 6px; }
-.kvline { font-size: 11.5px; color: var(--mute); font-variant-numeric: tabular-nums; }
+/* Label left, value right, so four fees read as a column of numbers rather
+   than four sentences. */
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 22px 44px; }
+@media (max-width: 720px) { .pair { grid-template-columns: 1fr; } }
+.rows { display: grid; gap: 7px; margin: 0; }
+.rows > div { display: grid; grid-template-columns: minmax(0, auto) 1fr; gap: 18px; align-items: baseline; }
+.rows dt { font-size: 11.5px; color: var(--faint); white-space: nowrap; }
+.rows dd { margin: 0; font-size: 11.5px; color: var(--dim); font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
 
 @media (prefers-reduced-motion: reduce) {
   .arc, .ghost, .chev, .panel { transition: none; }

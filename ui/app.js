@@ -104,31 +104,41 @@
     const balanceUsd = balance !== null && usd ? `${dollars(balance, usd.amount, 2)}${stale(usd) || balanceStale ? " last known" : ""}` : "USD unavailable";
     const gasLabel = gas ? `${units(gas.amount, 9)} gwei${stale(gas) ? " last known" : ""}` : "unavailable";
     const gasUsd = gas && usd ? `${dollars(gas.amount, usd.amount, 12)} / gas${stale(gas) || stale(usd) ? " last known" : ""}` : "USD unavailable";
-    byId("gas").textContent = `${balanceLabel}${balance !== null && balanceStale ? " last known" : ""} · ${balanceUsd}`;
-    byId("gas-price").textContent = `Gas price · ${gasLabel}`;
+    // Values only; the labels are static markup, so the numbers line up in a
+    // column instead of hiding inside four sentences. Staleness is said once
+    // per row rather than after every fragment it touches.
+    const known = (text, isStale) => `${text}${isStale ? " · last known" : ""}`;
+    // A missing conversion is stated, never silently dropped: an ETH figure with
+    // no dollar figure beside it would read as if none was expected.
+    byId("gas").textContent = balance === null ? "unavailable"
+      : known(`${units(balance, 18)} ETH · ${usd ? dollars(balance, usd.amount, 2) : "USD unavailable"}`,
+          balanceStale || (usd ? stale(usd) : false));
+    byId("gas-price").textContent = gas ? known(`${units(gas.amount, 9)} gwei`, stale(gas)) : "unavailable";
     const reference = lastSnapshot?.chain?.id === 4663 ? gasReference : null;
     const costReady = reference && gas && usd;
     const costsStale = stale(gas) || stale(usd);
-    byId("gas-estimate").textContent = costReady ? `Swap ≈${dollars(gas.amount * reference.swapGas, usd.amount, 2)} · + approval ≈${dollars(gas.amount * reference.approvalGas, usd.amount, 2)}${costsStale ? " · last known" : ""}` : "Swap estimate · unavailable";
+    byId("gas-estimate").textContent = costReady
+      ? known(`≈${dollars(gas.amount * reference.swapGas, usd.amount, 2)} · +${dollars(gas.amount * reference.approvalGas, usd.amount, 2)} approval`, costsStale)
+      : "unavailable";
     const projection = projectionMatches(rebalanceProjection) ? rebalanceProjection : null;
     const projectionStale = projection && (gasRequestFailed || statusDisconnected || Boolean(lastSnapshot?.error) || Date.now() - projection.timestamp >= quoteMaxAgeMs);
-    let rebalanceLabel = "Rebalance estimate · unavailable";
+    let rebalanceLabel = "unavailable";
     if (projection?.swaps === 0) {
-      rebalanceLabel = projectionStale ? "Rebalance · $0 (last known projection)" : "Rebalance · $0 (on target)";
+      rebalanceLabel = known("$0 · on target", Boolean(projectionStale));
     } else if (projection && costReady) {
       const legs = BigInt(projection.swaps);
       const low = dollars(gas.amount * reference.swapGas * legs, usd.amount, 2);
       const high = dollars(gas.amount * (reference.swapGas + reference.approvalGas) * legs, usd.amount, 2);
-      rebalanceLabel = `Rebalance ≈${low}–${high} · ${projection.swaps} ${projection.swaps === 1 ? "swap" : "swaps"}${projectionStale || costsStale ? " · last known" : ""}`;
+      rebalanceLabel = known(`≈${low}–${high} · ${projection.swaps} ${projection.swaps === 1 ? "swap" : "swaps"}`, Boolean(projectionStale) || costsStale);
     }
     byId("gas-rebalance").textContent = rebalanceLabel;
     const balanceDetails = `${balanceLabel}; ${balanceAt === null ? "observation time unavailable" : `balance observed ${new Date(balanceAt).toISOString()}`}; ${balanceUsd}; ${sourceNote(usd, "Coinbase ETH/USD spot")}. ETH gas is excluded from portfolio allocation.`;
     const priceDetails = `Gas price ${gasLabel}; ${sourceNote(gas, "Robinhood RPC eth_gasPrice")}; ${gasUsd}; ${sourceNote(usd, "Coinbase ETH/USD spot")}. USD amount is per gas unit, not a transaction fee; a full transaction uses multiple gas units.`;
     const referenceDetails = reference ? `Approximate transaction costs use verified historical single-pool receipts on Robinhood 4663: swap ${reference.swapHash}, ${reference.swapGas} gas; approval ${reference.approvalHash}, ${reference.approvalGas} gas. Gas usage of a new transaction may differ.` : "Historical transaction gas reference unavailable.";
-    const projectionDetails = `${rebalanceLabel}. ${projection ? `Fixed-price projection observed ${new Date(projection.timestamp).toISOString()}; matching wallet, targets and balances. The range assumes zero to one approval per swap leg.` : "A fresh projection matching this wallet, allocation and holdings is unavailable."} Estimates exclude market movement, liquidity-provider fees and slippage; they are not a measured rebalance cycle cost.`;
+    const projectionDetails = `Approximate cost of a full rebalance: ${rebalanceLabel}. ${projection ? `Fixed-price projection observed ${new Date(projection.timestamp).toISOString()}; matching wallet, targets and balances. The range assumes zero to one approval per swap leg.` : "A fresh projection matching this wallet, allocation and holdings is unavailable."} Estimates exclude market movement, liquidity-provider fees and slippage; they are not a measured rebalance cycle cost.`;
     byId("gas").setAttribute("aria-label", balanceDetails);
     byId("gas-price").setAttribute("aria-label", priceDetails);
-    byId("gas-estimate").setAttribute("aria-label", `${byId("gas-estimate").textContent}. ${referenceDetails}`);
+    byId("gas-estimate").setAttribute("aria-label", `Approximate cost of one swap: ${byId("gas-estimate").textContent}. ${referenceDetails}`);
     byId("gas-rebalance").setAttribute("aria-label", projectionDetails);
     byId("chart-description").textContent = `${allocationDescription} ${balanceDetails} ${priceDetails} ${referenceDetails} ${projectionDetails}`;
     const deadlines = [gas?.timestamp, usd?.timestamp, balanceAt, projection?.timestamp].filter((timestamp) => timestamp !== null && timestamp !== undefined).map((timestamp) => timestamp + quoteMaxAgeMs).filter((deadline) => deadline > Date.now());
@@ -394,11 +404,11 @@
       receipt.textContent = receiptWait ? "pending\u2026" : "\u2014";
     }
 
-    byId("set-band").textContent = `Rebalance when off by · ${band === null ? "unavailable" : `\u00b1${percent.format(band / 100)}%`}`;
+    byId("set-band").textContent = band === null ? "unavailable" : `\u00b1${percent.format(band / 100)}%`;
     const every = duration(snapshot?.config?.rebalanceIntervalSeconds);
-    byId("set-every").textContent = `Check every · ${every || "unavailable"}`;
+    byId("set-every").textContent = every || "unavailable";
     const modes = { "private-key": "Local key", privy: "Privy", ledger: "Ledger" };
-    byId("set-sign").textContent = `Signing · ${modes[snapshot?.mode] || "unavailable"}`;
+    byId("set-sign").textContent = modes[snapshot?.mode] || "unavailable";
 
     allocationDescription = `${state}. ${sub}. ${funded ? "Outer ring, actual holdings" : "Targets only"}: ${entries.map((r) => `${r.id} ${percent.format(r.weight / 100)}%`).join(", ")}.${funded && targets.length ? ` Inner ring, targets: ${targets.map((r) => `${r.id} ${percent.format(r.weight / 100)}%`).join(", ")}.` : ""}`;
     allocationDescription += ` ${renderRisk(snapshot, disconnected)}`;
