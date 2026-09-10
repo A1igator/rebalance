@@ -580,3 +580,8 @@ Focused coverage includes `tests/ledger-request.test.ts`, `tests/ledger-signing.
 Automated validation used temporary public-state fixtures and injected device/RPC behavior. It did not start a funded runner, sign or broadcast a live transaction, change targets, replace credentials, alter firmware or install an Ethereum app. Earlier physical indexed-address onboarding is established; live Ledger transaction signing, device display, rejection and confirmed swap evidence remain unverified. Automated tests do not establish live hardware transaction or confirmed swap evidence.
 
 Final TypeScript, skill validation and Git whitespace checks passed. Root reloaded only the verified Ledger chart process (`commands.ts chart`, PID 60421 replaced by 96645). Its read-only `GET :4665/api/runner` now reports `stopped` instead of the historical `deferred` state, while the raw-key runner on port 4663 remains running. Hashes of all three profiles' configuration, wallet, runner lock, cycle, pending, recovery and stop records remained unchanged. A fresh visual check was blocked by the locked Mac, so no new screenshot is claimed. PR #20 was separately reverified at head `6dc92a4` on preview port 4770 and remains unmerged.
+
+
+## PR 20 merge plan — 2026-09-10
+
+The human authorized merging the previously preview-only chart PR and asked for Ledger test readiness. [Prompt 054](prompts/054-merge-monitor-chart.md) records the scope and integration plan before merging. Preserve PR contributor/Claude commit history and the current Ledger implementation; verify the combined chart/runtime/control paths and refresh only read-only services. No live signing or runner activation is part of merge validation. Actual results follow after integration.
