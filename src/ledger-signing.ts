@@ -4,10 +4,8 @@ import { getAddress, hexToBytes, isAddress, parseTransaction, recoverTransaction
   type Address, type Hex } from 'viem';
 import { portfolioRoot } from '../scripts/profile-routing.mjs';
 import { completedAddress, findLedgerAccount, withLedgerDevice,
-  type LedgerAddressAction, type LedgerDevice, type LedgerOnboardingDependencies } from './ledger-onboarding.js';
+  type LedgerAddressAction, type LedgerOnboardingDependencies } from './ledger-onboarding.js';
 import type { PreparedTransaction } from './privy.js';
-import { preparedAuthorization, preparedMessageHash, verifiedAuthorizationSignature, verifiedMessageHashSignature,
-  type PreparedAuthorization } from './signing-payloads.js';
 
 export type LedgerSigningOutcome = 'rejected' | 'cancelled' | 'timeout' | 'unavailable' |
   'account-mismatch' | 'invalid-transaction' | 'invalid-signature' | 'unsupported';
@@ -127,45 +125,6 @@ export async function verifiedLedgerTransaction(output: unknown, wallet: Address
   } catch { throw new LedgerSigningError('invalid-signature'); }
 }
 
-/** Each paymaster payload owns one bounded physical action under the existing USB mutex. */
-async function signLedgerPayload(rootDir: string, selected: Address, timeoutMs: number, options: LedgerSigningOptions,
-  action: (device: LedgerDevice, path: string) => LedgerAddressAction,
-  verify: (output: unknown) => Promise<Hex>): Promise<Hex> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new LedgerSigningError('timeout')), timeoutMs);
-  const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
-  try {
-    active(signal);
-    const result = await withLedgerDevice(rootDir, signal, async device => {
-      let account;
-      try { account = await findLedgerAccount(rootDir, selected); }
-      catch { throw new LedgerSigningError('account-mismatch'); }
-      active(signal);
-      const anchor = await completedAddress(device.getAddress(ANCHOR_PATH, readOptions), signal);
-      if (fingerprint(anchor) !== account.fingerprint) throw new LedgerSigningError('account-mismatch');
-      const derived = await completedAddress(device.getAddress(account.derivationPath, readOptions), signal);
-      if (derived.toLowerCase() !== selected.toLowerCase()) throw new LedgerSigningError('account-mismatch');
-      active(signal);
-      const signature = await completedSignature(action(device, account.derivationPath), signal);
-      active(signal);
-      const finalAnchor = await completedAddress(device.getAddress(ANCHOR_PATH, readOptions), signal);
-      if (fingerprint(finalAnchor) !== account.fingerprint) throw new LedgerSigningError('account-mismatch');
-      active(signal);
-      let serialized: Hex;
-      try { serialized = await verify(signature); }
-      catch { throw new LedgerSigningError('invalid-signature'); }
-      active(signal);
-      return serialized;
-    }, options);
-    active(signal);
-    return result;
-  } catch (error) {
-    if (signal.aborted) throw abortError(signal);
-    if (error instanceof LedgerSigningError) throw error;
-    throw new LedgerSigningError('unavailable');
-  } finally { clearTimeout(timer); }
-}
-
 /** Loading a signer reads verified public metadata only; a sign call owns one device flow. */
 export async function ledgerSigner(wallet: Address, options: LedgerSigningOptions = {}) {
   const rootDir = options.rootDir ?? portfolioRoot();
@@ -208,23 +167,5 @@ export async function ledgerSigner(wallet: Address, options: LedgerSigningOption
       if (error instanceof LedgerSigningError) throw error;
       throw new LedgerSigningError('unavailable');
     } finally { clearTimeout(timer); }
-  },
-  async signAuthorization(input: PreparedAuthorization): Promise<Hex> {
-    let prepared: PreparedAuthorization;
-    try { prepared = preparedAuthorization(input); }
-    catch { throw new LedgerSigningError('invalid-transaction'); }
-    return signLedgerPayload(rootDir, selected, timeoutMs, options, (device, path) => {
-      if (!device.signDelegationAuthorization) throw new LedgerSigningError('unavailable');
-      return device.signDelegationAuthorization(path, prepared.chainId, prepared.address, prepared.nonce);
-    }, output => verifiedAuthorizationSignature(output, selected, prepared));
-  },
-  async signMessageHash(input: Hex): Promise<Hex> {
-    let hash: Hex;
-    try { hash = preparedMessageHash(input); }
-    catch { throw new LedgerSigningError('invalid-transaction'); }
-    return signLedgerPayload(rootDir, selected, timeoutMs, options, (device, path) => {
-      if (!device.signMessage) throw new LedgerSigningError('unavailable');
-      return device.signMessage(path, hexToBytes(hash));
-    }, output => verifiedMessageHashSignature(output, selected, hash));
   } };
 }

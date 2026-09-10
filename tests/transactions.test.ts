@@ -20,7 +20,7 @@ const data = await mkdtemp(join(tmpdir(), 'rebalance-transactions-'));
 process.env.REBALANCE_DATA_DIR = data;
 process.env.REBALANCE_PRIVATE_KEY = key;
 // These modules capture DATA at import time, after the isolated environment exists.
-const { CONFIG_PATH, KEY_PATH, PENDING_PATH, LAST_TRANSACTION_PATH, validateConfig } = await import('../src/config.js');
+const { CONFIG_PATH, KEY_PATH, PENDING_PATH, LAST_TRANSACTION_PATH, loadConfig, validateConfig } = await import('../src/config.js');
 const { acquireConfigLock } = await import('../src/config-lock.js');
 // Fail before any fixture write if a future static import captures config early.
 for (const [name, path] of Object.entries({ CONFIG_PATH, KEY_PATH, PENDING_PATH, LAST_TRANSACTION_PATH })) {
@@ -686,14 +686,39 @@ test('an aborted Ledger signer after a config edit is classified without a stale
   assert.equal(h.sent.length, 0); assert.equal(await readJson(PENDING_PATH), null);
 });
 
-test('unknown or incomplete paymaster transports fail closed before native receipt reads', async () => {
-  const base: PendingTransaction = { chainId: 4663, wallet, hash: fixtureHash, nonce: 7,
-    kind: 'swap', createdAt: new Date().toISOString(), status: 'unknown' };
-  const { chain, rpc } = mockedChain();
-  rpc.getTransactionReceipt = async () => { assert.fail('Must not read native receipt for a malformed transport'); };
-  for (const extra of [{ transport: 'future-provider' }, { transport: 'alchemy-usdg' }, { userOperation: {} }]) {
-    await atomicWriteJson(PENDING_PATH, { ...base, ...extra });
-    await assert.rejects(reconcile(configuration(), chain), /Invalid pending USDG/);
-    assert.deepEqual(await readJson(PENDING_PATH), { ...base, ...extra });
+
+test('retired gas settings block persisted configuration and dispatch without native fallback or rewriting files', async () => {
+  const selected = configuration();
+  await atomicWriteJson(CONFIG_PATH, { ...selected, gasPayment: null });
+  const before = await readFile(CONFIG_PATH, 'utf8');
+  await assert.rejects(loadConfig(), /saved gasPayment setting is no longer supported/);
+  const h = mockedChain();
+  let rpcCalls = 0, signerLoads = 0;
+  h.rpc.getChainId = async () => { rpcCalls++; return 4663; };
+  await assert.rejects(dispatch(selected, h.chain, transaction, async () => {
+    signerLoads++; throw new Error('Must not load a signer');
+  }), /saved gasPayment setting is no longer supported/);
+  assert.equal(rpcCalls, 0); assert.equal(signerLoads, 0); assert.deepEqual(h.sent, []);
+  assert.equal(await readFile(CONFIG_PATH, 'utf8'), before);
+  for (const path of [PENDING_PATH, LAST_TRANSACTION_PATH, stopPath]) assert.equal(existsSync(path), false);
+});
+
+test('retired and unknown pending transports retain their exact barrier before native receipt reads', async () => {
+  const config = configuration();
+  const original = await pending();
+  const h = mockedChain();
+  let chainReads = 0, receiptReads = 0;
+  h.rpc.getChainId = async () => { chainReads++; return 4663; };
+  h.rpc.getTransactionReceipt = async () => { receiptReads++; throw new Error('Must not read a native receipt'); };
+  for (const marker of [{ transport: 'alchemy-usdg', userOperation: { callId: fixtureHash } },
+    { transport: 'unknown' }, { transport: null }, { userOperation: null }, { userOperation: {} }]) {
+    await atomicWriteJson(PENDING_PATH, { ...original, ...marker });
+    const before = await readFile(PENDING_PATH, 'utf8');
+    await assert.rejects(reconcile(config, h.chain), /Pending transport or user-operation metadata is unsupported/);
+    assert.equal(await readFile(PENDING_PATH, 'utf8'), before);
+    assert.equal(existsSync(LAST_TRANSACTION_PATH), false);
+    assert.equal(existsSync(stopPath), false);
   }
+  assert.throws(() => validatePending({ ...original, transport: undefined } as PendingTransaction, config), /metadata is unsupported/);
+  assert.equal(chainReads, 0); assert.equal(receiptReads, 0); assert.deepEqual(h.sent, []);
 });

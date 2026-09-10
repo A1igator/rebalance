@@ -1,5 +1,7 @@
 # API-key-free USDG gas options — 2026-09-10
 
+**Decision:** gas abstraction is deferred under [prompt 068](prompts/068-remove-unused-paymaster.md). The unused Alchemy implementation was removed; no replacement service or operated relayer was adopted. The research below is historical evidence of the options and constraints considered.
+
 The owner requires no developer API-key setup, accepts a relayer instead of Alchemy, and prioritizes trust minimization and direct Uniswap/Ledger/Privy integrations. Provider choice is not permission to add custody, sessions or remote portfolio decisions. See [prompt 067](prompts/067-settings-header-and-gas-alternatives.md).
 
 ## Alchemy authentication is not gas provisioning

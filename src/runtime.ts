@@ -1,7 +1,3 @@
-import { PaymasterRpcError } from './paymaster-rpc.js';
-import { PaymasterBalanceError } from './paymaster-state.js';
-import { PaymasterProtocolError } from './paymaster-protocol.js';
-import { PaymasterReceiptError } from './paymaster-receipts.js';
 import { FeeTargetError, type FeeCheck } from './fee-target.js';
 import { projectSwapCount } from './fee-projection.js';
 import { resolve } from 'node:path';
@@ -30,7 +26,7 @@ export const STOP_PATH = resolve(DATA, 'stop.json');
 export type Status = {
   app: 'Rebalance'; chain: { id: 4663; name: 'Robinhood' };
   mode: Config['mode'] | null; wallet: string | null;
-  config: { targets: Record<string, number>; rebalanceIntervalSeconds: number; driftThresholdBps: number; rebalanceFeeTargetUsdE8?: string; gasPayment?: Config['gasPayment']; allocation?: ReturnType<typeof allocationSummary> } | null;
+  config: { targets: Record<string, number>; rebalanceIntervalSeconds: number; driftThresholdBps: number; rebalanceFeeTargetUsdE8?: string; allocation?: ReturnType<typeof allocationSummary> } | null;
   cycle: RebalanceCycle | null;
   portfolio: Portfolio | null;
   operation: Operation | null;
@@ -75,7 +71,6 @@ export async function status(): Promise<Status> {
     state.mode = config.mode;
     state.config = { targets: config.targets, rebalanceIntervalSeconds: config.rebalanceIntervalSeconds,
       driftThresholdBps: config.driftThresholdBps,
-      ...(config.gasPayment ? { gasPayment: config.gasPayment } : {}),
       ...(config.rebalanceFeeTargetUsdE8 !== undefined ? { rebalanceFeeTargetUsdE8: config.rebalanceFeeTargetUsdE8 } : {}),
       ...(config.allocation ? { allocation: allocationSummary(config) } : {}) };
     state.portfolio = withCurrentTargets(state.portfolio, config);
@@ -87,8 +82,7 @@ export async function status(): Promise<Status> {
       delete state.proposal;
     }
     if (JSON.stringify(saved?.config?.targets) !== JSON.stringify(config.targets)) delete state.proposal;
-    if (JSON.stringify(saved?.config?.gasPayment) !== JSON.stringify(config.gasPayment) ||
-        saved?.config?.rebalanceFeeTargetUsdE8 !== config.rebalanceFeeTargetUsdE8 ||
+    if (saved?.config?.rebalanceFeeTargetUsdE8 !== config.rebalanceFeeTargetUsdE8 ||
         saved?.config?.driftThresholdBps !== config.driftThresholdBps ||
         JSON.stringify(saved?.config?.targets) !== JSON.stringify(config.targets)) {
       delete state.feeCheck;
@@ -115,8 +109,7 @@ export async function status(): Promise<Status> {
 
 function publicError(error: unknown): string {
   // Provider error objects can contain request payloads/URLs; do not publish them.
-  if (error instanceof Error && (error.constructor === Error || error instanceof PaymasterBalanceError ||
-      error instanceof PaymasterProtocolError || error instanceof PaymasterReceiptError || error instanceof PaymasterRpcError)) return error.message.slice(0, 400);
+  if (error instanceof Error && error.constructor === Error) return error.message.slice(0, 400);
   return 'A network or local operation failed. Execution is paused; check connectivity and the agent status.';
 }
 
@@ -136,7 +129,6 @@ function runtimeAttention(state: Status): RebalanceAttention | null {
 /** Caller holds the single-run lock, including for an observation-only check. */
 export async function tick(execute: boolean, chainFor: typeof createChain = createChain, ledger?: LedgerExecution, signal?: AbortSignal, presence?: LedgerPresence): Promise<Status> {
   const state = await initialStatus();
-  let localPaymasterRetry = false;
   state.feeTargetVersion = 1;
   const connectionRevision = presence?.revision;
   let previous: Status | null = null;
@@ -155,7 +147,6 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
     Object.assign(state, {
       wallet: configured.wallet, mode: configured.mode, config: { targets: configured.targets, rebalanceIntervalSeconds: configured.rebalanceIntervalSeconds,
         driftThresholdBps: configured.driftThresholdBps,
-        ...(configured.gasPayment ? { gasPayment: configured.gasPayment } : {}),
         ...(configured.rebalanceFeeTargetUsdE8 !== undefined ? { rebalanceFeeTargetUsdE8: configured.rebalanceFeeTargetUsdE8 } : {}),
         ...(configured.allocation ? { allocation: allocationSummary(configured) } : {}) },
       cycle: previous.cycle ?? null,
@@ -195,7 +186,6 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
       state.wallet = config.wallet;
       state.config = { targets: config.targets, rebalanceIntervalSeconds: config.rebalanceIntervalSeconds,
         driftThresholdBps: config.driftThresholdBps,
-      ...(config.gasPayment ? { gasPayment: config.gasPayment } : {}),
         ...(config.rebalanceFeeTargetUsdE8 !== undefined ? { rebalanceFeeTargetUsdE8: config.rebalanceFeeTargetUsdE8 } : {}),
         ...(config.allocation ? { allocation: allocationSummary(config) } : {}) };
       state.armed = execute;
@@ -250,9 +240,7 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
         // meaningful signing request; this never accesses the device or keys.
         if (config.rebalanceFeeTargetUsdE8 !== undefined) {
           try {
-            const transaction = config.gasPayment
-              ? (await (await import('./paymaster.js')).preparePaymasterTrade(config, chain, trade, quote as RouteQuote, state.portfolio ? projectSwapCount(state.portfolio.positions, config.driftThresholdBps) : null)).transaction
-              : await chain.transaction(trade, quote as RouteQuote);
+            const transaction = await chain.transaction(trade, quote as RouteQuote);
             const swaps = state.portfolio ? projectSwapCount(state.portfolio.positions, config.driftThresholdBps) : null;
             state.feeCheck = await readRebalanceFee(config, chain, transaction, swaps);
           } catch {
@@ -275,12 +263,7 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
         }
         await ledger!.assertReady(config);
       }
-      const prepared = config.gasPayment
-        ? await (await import('./paymaster.js')).preparePaymasterTrade(config, chain, trade, quote as RouteQuote,
-            state.portfolio ? projectSwapCount(state.portfolio.positions, config.driftThresholdBps) : null)
-        : { transaction: await chain.transaction(trade, quote as RouteQuote), trade };
-      const transaction = prepared.transaction;
-      state.proposal = prepared.trade;
+      const transaction = await chain.transaction(trade, quote as RouteQuote);
       const fees: FeeContext | undefined = config.rebalanceFeeTargetUsdE8 === undefined ? undefined : {
         swaps: state.portfolio ? projectSwapCount(state.portfolio.positions, config.driftThresholdBps) : null,
         onCheck: async check => { state.feeCheck = check; await atomicWriteJson(STATE_PATH, state); },
@@ -306,8 +289,6 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
       await atomicWriteJson(STATE_PATH, state);
     },
   }).catch(async error => {
-    localPaymasterRetry = (error instanceof PaymasterReceiptError && error.code === 'read-failed') ||
-      (error instanceof PaymasterRpcError && error.retryable);
     if (error instanceof ConfigChangedError || error instanceof ConfigLockBusyError) {
       state.error = null;
       state.operation = { status: 'configuration-changed', message: error instanceof ConfigChangedError
@@ -337,9 +318,7 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
   try {
     // Receipt barriers happen before observe/plan. They still need a durable
     // alert; retained holdings or an old receipt never establish completion.
-    // A transient paymaster read/quote outage belongs to deterministic retries.
-    // Preserve any earlier actionable incident; a failed read cannot resolve it.
-    if (!localPaymasterRetry) await attentionCondition(state.wallet, runtimeAttention(state));
+    await attentionCondition(state.wallet, runtimeAttention(state));
     const recovered = recoveryObservation.operation;
     if (recovered?.hash && (recovered.status === 'cancelled' || recovered.status === 'recovered-revert')) {
       await transactionRecovered(recovered.hash, recovered.status);

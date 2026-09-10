@@ -26,3 +26,7 @@ Validate exact intent/quote/signature binding, ETH-free balance handling, user-o
 The final selected flow uses EIP-7702 authorization plus personal-message UserOperation-hash signing, not a typed-data signature. The current Wallet API schema and provider v1.1 default-transition documentation informed that choice. The main agent implemented runtime/transaction/recovery routing and USDG fee reservation. Parallel agents implemented and tested strict prepared-intent/hash validation, EntryPoint receipt inspection, local/Privy/Ledger payload signing, private provider transport, startup identity checks and setup commands; reviewers checked cross-mode recovery and notification behavior. A final review found temporary paymaster receipt/preparation outages could alert chat; the implementation now retains them locally without clearing prior actionable incidents.
 
 Setup was simplified to hidden local API-key entry plus a public policy UUID. The app discovers that policy's paymaster using authenticated read-only stub data and validates a full estimation response before saving configuration. No provider billing/policy or live wallet changes were performed by this task. The detailed implementation, public deployment observations and remaining live checks are in [the execution record](../PAYMASTER_EXECUTION.md).
+
+## Subsequent decision
+
+The owner withdrew gas abstraction under [prompt 068](068-remove-unused-paymaster.md). The implementation was removed while preserving this original plan, implementation commits and AI disclosure as history.

@@ -9,7 +9,6 @@ import { acquireLock, atomicWriteJson, readJson } from './storage.js';
 import { ASSETS } from './assets.js';
 import { validateManagedAllocation, type ManagedAllocation } from './allocation-management.js';
 import type { SeedStore } from './macos-keychain.js';
-import { validatePaymasterConfig, type PaymasterConfig } from './paymaster-config.js';
 
 assertTestStorageEnvironment();
 
@@ -34,11 +33,14 @@ export type Config = {
   pollSeconds: number;
   rebalanceIntervalSeconds: number;
   rebalanceFeeTargetUsdE8?: string;
-  gasPayment?: PaymasterConfig;
 };
 
 export function validateConfig(value: unknown): Config {
   if (!value || typeof value !== 'object') throw new Error('Configuration must be an object');
+  // Do not reinterpret a saved gas-abstraction opt-in as native ETH execution.
+  if (Object.hasOwn(value, 'gasPayment')) {
+    throw new Error('The saved gasPayment setting is no longer supported. Preserve the configuration for review; native ETH was not selected automatically.');
+  }
   const c = { ...value as Config };
   if (c.rebalanceIntervalSeconds === undefined) c.rebalanceIntervalSeconds = 3600;
   if (c.version !== 1 || c.chainId !== 4663) throw new Error('Only Robinhood mainnet (4663) is supported');
@@ -68,7 +70,6 @@ export function validateConfig(value: unknown): Config {
       !/^(0|[1-9][0-9]{0,19})$/.test(c.rebalanceFeeTargetUsdE8))) {
     throw new Error('Invalid rebalanceFeeTargetUsdE8: use a canonical unsigned integer below 100000000000000000000');
   }
-  if (c.gasPayment !== undefined) c.gasPayment = validatePaymasterConfig(c.gasPayment);
   if (c.allocation !== undefined) c.allocation = validateManagedAllocation(c.allocation, c.targets);
   return { ...c, wallet: getAddress(c.wallet) };
 }

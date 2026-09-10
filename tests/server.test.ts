@@ -308,6 +308,8 @@ test('chart uses events while connected and one polling fallback only while disc
       },
     },
     document: {
+      visibilityState: 'visible',
+      addEventListener: (name: string, fn: () => void) => lifecycle.set(name, fn),
       getElementById: (id: string) => {
         if (id === 'arcs') renders++;
         if (!elements.has(id)) elements.set(id, { textContent: '', style: {}, parentNode: null, children: [],
@@ -357,7 +359,7 @@ test('chart uses events while connected and one polling fallback only while disc
   assert.equal(controlStatus.length, beforeRestore, 'closed connections cannot restore control freshness');
   const restored = Source.instances[1]!;
   restored.send(restoredSnapshot);
-  assert.equal(renders, 3, 'restoring an identical status still skips unnecessary chart drawing');
+  assert.equal(renders, 4, 'restoring the page recalculates time-sensitive display values once');
   assert.equal(controlStatus.length, beforeRestore + 1, 'the identical restored payload must still reach controls marked stale by pagehide');
   assert.equal(controlStatus.at(-1)?.snapshot?.wallet, restoredSnapshot.wallet);
   assert.equal(controlStatus.at(-1)?.snapshot?.updatedAt, restoredSnapshot.updatedAt);

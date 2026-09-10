@@ -1,4 +1,3 @@
-import { validatePaymasterPending } from './paymaster-state.js';
 import { checkRebalanceFee, FeeTargetError, type FeeCheck } from './fee-target.js';
 import { acquireConfigLock } from './config-lock.js';
 import { rm } from 'node:fs/promises';
@@ -18,6 +17,14 @@ export class ConfigChangedError extends Error {
   constructor() { super('Configuration changed; rebuild from the latest settings.'); this.name = 'ConfigChangedError'; }
 }
 class FeeQuoteExpiredError extends Error {}
+
+/** Fixed local diagnostic: never disclose arbitrary saved provider payloads. */
+export class UnsupportedPendingTransportError extends Error {
+  constructor() {
+    super('Pending transport or user-operation metadata is unsupported. Preserve the record for receipt review; native receipt and cancellation paths are unavailable.');
+    this.name = 'UnsupportedPendingTransportError';
+  }
+}
 
 const SEND_FAILURE_MESSAGES: Record<DispatchFailure, string> = {
   underpriced: 'RPC reported a fee that was too low.',
@@ -72,6 +79,11 @@ function validQuantity(value: unknown): boolean {
 }
 
 export function validatePending(p: PendingTransaction, config: Config): void {
+  // A retired or unknown transport must keep its barrier; its hash and nonce
+  // cannot be interpreted as a native transaction or cancellation target.
+  if (p && typeof p === 'object' && (Object.hasOwn(p, 'transport') || Object.hasOwn(p, 'userOperation'))) {
+    throw new UnsupportedPendingTransportError();
+  }
   if (!p || typeof p !== 'object' || p.chainId !== 4663 || typeof p.wallet !== 'string' ||
       p.wallet.toLowerCase() !== config.wallet.toLowerCase() || typeof p.hash !== 'string' ||
       !/^0x[0-9a-fA-F]{64}$/.test(p.hash) || !Number.isSafeInteger(p.nonce) || p.nonce < 0 ||
@@ -80,7 +92,6 @@ export function validatePending(p: PendingTransaction, config: Config): void {
       (p.sendFailure !== undefined && (typeof p.sendFailure !== 'string' || !Object.hasOwn(SEND_FAILURE_MESSAGES, p.sendFailure)))) {
     throw new Error('Pending transaction does not match the configured wallet/network or is invalid');
   }
-  if (p.transport !== undefined || p.userOperation !== undefined) validatePaymasterPending(p);
 }
 
 /** Receipt observation is independent of signing and is always run first. */
@@ -95,7 +106,6 @@ export async function reconcile(config: Config, chain: Chain): Promise<{ blocked
     return { blocked: false, operation: matches ? last : null };
   }
   validatePending(pending, config);
-  if (pending.transport === 'alchemy-usdg') return (await import('./paymaster.js')).reconcilePaymaster(config, chain, pending);
   if (await chain.publicClient.getChainId() !== 4663) throw new Error('RPC is not Robinhood mainnet');
   let receipt;
   try { receipt = await chain.publicClient.getTransactionReceipt({ hash: pending.hash as Hex }); }
@@ -145,7 +155,6 @@ export type FeeContext = { swaps: number | null; onCheck(check: FeeCheck): Promi
 /** Passive Ledger fee assessment: public calls only, without loading a signer. */
 export async function readRebalanceFee(config: Config, chain: Chain, tx: ChainTransaction, swaps: number | null): Promise<FeeCheck> {
   if (config.rebalanceFeeTargetUsdE8 === undefined) throw new Error('No fee target configured');
-  if (config.gasPayment) return (await import('./paymaster.js')).readPaymasterFee(config, chain, tx, swaps);
   const unavailable: FeeCheck = { state: 'unavailable', targetUsdE8: config.rebalanceFeeTargetUsdE8,
     estimatedUsdE8: null, gasPriceWei: null, ethUsdE8: null, observedAt: null };
   if (swaps === null || !Number.isInteger(swaps) || swaps < 1 || swaps > 16 || (tx.kind !== 'approval' && tx.kind !== 'swap')) return unavailable;
@@ -166,8 +175,6 @@ export async function dispatch(config: Config, chain: Chain, tx: ChainTransactio
   ledger?: { signal?: AbortSignal; assertReady(): Promise<void> }, fees?: FeeContext): Promise<Operation> {
   if (!['private-key', 'privy', 'ledger'].includes(config.mode)) throw new Error(`${config.mode} execution is not connected yet; no fallback signer was used`);
   if (config.mode === 'ledger' && !ledger) throw new Error('Ledger needs an explicit rebalance request; no fallback signer was used');
-  if (config.gasPayment) return (await import('./paymaster.js')).dispatchPaymaster(config, chain, tx, signer, ledger, fees);
-  if (tx.calls) throw new Error('A batched transaction requires the selected paymaster transport');
   let feeInput: Parameters<typeof checkRebalanceFee>[0] | undefined;
   let lastFeeCheck: FeeCheck | undefined;
   const capturedConfig = JSON.stringify(config);

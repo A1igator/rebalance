@@ -1,6 +1,6 @@
 # USDG paymaster verification — 2026-09-10
 
-Historical research snapshot before implementation. The optional adapter was subsequently implemented under [prompt 066](prompts/066-usdg-paymaster-implementation.md); see [setup](PAYMASTER_SETUP.md) and [the new execution/evidence record](PAYMASTER_EXECUTION.md). The observations below are preserved as originally measured.
+Historical research snapshot. The optional adapter was implemented under [prompt 066](prompts/066-usdg-paymaster-implementation.md), then removed under [prompt 068](prompts/068-remove-unused-paymaster.md) when the owner deferred gas abstraction. The [setup](PAYMASTER_SETUP.md) and [execution/evidence record](PAYMASTER_EXECUTION.md) are archived; their commands are no longer available. Observations below remain as originally measured.
 
 **Robinhood infrastructure supports this direction, but canonical USDG payment acceptance and a sponsored Rebalance transaction are unverified.** Rebalance currently sends legacy EOA transactions and requires native ETH. The user's $0.05 estimated rebalance-fee target does not make those transactions ETH-free.
 

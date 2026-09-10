@@ -77,3 +77,14 @@ test('fee targets are optional canonical integer USD units and do not change leg
     assert.throws(() => validateConfig({ ...config, rebalanceFeeTargetUsdE8: target }), /Invalid rebalanceFeeTargetUsdE8/);
   }
 });
+
+
+test('retired gas-payment settings are rejected rather than silently selecting native ETH', () => {
+  for (const gasPayment of [undefined, null, false, '', {}, { provider: 'alchemy', token: 'USDG' }, { provider: 'unknown' }]) {
+    const saved = { ...config, gasPayment, rebalanceFeeTargetUsdE8: '5000000' };
+    const before = structuredClone(saved);
+    assert.throws(() => validateConfig(saved), /saved gasPayment setting is no longer supported.*not selected automatically/);
+    assert.deepEqual(saved, before, 'validation never migrates the saved setting or target');
+  }
+  assert.equal(Object.hasOwn(validateConfig(config), 'gasPayment'), false);
+});

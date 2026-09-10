@@ -1,5 +1,7 @@
 # USDG paymaster execution
 
+> **Archived — removed on September 10, 2026.** The owner withdrew gas abstraction under [prompt 068](prompts/068-remove-unused-paymaster.md). The implementation and CLI commands described below are historical and are unavailable in current main. Native ETH gas and the per-wallet fee target remain. Older gasPayment configurations and paymaster pending records are rejected without modification.
+
 This optional per-wallet transport implements the user's [paymaster request](prompts/066-usdg-paymaster-implementation.md). It does not activate existing portfolios. [Setup](PAYMASTER_SETUP.md) requires an Alchemy app/key, active Robinhood USDG policy and an authenticated read-only estimate. Native ETH mode remains the default.
 
 ## Execution

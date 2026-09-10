@@ -21,7 +21,6 @@ import { validatePending } from './transactions.js';
 import { chartPort, chartUrl } from './chart-address.js';
 import { loginPrivy, privyWallet } from './privy.js';
 import { launch } from './launch.js';
-import { DELEGATION_NOTICE, runPaymasterCommand } from './paymaster-commands.js';
 import { recover } from './recovery.js';
 import { configureCodexNotifications, codexNotificationStatus, prepareCodexNotifications,
   runCodexNotifications, stopCodexNotifications } from './codex-notifications.js';
@@ -52,12 +51,6 @@ const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
   fees target <USD>                    Set this wallet's estimated rebalance network-fee target
   fees clear                           Remove this wallet's fee target
   fees status                          Read the saved fee target; estimates are not guarantees
-  paymaster status                     Read this wallet's gas transport and credential presence
-  paymaster setup                      User-only hidden local API-key prompt; no key in argv/chat
-  paymaster configure <policy-uuid> [public-paymaster-address]
-                                       Verify a read-only estimate, then select USDG gas payments
-  paymaster check                      Fresh read-only infrastructure/policy/fee probe; never sign
-  paymaster disable                    Return to native gas; existing 7702 delegation remains
   ledger status                        Read the latest Ledger rebalance request
   ledger rebalance [--request-id UUID]   Request one device-confirmed rebalance on a running Ledger monitor
   check                                Fresh read/plan/quote; never sign
@@ -78,7 +71,7 @@ const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
   notifications status                 Read listener preference and delivery state
   notifications test                   Publish a connection test; never perform trading
   notifications stop                   Pause notification delivery; leave trading unchanged
-Native ETH is gas-only unless this wallet explicitly selects the verified USDG paymaster transport; select USDG + four stocks from the verified manifest.
+Native ETH is gas-only; select USDG + four stocks from the verified manifest.
 Supported stocks: ${Object.keys(ASSETS).filter(id => id !== 'USDG').join(', ')}.
 Privy uses its logged-in agent CLI; Ledger requires physical confirmation for every transaction. Never pass a private key as a CLI argument.
 `;
@@ -279,13 +272,6 @@ async function main() {
     await background(command); return;
   }
   switch (command) {
-    case 'paymaster': {
-      for (const value of Object.values(values)) {
-        if (value !== undefined && value !== false) throw new Error('Options do not apply to paymaster commands; use its public positional arguments. Never supply API keys.');
-      }
-      if (args[1] === 'configure') process.stderr.write(DELEGATION_NOTICE + '\n');
-      print(await runPaymasterCommand(args.slice(1))); return;
-    }
     case 'wallet': {
       if (args[1] !== 'create') throw new Error('Use wallet create');
       const configured = await loadConfig();
@@ -395,7 +381,6 @@ async function main() {
             rpcUrl: values.rpc ?? previous?.rpcUrl ?? ROBINHOOD.rpcUrls.default.http[0],
             targets: values.targets !== undefined ? parseTargets(values.targets) : previous?.targets,
             ...(values.targets === undefined && previous?.allocation ? { allocation: previous.allocation } : {}),
-            ...(previous?.gasPayment ? { gasPayment: previous.gasPayment } : {}),
             ...(previous?.rebalanceFeeTargetUsdE8 === undefined ? {} : { rebalanceFeeTargetUsdE8: previous.rebalanceFeeTargetUsdE8 }),
             driftThresholdBps: values.threshold ? percentToBps(values.threshold) : previous?.driftThresholdBps ?? 500,
             slippageBps: values.slippage ? percentToBps(values.slippage) : previous?.slippageBps ?? 50,
@@ -454,11 +439,6 @@ async function main() {
         const config = await requiredConfig(); const pending = await readJson<PendingTransaction>(PENDING_PATH);
         if (!pending) throw new Error('No pending transaction');
         validatePending(pending, config); const chain = createChain(config);
-        if (pending.transport === 'alchemy-usdg') {
-          const { acknowledgePaymasterRevert } = await import('./paymaster.js');
-          const hash = await acknowledgePaymasterRevert(config, chain, pending);
-          print({ status: 'revert-acknowledged', hash }); return;
-        }
         if (await chain.publicClient.getChainId() !== 4663) throw new Error('Wrong RPC chain');
         const receipt = await chain.publicClient.getTransactionReceipt({ hash: pending.hash as Hex });
         if (receipt.status !== 'reverted' || receipt.from.toLowerCase() !== config.wallet.toLowerCase()) throw new Error('Only a mined reverted transaction can be acknowledged');

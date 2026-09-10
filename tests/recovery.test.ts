@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
@@ -775,24 +775,38 @@ for (const execution of ['automatic', 'manual'] as const) test(`${execution} can
   assert.deepEqual(await readJson(f.path('cycle.json')), f.cycle);
 });
 
-for (const action of ['inspect', 'cancel', 'automatic'] as const) test(`paymaster pending never enters native ${action} recovery`, async t => {
-  const f = await fixture(t, true);
-  f.pending.transport = 'alchemy-usdg';
-  f.pending.userOperation = { paymaster: '0x0000000000000000000000000000000000000009',
-    userOperationNonce: (1n << 64n).toString(), submittedAtBlock: '100', maxTokenAmount: '50000',
-    callId: `0x${'00'.repeat(64)}` };
-  await atomicWriteJson(f.path('pending.json'), f.pending);
-  t.mock.method(f.rpc, 'getTransactionReceipt', async () => { throw new Error('Native receipt must not interpret a UserOperation hash'); });
-  t.mock.method(f.rpc, 'getTransactionCount', async () => { throw new Error('Native nonce must not be used for cancellation'); });
-  if (action === 'automatic') assert.equal(await auto(f), null);
-  else {
-    const result = await recover(action === 'cancel' ? { cancel: true } : {}, f.deps);
-    assert.equal(result.outcome, 'blocked');
-    assert.match(result.messages.join(' '), /EntryPoint/);
+
+for (const source of ['pending', 'recovery-original'] as const) {
+  for (const action of ['inspect', 'cancel', 'automatic'] as const) {
+    test(`unsupported ${source} metadata blocks ${action} recovery without native activity or record changes`, async t => {
+      for (const marker of [{ transport: 'alchemy-usdg', userOperation: {} }, { transport: 'future-provider' },
+        { transport: null }, { userOperation: null }]) {
+        const f = await fixture(t, true);
+        const unsupported = { ...f.pending, ...marker };
+        if (source === 'pending') await atomicWriteJson(f.path('pending.json'), unsupported);
+        else {
+          await rm(f.path('pending.json'));
+          await atomicWriteJson(f.path('recovery.json'), { version: 1, automatic: true, original: unsupported,
+            originallyArmed: true, createdAt: f.pending.createdAt });
+        }
+        const names = (await readdir(f.deps.dataDir)).sort();
+        const before = await Promise.all(names.map(name => readFile(f.path(name), 'utf8')));
+        let rpcCalls = 0;
+        f.rpc.getChainId = async () => { rpcCalls++; return 4663; };
+        if (action === 'automatic') {
+          const result = await auto(f);
+          assert.equal(result?.blocked, true);
+          assert.match(result?.operation?.message ?? '', /Pending transport or user-operation metadata is unsupported/);
+        } else {
+          const result = await recover(action === 'cancel' ? { cancel: true } : {}, f.deps);
+          assert.equal(result.outcome, 'blocked');
+          assert.match(result.messages.join(' '), /Pending transport or user-operation metadata is unsupported/);
+        }
+        assert.equal(rpcCalls, 0); assert.equal(f.keyReads, 0); assert.equal(f.resumeCalls, 0);
+        assert.equal(f.successfulNotes, 0); assert.deepEqual(f.sent, []);
+        assert.deepEqual((await readdir(f.deps.dataDir)).sort(), names, 'no stop, recovery, history or pending files were created/removed');
+        assert.deepEqual(await Promise.all(names.map(name => readFile(f.path(name), 'utf8'))), before);
+      }
+    });
   }
-  assert.equal(f.keyReads, 0); assert.equal(f.resumeCalls, 0); assert.equal(f.sent.length, 0);
-  assert.equal(await readJson(f.path('stop.json')), null);
-  assert.equal(await readJson(f.path('recovery.json')), null);
-  assert.deepEqual(await readJson(f.path('pending.json')), f.pending);
-  assert.deepEqual(await readJson(f.path('cycle.json')), f.cycle);
-});
+}

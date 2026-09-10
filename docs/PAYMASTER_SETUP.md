@@ -1,5 +1,7 @@
 # Optional USDG gas payments
 
+> **Archived — removed on September 10, 2026.** The owner withdrew gas abstraction under [prompt 068](prompts/068-remove-unused-paymaster.md). The implementation and CLI commands described below are historical and are unavailable in current main. Native ETH gas and the per-wallet fee target remain. Older gasPayment configurations and paymaster pending records are rejected without modification.
+
 USDG gas is an optional per-wallet transport. Native ETH remains the default. The implementation keeps the same wallet address and uses Alchemy Wallet APIs, EntryPoint v0.7 and SemiModularAccount7702 v1.1. It does not create a new portfolio, change targets or start trading.
 
 Implementation and fixture tests do not prove that a particular Alchemy policy accepts Robinhood canonical USDG. A successful authenticated read-only estimate is required before `configure` saves the transport. A sponsored execution is proven only by its verified on-chain UserOperation receipt.
