@@ -362,8 +362,9 @@
       // Mid-trade, how the send is going matters more than the portfolio total.
       value = receiptWait;
     } else if (funded) {
-      state = band === null ? "Holdings" : !armed ? "Not armed" : Math.abs(worst) > band ? "Off target" : "On target";
-      // "Not armed" is the headline, but the drift reading is not lost with it.
+      state = band === null ? "Holdings" : !armed ? "Paused" : Math.abs(worst) > band ? "Off target" : "On target";
+      // A stopped runner is the headline, in the word people use for it,
+      // and the drift reading is not lost underneath it.
       sub = band === null ? "Drift band unavailable" : drift;
     } else if (targets.length) {
       state = "Targets";

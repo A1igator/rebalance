@@ -19,7 +19,7 @@ body { margin: 0; height: 100vh; height: 100dvh; display: flex; overflow: hidden
 .panelin { scrollbar-width: none; }
 .panelin::-webkit-scrollbar { width: 0; height: 0; }
 
-svg.ring { width: 100%; max-width: 40rem; max-height: 100%; height: auto; aspect-ratio: 560 / 480; display: block; }
+svg.ring { fill: var(--ink); width: 100%; max-width: 40rem; max-height: 100%; height: auto; aspect-ratio: 560 / 480; display: block; }
 .track { stroke: var(--track); }
 .arc { fill: none; stroke-linecap: butt; transition: opacity .18s ease, stroke-dasharray .95s cubic-bezier(.32,.72,.24,1), stroke-dashoffset .95s cubic-bezier(.32,.72,.24,1); }
 .arc.active { animation: seg 1.7s ease-in-out infinite; }
@@ -28,7 +28,7 @@ svg.ring { width: 100%; max-width: 40rem; max-height: 100%; height: auto; aspect
 .ghost { stroke-linecap: butt; opacity: 0; transition: opacity .45s ease; }
 .ghost.show { opacity: .22; }
 text { text-anchor: middle; }
-.ctr-state { font-size: 23px; font-weight: 500; letter-spacing: -.5px; }
+.ctr-state { font-size: 23px; font-weight: 500; letter-spacing: -.5px; fill: var(--ink); }
 .ctr-sub { font-size: 12px; fill: var(--mute); }
 .ctr-val { font-size: 10.5px; fill: var(--faint); }
 

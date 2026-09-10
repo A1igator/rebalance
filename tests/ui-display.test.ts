@@ -606,10 +606,10 @@ test('a zero drift band does not invert the display', async () => {
   page.hide();
 });
 
-test('an unarmed runner is the headline, without hiding the drift reading', async () => {
+test('a stopped runner is the headline, without hiding the drift reading', async () => {
   const page = await browser();
   page.source.send({ ...current, armed: false, config: { targets: allocation, driftThresholdBps: 500 } });
-  assert.equal(page.element('c-state').textContent, 'Not armed');
+  assert.equal(page.element('c-state').textContent, 'Paused');
   assert.equal(page.element('c-sub').textContent, '0% off target', 'a stopped runner still reports where the portfolio stands');
   page.hide();
 });
