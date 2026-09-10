@@ -711,3 +711,8 @@ The first full isolated run inside the restricted sandbox reported 927 passes, 4
 Typecheck, Git whitespace and changed Markdown local-link checks passed. The Python skill validator could not start because its PyYAML dependency was absent; Ruby safe_load verified the restored skill's YAML frontmatter, and local skill links were checked. Public portfolio configuration/pending/control snapshots remained unchanged. No wallet keys, credentials, native Keychain items, targets, runner state or incident archives were modified.
 
 Final outside-sandbox validation passed **968/968 tests**, with zero failures, cancellations or skips, using the isolated launcher and two test workers (119.3 seconds). All test storage remained in disposable directories. The final TypeScript check passed. Public configuration/pending/control records still matched the pre-rollback snapshot; live wallet material and trading state were not changed.
+
+
+## Companion UI verification follow-up — September 10
+
+Codex and an independent navigation reviewer diagnosed browser Back state and Settings anchoring under [prompt 069](prompts/069-companion-ui-verification.md). The human also authorized closing older companion tabs. Source implementation and isolated/browser validation are recorded after completion; no trading or wallet state changes are authorized by this UI task.
