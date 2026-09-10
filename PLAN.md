@@ -156,3 +156,8 @@ Live settings milestone (September 10): allow scoped settings, targets and alloc
 ## Gas abstraction deferred — September 10
 
 After checking hosted paymasters, independent relaying and UniswapX, the owner withdrew this direction because no verified route met the combined no developer-key setup and no operated-backend requirements. [Prompt 068](docs/prompts/068-remove-unused-paymaster.md) removes the unused Alchemy implementation; native ETH gas and existing fee-target checks remain. Historical implementation commits and [provider findings](docs/PAYMASTER_ALTERNATIVES.md) are retained. No wallet, target, runner or incident data is migrated. Legacy paymaster configurations and pending markers are rejected explicitly rather than treated as native transactions.
+
+
+## Companion navigation verification — September 10
+
+[Prompt 069](docs/prompts/069-companion-ui-verification.md) fixes the selector busy state across browser Back and makes Settings a stationary header below navigation with animated content beneath it. The chart dimensions remain unchanged on expansion. The actual local companion was refreshed, linked to this chat, and checked for working grid/card navigation and stable geometry.

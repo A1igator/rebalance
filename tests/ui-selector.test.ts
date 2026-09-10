@@ -429,6 +429,8 @@ test('browser Back restores the grid without bouncing after a card response beat
   await page.send(snapshot(walletB));
   assert.equal(page.navigations.length, 1, 'restored selector accepts current selection as its new baseline');
   assert.match(content(page.cards()[1]!), /This chat/);
+  assert.ok(page.cards().every(card => !card.disabled), 'Back restores selectable cards');
+  assert.equal(page.byId('portfolio-status').textContent, '');
   await page.send(snapshot(walletA));
   assert.deepEqual(page.navigations, [`http://127.0.0.1:4664/chart${fragment}`, `http://127.0.0.1:4663/chart${fragment}`]);
   await page.hide();
@@ -638,4 +640,65 @@ test('malformed view frames close their old transport before reconnecting', asyn
   assert.equal(page.calls.filter(call => !call.signal!.aborted).length, 1);
   await page.send(snapshot(walletA));
   await page.hide();
+});
+
+
+test('Back after a completed selection allows choosing another portfolio without reconnecting automatically', async () => {
+  const page = await browser();
+  await page.send(snapshot(walletA));
+  await page.click(page.cards()[1]!);
+  await page.hide(); await page.show();
+  await page.send(snapshot(walletB));
+  assert.equal(page.calls.filter(call => call.url === '/api/connect').length, 1);
+  assert.ok(page.cards().every(card => !card.disabled));
+  await page.click(page.cards()[0]!);
+  assert.deepEqual(page.calls.filter(call => call.url === '/api/connect').map(call => call.body?.wallet), [walletB, walletA]);
+  assert.deepEqual(page.navigations, [`http://127.0.0.1:4664/chart${fragment}`, `http://127.0.0.1:4663/chart${fragment}`]);
+  assert.equal(page.uuidCalls, 0);
+  await page.hide();
+});
+
+test('connection replies received while away cannot navigate a restored selector or show an obsolete error', async () => {
+  for (const rejected of [false, true]) {
+    let finish!: (value: Reply) => void;
+    const page = await browser({ reply: async call => call.url === '/api/connect'
+      ? new Promise(resolve => { finish = resolve; }) : undefined });
+    await page.send(snapshot(walletA));
+    await page.click(page.cards()[1]!);
+    await page.hide();
+    finish(rejected ? { ok: false, json: async () => ({ error: 'Obsolete connection error' }) }
+      : ok({ wallet: walletB, chartUrl: portfolios[1]!.chartUrl, tradingChanged: false }));
+    await flush();
+    assert.equal(page.navigations.length, 0);
+    await page.show(); await page.send(snapshot(rejected ? walletA : walletB));
+    assert.ok(page.cards().every(card => !card.disabled));
+    assert.equal(page.byId('portfolio-status').textContent, '');
+    assert.equal(page.navigations.length, 0);
+    assert.equal(page.calls.filter(call => call.url === '/api/connect').length, 1);
+    await page.hide();
+  }
+});
+
+test('a late pre-Back success or failure cannot replace a newer selection in progress', async () => {
+  for (const rejected of [false, true]) {
+    const finish: ((value: Reply) => void)[] = [];
+    const page = await browser({ reply: async call => call.url === '/api/connect'
+      ? new Promise(resolve => { finish.push(resolve); }) : undefined });
+    await page.send(snapshot(walletA));
+    await page.click(page.cards()[1]!);
+    await page.hide(); await page.show(); await page.send(snapshot(walletB));
+    await page.click(page.cards()[0]!);
+    assert.equal(finish.length, 2);
+    finish[0]!(rejected ? { ok: false, json: async () => ({ error: 'Obsolete connection error' }) }
+      : ok({ wallet: walletB, chartUrl: portfolios[1]!.chartUrl, tradingChanged: false }));
+    await flush();
+    assert.equal(page.navigations.length, 0);
+    assert.ok(page.cards().slice(0, -1).every(card => card.disabled));
+    assert.equal(page.byId('portfolio-status').textContent, 'Connecting this portfolio to your chat…');
+    finish[1]!(ok({ wallet: walletA, chartUrl: portfolios[0]!.chartUrl, tradingChanged: false }));
+    await flush();
+    assert.deepEqual(page.navigations, [`http://127.0.0.1:4663/chart${fragment}`]);
+    assert.equal(page.calls.filter(call => call.url === '/api/connect').length, 2);
+    await page.hide();
+  }
 });

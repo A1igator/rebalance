@@ -10,7 +10,7 @@
 * { box-sizing: border-box; }
 body { margin: 0; height: 100vh; height: 100dvh; display: flex; overflow: hidden; }
 /* The allocation ring and its centre share the available window. */
-.chart-shell { position: relative; padding-bottom: 46px; flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.chart-shell { position: relative; flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .main { flex: 1 1 auto; min-height: 0; display: grid; place-items: center; padding: clamp(8px, 2vh, 24px) clamp(12px, 3vw, 32px); }
 
 svg.ring { overflow: visible; fill: var(--ink); width: 100%; max-width: 40rem; max-height: 100%; height: auto; aspect-ratio: 560 / 480; display: block; }
@@ -30,15 +30,15 @@ text { text-anchor: middle; }
 .ctr-val { font-size: 10.5px; fill: var(--faint); }
 .centre .ctr-val { margin-top: 6px; line-height: 14px; color: var(--faint); }
 .centre .ctr-val:empty { display: none; }
-/* Reserve the closed bar once. The overlay keeps its header above the animated
-   content; its changing height never moves or resizes the chart. */
-.settings { position: absolute; z-index: 10; left: 0; right: 0; bottom: 0; }
+/* The header keeps one fixed row below navigation. Only its panel overlays the
+   chart, opening downward without moving the header or resizing the ring. */
+.settings { position: relative; z-index: 10; flex: 0 0 46px; height: 46px; }
 .settings-toggle { display: flex; justify-content: space-between; align-items: center; width: 100%; height: 46px; padding: 0 clamp(20px, 5vw, 40px); border: 0; border-top: 1px solid var(--rule); background: var(--ground); color: var(--mute); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
 .settings-toggle::after { content: "+"; font-size: 16px; line-height: 12px; }
 .settings-toggle[aria-expanded="true"]::after { content: "−"; }
 .settings-toggle:hover { background: var(--lift); color: var(--ink); }
 .settings-toggle:focus-visible { outline: 2px solid #8dbafa; outline-offset: -2px; }
-.settings-panel { display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden; pointer-events: none; transition: grid-template-rows .28s ease, opacity .22s ease, visibility 0s .28s; }
+.settings-panel { position: absolute; top: 100%; left: 0; right: 0; display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden; pointer-events: none; transition: grid-template-rows .28s ease, opacity .22s ease, visibility 0s .28s; }
 .settings-panel.open { grid-template-rows: 1fr; opacity: 1; visibility: visible; pointer-events: auto; transition-delay: 0s; }
 .settings-clip { min-height: 0; overflow: hidden; }
 .settings-content { max-height: 42dvh; overflow: auto; background: var(--lift); border-top: 1px solid var(--rule); padding: 18px clamp(20px, 5vw, 40px) 22px; }

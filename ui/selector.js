@@ -11,7 +11,7 @@
   let viewReady = !token, connecting = false, setupBusy = false, setupRequest = null, streamed = false, connectionRevision = 0;
   let setupExisting = null;
   let setupState = null, setupController = null, setupGeneration = 0, setupSuspended = document.visibilityState === "hidden", setupAttachmentAllowed = false;
-  let pageHidden = false;
+  let pageHidden = false, connectionAttempt = 0;
 
   function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -74,20 +74,22 @@
     byId("setup-dialog").showModal();
   }
   async function choose(portfolio) {
-    if (!viewReady || connecting) return;
+    if (!viewReady || connecting || pageHidden) return;
     const url = safeChartUrl(portfolio.chartUrl);
     if (!url) { byId("portfolio-status").textContent = "This portfolio’s chart address is unavailable."; return; }
     if (!authorized) { window.location.assign(url); return; }
     connecting = true; render();
-    const revision = ++connectionRevision;
+    const revision = ++connectionRevision, attempt = ++connectionAttempt;
     byId("portfolio-status").textContent = "Connecting this portfolio to your chat…";
     try {
       const result = await request("/api/connect", { token, wallet: portfolio.wallet });
+      if (pageHidden || attempt !== connectionAttempt) return;
       const chartUrl = safeChartUrl(result?.chartUrl);
       if (typeof result?.wallet !== "string" || result.wallet.toLowerCase() !== portfolio.wallet.toLowerCase() || result.tradingChanged !== false || !chartUrl) throw new Error("The portfolio connection could not be verified. Please try again.");
       if (connectionRevision !== revision && connectedWallet?.toLowerCase() !== portfolio.wallet.toLowerCase()) throw new Error("The chat’s portfolio changed while connecting. Select a portfolio again if needed.");
       window.location.assign(chartUrl);
     } catch (error) {
+      if (pageHidden || attempt !== connectionAttempt) return;
       byId("portfolio-status").textContent = error instanceof Error ? error.message : "The portfolio could not be connected. Please try again.";
       connecting = false; render();
     }
@@ -311,9 +313,14 @@
     if (setupRequest && !["ready", "failed"].includes(setupState)) void watchSetup(setupRequest);
   }
   window.addEventListener("pagehide", () => {
+    // Browser Back may restore this document after a completed or pending
+    // selection. Old replies cannot navigate it or keep its cards disabled.
+    connectionAttempt++;
+    if (connecting) byId("portfolio-status").textContent = "";
+    connecting = false;
     pageHidden = true; setupSuspended = true; setupAttachmentAllowed = false; stopSetupStream();
   });
-  window.addEventListener("pageshow", () => { pageHidden = false; resumeSetup(); });
+  window.addEventListener("pageshow", () => { pageHidden = false; render(); resumeSetup(); });
   document.addEventListener("visibilitychange", () => {
     // Switching to Privy's approval tab keeps the user's setup intent. Only
     // progress delivery pauses; wallet preparation continues independently.

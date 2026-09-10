@@ -22,3 +22,7 @@ No wallet creation, signing, trading start/stop, targets or credentials are part
 Current main is f12326f. A selector connection attempt leaves connecting=true across BFCache restoration; restored cards may remain disabled. Existing Settings CSS anchors the entire expanding section to the bottom, moving the header upward. Live chart servers listen on 4663, 4664 and 4665, with an older preview on 4770. Source fixes alone do not prove an older open document has loaded them.
 
 The required Tenjin search returned NETWORK_ERROR; no shelf result was available.
+
+## Outcome
+
+Implemented and browser-verified the stationary header and Back/card fix. See [AI validation evidence](../AI_USAGE.md#companion-ui-verification-follow-up--september-10). Six old companion tabs closed; one browser error tab remains blocked by Browser Use URL policy. The retained port-4665 companion was refreshed and linked to the same chat without trading changes.
