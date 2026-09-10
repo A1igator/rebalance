@@ -307,9 +307,6 @@ test('chart uses events while connected and one polling fallback only while disc
       createElementNS: () => ({ setAttribute: () => {}, textContent: '', style: {}, parentNode: null,
         classList: { add: () => {}, remove: () => {}, toggle: () => {}, contains: () => false },
         append: () => {}, remove: () => {} }),
-      createElement: () => ({ setAttribute: () => {}, textContent: '', classes: new Set(), style: {}, parentNode: null,
-        classList: { add: () => {}, remove: () => {}, toggle: () => {}, contains: () => false },
-        children: [], append: () => {}, remove: () => {}, addEventListener: () => {} }),
     },
   });
   const source = Source.instances[0]!;

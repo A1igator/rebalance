@@ -292,7 +292,7 @@
       const target = Object.hasOwn(targetMap, entry.id) ? targetMap[entry.id] : null;
       const drift = funded && target !== null ? entry.weight - target : null;
       const group = svgElement("g", drift !== null && Math.abs(drift) > bandBps ? { class: "label-out" } : {});
-      group.append(svgElement("text", { x, y: entry.y, class: "ticker", style: `--tick:${color(entry.id)}` }, entry.id));
+      group.append(svgElement("text", { x, y: entry.y, class: "ticker", fill: color(entry.id) }, entry.id));
       group.append(svgElement("text", { x, y: entry.y + 18, class: "weight" }, `${percent.format(entry.weight / 100)}%`));
       labels.append(group);
     }

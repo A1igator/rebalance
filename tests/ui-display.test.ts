@@ -79,7 +79,6 @@ async function browser(options: { gas?: () => Promise<Response>; status?: () => 
     document: {
       getElementById: (id: string) => { if (id === 'arcs') pieRenders++; if (!elements.has(id)) elements.set(id, node('text', id)); return elements.get(id); },
       createElementNS: (_namespace: string, tag: string) => node(tag),
-      createElement: (tag: string) => node(tag),
     },
   });
   const source = Source.instances[0]!;
