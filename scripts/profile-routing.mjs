@@ -12,7 +12,7 @@ export function portfolioRoot(env = process.env, root = repository) {
   return resolve(root, env.REBALANCE_ROOT_DIR || env.REBALANCE_DATA_DIR || '.local');
 }
 export function sessionIdentity(explicit, env = process.env) {
-  const id = explicit ?? env.REBALANCE_SESSION_ID ?? env.CODEX_THREAD_ID;
+  const id = explicit ?? env.REBALANCE_SESSION_ID ?? env.CODEX_THREAD_ID ?? (env.CLAUDE_CODE_SESSION_ID ? `claude:${env.CLAUDE_CODE_SESSION_ID}` : undefined);
   if (id === undefined || id === '') return undefined;
   if (typeof id !== 'string' || id.length > 2048 || /[\0\r\n]/.test(id)) throw new Error('Invalid conversation identity.');
   return id;

@@ -7,23 +7,26 @@ import { connectionPath, readProfiles, resolveProfile, validateProfileDirectory,
 export async function portfolios(root: string) {
   return Promise.all((await readProfiles(root)).map(async profile => {
     let config: Config;
+    let lock: {pid:number} | null;
+    let stopped: unknown;
     try {
       await validateProfileDirectory(root, profile.directory);
       config = validateConfig(await readJson(resolve(profile.dataDir, 'config.json')));
       if (walletIdentity(config.wallet) !== profile.wallet) throw new Error();
+      lock = await readJson<{pid:number}>(resolve(profile.dataDir, 'run.lock'));
+      stopped = await readJson(resolve(profile.dataDir, 'stop.json'));
+      if (lock !== null && (!Number.isSafeInteger(lock.pid) || lock.pid <= 0 || lock.pid > 2_147_483_647)) throw new Error();
     } catch {
       return { wallet: getAddress(profile.wallet!), chainId: 4663, mode: null, targets: null, running: null,
-        chartUrl: `http://127.0.0.1:${profile.chartPort}/`, error: 'This wallet configuration is unavailable; other portfolios are unaffected.' };
+        chartUrl: `http://127.0.0.1:${profile.chartPort}/chart`, error: 'This wallet configuration is unavailable; other portfolios are unaffected.' };
     }
-    const lock = await readJson<{pid:number}>(resolve(profile.dataDir, 'run.lock'));
-    const stopped = await readJson(resolve(profile.dataDir, 'stop.json'));
     let running = false;
     if (Number.isSafeInteger(lock?.pid) && lock!.pid > 0) {
       try { process.kill(lock!.pid, 0); running = true; }
       catch (error) { if ((error as NodeJS.ErrnoException).code === 'EPERM') running = true; }
     }
     return { wallet: getAddress(profile.wallet!), chainId: 4663, mode: config.mode, targets: config.targets,
-      running: running && !stopped, chartUrl: `http://127.0.0.1:${profile.chartPort}/` };
+      running: running && !stopped, allocationObjective: config.allocation?.policy.objective ?? 'manual', chartUrl: `http://127.0.0.1:${profile.chartPort}/chart` };
   }));
 }
 
@@ -58,5 +61,5 @@ export async function connectPortfolio(root: string, sessionId: string, wallet: 
   const path = connectionPath(root, sessionId);
   await atomicWriteJson(path, { version: 1, wallet: profile.wallet, chainId: 4663 });
   return { sessionId, wallet: getAddress(profile.wallet!), chainId: 4663,
-    chartUrl: `http://127.0.0.1:${profile.chartPort}/`, tradingChanged: false };
+    chartUrl: `http://127.0.0.1:${profile.chartPort}/chart`, tradingChanged: false };
 }

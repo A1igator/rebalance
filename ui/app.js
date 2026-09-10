@@ -2,10 +2,14 @@
   "use strict";
   const ns = "http://www.w3.org/2000/svg";
   const byId = (id) => document.getElementById(id);
+  // Carry a valid view handle back to the selector; anything else goes to the root.
+  const viewToken = /^#view=([a-f0-9]{64})$/i.exec(window.location?.hash || "")?.[1];
+  byId("portfolios-back")?.setAttribute("href", viewToken ? `/#view=${viewToken}` : "/");
   const percent = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
   const time = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
-  const colors = { USDG: "#b4cbb8", AAPL: "#8dbafa", NVDA: "#bad776", MSFT: "#b5a1df", AMD: "#e3a37c" };
-  const assetOrder = Object.keys(colors);
+  // One palette for the whole app: the selector tiles and this chart must never
+  // disagree about what colour an asset is.
+  const { assetOrder, color } = window.rebalanceRing;
   // Match the display-only projection gate in src/fee-projection.ts when a newer status event arrives.
   const projectionNodes = new Set(["intent", "config", "observe", "plan", "interval", "quote", "wait"]);
   const projectionOperations = new Set(["confirmed", "cancelled", "recovered-revert", "needs-rebalance", "cooling-down", "waiting-ledger", "waiting-privy", "stopping"]);
@@ -158,11 +162,6 @@
       if (left < 0 && right < 0) return a.id.localeCompare(b.id);
       return (left < 0 ? assetOrder.length : left) - (right < 0 ? assetOrder.length : right);
     });
-  }
-  function color(id) {
-    let hash = 0;
-    for (const letter of id) hash = (Math.imul(hash, 31) + letter.charCodeAt(0)) | 0;
-    return colors[id] || `hsl(${(hash >>> 0) % 360} 55% 70%)`;
   }
   function svgElement(tag, attrs, content) {
     const element = document.createElementNS(ns, tag);
@@ -459,6 +458,8 @@
   }
 
   function show(snapshot, disconnected = false) {
+    // Controls must regain freshness after browser restoration even when the chart pixels are unchanged.
+    window.rebalanceControls?.updateStatus(snapshot, disconnected);
     const key = JSON.stringify([snapshot, disconnected]);
     if (key === lastRendered) return;
     lastRendered = key;
@@ -483,7 +484,10 @@
       const response = await fetch("/api/status", { cache: "no-store", signal: request.signal });
       if (!response.ok) throw new Error("Local status unavailable");
       const snapshot = await response.json();
-      if (!streamReady && !suspended && generation === streamGeneration) accept(snapshot);
+      if (!streamReady && !suspended && generation === streamGeneration) {
+        accept(snapshot);
+        if (window.rebalanceControls) await window.rebalanceControls.refreshRunner(snapshot.wallet);
+      }
     } catch {
       if (!streamReady && !suspended) show(lastSnapshot, true);
     } finally {
@@ -522,10 +526,17 @@
           fallback();
         }
       });
+      source.addEventListener("runner", (event) => {
+        if (stream !== source || suspended) return;
+        try { window.rebalanceControls?.updateRunner(JSON.parse(event.data)); }
+        catch { window.rebalanceControls?.updateRunner(null, true); }
+      });
       // EventSource reconnects itself; polling runs only until a valid event.
       source.onerror = () => {
         if (stream !== source || suspended) return;
-        streamReady = false; fallback();
+        streamReady = false;
+        window.rebalanceControls?.updateRunner(null, true);
+        fallback();
       };
     } catch { fallback(); }
   }

@@ -8,7 +8,7 @@ The pinned Privy CLI exposes one first-Ethereum session wallet and no per-reques
 
 ## Agent commands
 
-All user interaction stays in the conversation. The agent operates:
+Allocation and execution requests stay in the conversation. Portfolio navigation and wallet setup are also available in the companion UI. The agent operates:
 
 ```bash
 npm run cli -- wallet list
@@ -49,3 +49,13 @@ Isolated tests cover different allocations and state, two simultaneous backgroun
 
 
 Risk-based allocation is also wallet-scoped. `allocation preview/set/status/manual` use the same chat attachment or explicit `--profile` routing. Policy inputs, adopted targets and calculation provenance are one local configuration revision per wallet; changing the chat connection does not change that revision. Read [the allocation guide](ALLOCATION.md) for subjective risk and optional statistical inputs.
+
+## Companion selector — 2026-09-07
+
+`npm run cli -- view` prepares the local opening grid before a wallet has been selected, including with an empty registry. It returns a conversation-specific URL; open the entire URL in the host side pane. `--profile <address> view` opens one chart. The URL fragment carries an opaque local handle for attachment and setup requests, not a wallet key or signing authority. It is not stored in shared preview configuration or committed evidence. A bare origin is an unlinked read-only view.
+
+The grid lists independent portfolios, mode, target model and runner status. Clicking a card uses the same per-conversation connection record as `wallet connect`. The target view is prepared before UI selection; other conversations and each pinned worker retain their own wallet. The chart Back button returns to the selector without detaching or stopping anything. Local file events update the selection and registry; changing the attachment from the agent moves the companion to that wallet. No model call is required for navigation.
+
+New wallet offers Local key, Privy and Ledger. Its validated click starts a local setup job directly, with file-event progress in the dialog and no model request. Local keys derive consecutive accounts from one shared seed. Privy reuses its signed-in Ethereum wallet or opens the official approval page. Ledger derives and physically verifies an indexed address on the existing device seed. Existing portfolios retain their targets; new ones use the current five-asset demo defaults. When first-time setup finishes while the dialog is still active and the conversation selection has not changed, the UI connects and opens that portfolio. A reused Privy portfolio is shown explicitly and opens only when the user chooses **Open existing portfolio**. Closing the dialog allows setup to finish without taking over another selection. See [wallet setup and recovery](WALLET_SETUP.md). No browser key inputs, transaction signing, allocation editing or trading controls are added.
+
+See [persistent companion views](COMPANION_VIEW.md) for Claude Desktop and cmux support and native verification limits. The old pie-only restriction now applies to the chart content; selector/back/wallet-setup clicks are the owner's explicit exception.

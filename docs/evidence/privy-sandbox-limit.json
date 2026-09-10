@@ -1,0 +1,43 @@
+{
+  "date": "2026-09-07",
+  "request": "Agent Sandbox only; disable Privy in New portfolio after one is registered; explain limit on hover",
+  "provider": "agents.privy.io exclusively",
+  "dashboardIntegration": false,
+  "newRemoteWalletCreated": false,
+  "dependenciesAdded": false,
+  "validation": {
+    "selectorTests": 30,
+    "boundedFullSuite": {
+      "workers": 4,
+      "tests": 697,
+      "passed": 697,
+      "failed": 0
+    },
+    "defaultFullSuite": {
+      "tests": 697,
+      "passed": 696,
+      "failed": 1,
+      "failure": "Intermittent existing HD separate-process setup test; focused HD 10/10 passed; no HD fix claimed"
+    },
+    "typecheck": "passed",
+    "skillValidation": "passed",
+    "whitespace": "passed"
+  },
+  "liveUi": {
+    "privyDisabled": true,
+    "hoverTooltipVerified": true,
+    "existingPrivyCardAvailable": true,
+    "otherSignerChoicesAvailable": true,
+    "view": "existing Codex companion"
+  },
+  "liveState": {
+    "portfolioAndExecutionRecordsUnchanged": true,
+    "onlyReadOnlyChartsReloaded": true,
+    "signingOrBroadcast": false,
+    "runnerOrNotificationWorkerRestarted": false
+  },
+  "relatedFixes": [
+    "Quiet expected setup publication lock contention while retaining retries",
+    "Bound notifier initial-lock JSON read retry; preserve persistent-corruption errors"
+  ]
+}

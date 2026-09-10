@@ -26,6 +26,7 @@ import { configureCodexNotifications, codexNotificationStatus, prepareCodexNotif
   runCodexNotifications, stopCodexNotifications } from './codex-notifications.js';
 
 const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
+  view                                 Open the portfolio grid linked to this conversation
   wallet list                          List independent wallet portfolios
   wallet add --wallet 0x... --mode privy --targets USDG=5,...
                                        Register a separate portfolio; do not arm it

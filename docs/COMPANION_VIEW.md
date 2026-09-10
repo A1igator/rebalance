@@ -1,0 +1,43 @@
+# Persistent portfolio companion view
+
+Keep the portfolio in a browser pane beside the conversation. The view uses the same local Rebalance server and session-scoped URL as the selector. Opening or navigating it does not launch, stop, or recover a runner.
+
+## Claude Code in cmux
+
+The Claude slash-command wrapper supplies `openCompanionView` to the shared hook. After the shared handler has a view URL, the helper opens a cmux browser split beside the invoking terminal. It passes the inherited `CMUX_WORKSPACE_ID` and `CMUX_SURFACE_ID` explicitly and uses `--focus false`, so another focused workspace cannot redirect the opening and keyboard focus stays with the conversation.
+
+The helper uses the installed `cmux` executable, including the macOS app's bundled command when it is absent from `PATH`. It does not start cmux, enable its browser, change socket permissions, inspect terminal contents, or change Claude hook trust. cmux must already be running with its browser available, and Claude must have been started inside that cmux terminal.
+
+On subsequent openings, it checks the recorded browser UUID in the same workspace and verifies that the pane still displays its saved local origin before navigating. A pane that the user has navigated to another site is left alone. A moved or closed pane is not navigated through a guessed handle. The helper uses native UUIDs rather than short surface references that can change across app restarts.
+
+Receipts live under the local root's `companion-views/` directory, keyed by a hash of the conversation and cmux workspace/source. They contain public pane IDs and the local origin, never the session URL's capability token. A prepared opening whose result was lost is retained as unverified, preventing repeated browser creation. If an opening remains busy after its owner has exited or is unverified, inspect that exact companion receipt and the existing pane before repairing it; do not delete trading, pending, or hook-request records.
+
+The public result contains `view.presentation`: `host`, `opened`, and either `reused` or a fixed `reason`. An unavailable companion pane leaves the underlying command's trading result intact. A successful browser-open response is not proof that the application finished loading.
+
+The implementation uses only documented CLI commands, with argument arrays, bounded output, and a five-second timeout per command. Fixture tests substitute every native call; they never open a real pane or read a live wallet.
+
+Sources: [cmux browser automation](https://cmux.com/docs/browser-automation), [CLI contract and inherited identities](https://github.com/manaflow-ai/cmux/blob/main/docs/cli-contract.md), and the installed `cmux browser --help` / `cmux identify --help` output.
+
+## Claude Code Desktop
+
+The Code tab's native Browser pane supports local servers and can be arranged beside chat. Use Claude's available native Browser/Preview tools to open the returned session-specific view URL there. The user can keep that pane open while scrolling the conversation. Tool names depend on the host's exposed capabilities; a shell helper does not fabricate a Desktop tool or force an unsupported pane.
+
+Claude Desktop also supports attaching its preview to a server that is already running through `.claude/launch.json`: an entry may contain a name, matching port, and local origin URL without a server command. This must not be a trading launch command. A localhost `url` in that file is restricted to the origin: no path or query, and its port must match the entry. Navigate to the returned complete Rebalance URL through the native Browser after attaching. Do not commit a session capability URL, store one in shared preview configuration, or infer a conversation from a shared server's environment.
+
+An ordinary external-browser tab is not a persistent in-app companion pane. If the native pane cannot be opened, report that limitation and provide the local view URL without claiming that a side panel was opened.
+
+Sources: [Claude Code Desktop preview](https://code.claude.com/docs/en/desktop#preview-your-app), [pane layout](https://code.claude.com/docs/en/desktop#arrange-your-workspace), and [preview server configuration](https://code.claude.com/docs/en/desktop#configure-preview-servers).
+
+## Conversation identity
+
+Claude's native hook supplies `session_id`, normalized by Rebalance to `claude:<session_id>`. Direct commands from Claude's Bash tool can use the current `CLAUDE_CODE_SESSION_ID` with the same prefix. The helper never reads a transcript to discover identity.
+
+Current Claude documentation also supplies `CLAUDE_CODE_SESSION_ID` to stdio MCP servers, but that value remains the spawn-time identity. It can become stale after `/clear`, or start with the wrong identity under implicit `--continue`/`--resume`. The channel is bound to its known native session, or to the first valid Claude view when no native identity is available. `connect_companion_view` accepts rotated tokens for that same session only; another session’s token cannot retarget delivery or acknowledgement. After `/clear` or an implicit resume changes the conversation identity, reconnect the MCP channel through the host so its new process receives the current native identity. Old pending requests stay with their original session; do not use a token to redirect them into the new chat.
+
+Source: [Claude environment variable reference](https://code.claude.com/docs/en/env-vars), `CLAUDE_CODE_SESSION_ID`.
+
+## Portfolio controls
+
+The chart places **Start / Stop** at the top right and the displayed wallet’s shortened public address beside it. Clicking the address copies its full value for funding on Robinhood chain 4663; a selectable address is provided if the clipboard is unavailable. These controls preserve the compact chart and existing Back navigation.
+
+Start/Stop requires the existing agent-linked local view and must match both the chart wallet and this conversation’s current attachment. It calls deterministic local code, without queueing a model request. Current runner state arrives through the chart’s event stream, with the existing bounded read fallback on connection failure. Starting/stopping or unverifiable states are displayed truthfully; request acceptance is not running confirmation. Start uses the existing launcher and saved targets; Stop respects the dispatch boundary and does not undo submitted transactions. Ledger execution is currently deferred. Navigation and new-wallet setup still do not arm trading.

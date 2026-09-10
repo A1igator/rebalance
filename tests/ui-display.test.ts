@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { runInNewContext } from 'node:vm';
+import { createContext, runInContext } from 'node:vm';
 
 const observed = '2026-09-06T02:30:00.000Z';
 const initialTime = Date.parse(observed);
@@ -26,7 +26,8 @@ type Response = { ok: boolean; json: () => Promise<unknown> };
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
 async function browser(options: { gas?: () => Promise<Response>; status?: () => Promise<Response> } = {}) {
-  const script = await readFile(new URL('../ui/app.js', import.meta.url), 'utf8');
+  const [ringScript, script] = await Promise.all(['allocation-ring.js', 'app.js']
+    .map(file => readFile(new URL(`../ui/${file}`, import.meta.url), 'utf8')));
   const elements = new Map<string, DisplayNode>();
   const lifecycle = new Map<string, () => void>();
   const timers = new Map<number, { fn: () => void; at: number }>();
@@ -67,7 +68,7 @@ async function browser(options: { gas?: () => Promise<Response>; status?: () => 
     close() { this.closed = true; }
     send(snapshot: unknown) { this.handlers.get('status')!({ data: JSON.stringify(snapshot) }); }
   }
-  runInNewContext(script, {
+  const context = createContext({
     Date: ClockDate, EventSource: Source, AbortController,
     setTimeout: (fn: () => void, ms: number) => { const id = ++nextTimer; timers.set(id, { fn, at: now + ms }); return id; },
     clearTimeout: (id: number) => timers.delete(id),
@@ -81,6 +82,8 @@ async function browser(options: { gas?: () => Promise<Response>; status?: () => 
       createElementNS: (_namespace: string, tag: string) => node(tag),
     },
   });
+  runInContext(ringScript, context);
+  runInContext(script, context);
   const source = Source.instances[0]!;
   source.send(current);
   await flush();
@@ -101,6 +104,25 @@ async function browser(options: { gas?: () => Promise<Response>; status?: () => 
       throw new Error('Unexpected timer loop');
     },
   };
+}
+
+function assertSector(node: DisplayNode, startPercent: number, endPercent: number, innerRadius: number, outerRadius: number) {
+  assert.equal(node.tag, 'path', 'partial allocations use bounded filled sectors instead of repeating circle dashes');
+  assert.ok(node.attrs.fill && node.attrs.fill !== 'none');
+  for (const attribute of ['stroke', 'stroke-width', 'stroke-dasharray', 'stroke-dashoffset', 'pathLength']) {
+    assert.equal(node.attrs[attribute], undefined, 'colored sectors cannot paint beyond their geometric boundaries');
+  }
+  const parts = node.attrs.d!.match(/[MLAZ]|[-+]?(?:\d*\.?\d+)(?:e[-+]?\d+)?/gi)!;
+  assert.equal(parts.length, 23);
+  assert.deepEqual([parts[0], parts[3], parts[11], parts[14], parts[22]], ['M', 'A', 'L', 'A', 'Z']);
+  const largeArc = endPercent - startPercent > 50 ? 1 : 0;
+  assert.deepEqual(parts.slice(4, 9).map(Number), [outerRadius, outerRadius, 0, largeArc, 1], 'outer arc follows the full clockwise allocation');
+  assert.deepEqual(parts.slice(15, 20).map(Number), [innerRadius, innerRadius, 0, largeArc, 0], 'inner arc closes the same allocation counterclockwise');
+  for (const [index, radius, percent] of [[1, outerRadius, startPercent], [9, outerRadius, endPercent], [12, innerRadius, endPercent], [20, innerRadius, startPercent]]) {
+    const angle = percent! * Math.PI / 50;
+    assert.ok(Math.abs(Number(parts[index!]) - 270 - radius! * Math.cos(angle)) < 1e-8, 'sector endpoints stay on the exact allocation boundary');
+    assert.ok(Math.abs(Number(parts[index! + 1]) - 270 - radius! * Math.sin(angle)) < 1e-8, 'sector endpoints stay on the exact allocation boundary');
+  }
 }
 
 test('actual and target rings share stable colors/order despite different configuration insertion order', async () => {

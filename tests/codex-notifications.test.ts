@@ -89,6 +89,31 @@ test('configuration is local-only, validated and enabled without starting delive
   assert.deepEqual(await f.status(), status);
 });
 
+test('status waits for a 200 ms delayed initial notifier lock write without reporting inactivity', { timeout: 3_000 }, async t => {
+  const f = await fixture(t); await f.configure();
+  const path = join(f.directory, 'codex-notifications.lock');
+  await writeFile(path, '', { flag: 'wx' });
+  let settled = false;
+  const status = f.status();
+  void status.then(() => { settled = true; }, () => { settled = true; });
+  await delay(200);
+  assert.equal(settled, false, 'an incomplete lock must not become a failed or inactive snapshot');
+  await writeFile(path, JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() }));
+  assert.equal((await status).running, true);
+  assert.equal(f.calls.length, 0);
+});
+
+test('status still rejects persistent malformed or invalid notifier locks without starting another worker', { timeout: 3_000 }, async t => {
+  const f = await fixture(t); await f.configure();
+  const path = join(f.directory, 'codex-notifications.lock');
+  await writeFile(path, '{');
+  await assert.rejects(f.status(), SyntaxError);
+  assert.equal(await readFile(path, 'utf8'), '{', 'status does not reclaim corrupt locks');
+  await writeFile(path, JSON.stringify({ pid: 0 }));
+  await assert.rejects(f.status(), /Notification runner lock is invalid/);
+  assert.equal(f.calls.length, 0);
+});
+
 test('event changes deliver native queue args only and accepted events survive restart without duplication', async t => {
   const f = await fixture(t); await f.configure(); await f.writeEvents([event()]);
   const worker = await f.start();

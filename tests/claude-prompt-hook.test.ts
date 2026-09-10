@@ -22,6 +22,8 @@ function publicResult(reply: { hookSpecificOutput: { additionalContext: string }
   return JSON.parse(context.slice(context.indexOf('\n') + 1));
 }
 const forbidden = {
+  runView: () => assert.fail('must not prepare view'),
+  openView: () => assert.fail('must not open a native pane'),
   readStopToken: () => assert.fail('must not read stop state'),
   ensureDependencies: () => assert.fail('must not install'),
   runLaunch: () => assert.fail('must not launch'),
@@ -79,7 +81,7 @@ test('native expansion routes to the shared launcher once with pre-bootstrap sto
   const calls: string[] = [];
   let stop = 'none';
   const expected = { app: 'Rebalance', outcome: 'armed', status: { armed: true }, messages: [] };
-  const result = await handleClaudePrompt(input, { repository: root,
+  const result = await handleClaudePrompt(input, { repository: root, runView: async () => undefined,
     readStopToken: async () => { calls.push('stop'); return stop; },
     ensureDependencies: async (repo: string) => { assert.equal(repo, root); calls.push('dependencies'); stop = 'a'.repeat(64); },
     runLaunch: async (repo: string, requestId: string, expectedStop: string) => {
@@ -111,7 +113,7 @@ test('Claude normalized session selects a wallet and preserves that route after 
   const routePath = join(rootDir, 'hook-routes', `${requestId}.json`);
   const observed: unknown[] = [];
   const overrides = {
-    repository: root,
+    repository: root, runView: async () => undefined,
     resolveProfile: async (dataRoot: string, context: { sessionId: string }) => {
       assert.equal(dataRoot, rootDir); assert.deepEqual(context, { sessionId }); return selected;
     },
@@ -149,7 +151,7 @@ test('outside workspaces and symlinks escaping the project never launch', async 
 test('lost dispatch output preserves unknown start state without leaking subprocess errors', async t => {
   const root = await mkdtemp(join(tmpdir(), 'rebalance-claude-unknown-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const result = await handleClaudePrompt({ ...event, cwd: root }, { repository: root,
+  const result = await handleClaudePrompt({ ...event, cwd: root }, { repository: root, runView: async () => undefined,
     readStopToken: async () => 'none', ensureDependencies: async () => {},
     runLaunch: async () => { throw new Error('fixture-secret-provider-response'); },
     runRecovery: forbidden.runRecovery,
@@ -163,7 +165,7 @@ test('lost dispatch output preserves unknown start state without leaking subproc
 test('dependency failures return fixed blocked context without entering the launcher', async t => {
   const root = await mkdtemp(join(tmpdir(), 'rebalance-claude-deps-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const result = await handleClaudePrompt({ ...event, cwd: root }, { repository: root,
+  const result = await handleClaudePrompt({ ...event, cwd: root }, { repository: root, runView: async () => undefined,
     readStopToken: async () => 'none',
     ensureDependencies: async () => { throw new Error('fixture-secret-installer-output'); },
     runLaunch: forbidden.runLaunch, runRecovery: forbidden.runRecovery,
@@ -213,6 +215,19 @@ test('prepared Claude command reaches only an isolated unconfigured CLI and repl
   const definition = settings.hooks.UserPromptExpansion[0].hooks[0];
   const args = definition.args.map((argument: string) => argument.replace('${CLAUDE_PROJECT_DIR}', root));
   const input = { ...event, cwd: root };
+  // Preserve the real isolated launcher but stub the separate view boundary in
+  // this subprocess adapter. This fixture must never start a real hub or cmux.
+  const wrapperUrl = new URL('../scripts/rebalance-claude-hook.mjs', import.meta.url);
+  const isolatedWrapper = join(directory, 'isolated-claude-hook.mjs');
+  const source = (await readFile(wrapperUrl, 'utf8'))
+    .replace("'./rebalance-hook.mjs'", JSON.stringify(new URL('../scripts/rebalance-hook.mjs', import.meta.url).href))
+    .replace("'./companion-view.mjs'", JSON.stringify(new URL('../scripts/companion-view.mjs', import.meta.url).href))
+    .replace("const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');", `const repository = ${JSON.stringify(root)};`)
+    .replace('{ openView: openCompanionView, ...overrides,', '{ openView: openCompanionView, runView: async () => undefined, ...overrides,');
+  assert.match(source, /runView: async \(\) => undefined/);
+  await writeFile(isolatedWrapper, source);
+  assert.equal(args.length, 1);
+  args[0] = await realpath(isolatedWrapper);
   async function invoke() {
     return new Promise<string>((resolve, reject) => {
       const child = execFile(process.execPath, args, { cwd: root,
@@ -230,4 +245,60 @@ test('prepared Claude command reaches only an isolated unconfigured CLI and repl
   assert.deepEqual(JSON.parse(await readFile(join(directory, 'stop.json'), 'utf8')), stop);
   for (const file of ['unexpected-network', 'private-key', 'config.json', 'start.log', 'chart.log', 'pending.json',
     'cycle.json', 'run.lock', 'chart.lock', 'recovery.json', 'recovery.lock']) assert.equal(existsSync(join(directory, file)), false);
+});
+
+
+test('Claude view integration opens the returned session URL only after the deterministic launch result', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-claude-view-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const calls: string[] = [];
+  const view = { state: 'ready', url: `http://127.0.0.1:4663/#view=${'a'.repeat(64)}`,
+    connected: true, tradingChanged: false };
+  const launched = { app: 'Rebalance', outcome: 'armed', status: { armed: true }, messages: [] };
+  const result = await handleClaudePrompt({ ...event, cwd: root }, { repository: root,
+    readStopToken: async () => 'none', ensureDependencies: async () => {},
+    runLaunch: async () => { calls.push('launch'); return launched; },
+    runView: async (repository: string, sessionId: string) => {
+      calls.push('view'); assert.equal(repository, root); assert.equal(sessionId, `claude:${event.session_id}`); return view;
+    },
+    openView: async (request: unknown) => {
+      calls.push('open'); assert.deepEqual(request, { url: view.url, rootDir: join(root, '.local'), sessionId: `claude:${event.session_id}` });
+      return { host: 'cmux', opened: true, reused: false };
+    },
+  });
+  assert.deepEqual(calls, ['launch', 'view', 'open']);
+  assert.deepEqual(publicResult(result), { ...launched, view: { ...view, presentation: { host: 'cmux', opened: true, reused: false } } });
+});
+
+test('Claude native-pane failure preserves the launch outcome without leaking host errors', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-claude-view-failure-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const launched = { app: 'Rebalance', outcome: 'armed', status: { armed: true }, messages: [] };
+  const result = await handleClaudePrompt({ ...event, cwd: root }, { repository: root,
+    readStopToken: async () => 'none', ensureDependencies: async () => {}, runLaunch: async () => launched,
+    runView: async () => ({ state: 'ready', url: `http://127.0.0.1:4663/#view=${'b'.repeat(64)}`, connected: true, tradingChanged: false }),
+    openView: async () => { throw new Error('fixture-private-native-output'); },
+  });
+  const value = publicResult(result);
+  assert.equal(value.outcome, 'armed'); assert.deepEqual(value.status, { armed: true });
+  assert.equal(value.view.presentation.opened, false); assert.doesNotMatch(JSON.stringify(result), /fixture-private/);
+});
+
+test('Claude view preparation failure never repeats launch or attempts a pane', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-claude-view-prepare-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  let launches = 0;
+  const result = await handleClaudePrompt({ ...event, cwd: root }, { repository: root,
+    readStopToken: async () => 'none', ensureDependencies: async () => {},
+    runLaunch: async () => { launches++; return { app: 'Rebalance', outcome: 'needs-input', status: { armed: false }, messages: [] }; },
+    runView: async () => { throw new Error('fixture-private-view-failure'); }, openView: forbidden.openView,
+  });
+  assert.equal(launches, 1); const value = publicResult(result);
+  assert.equal(value.outcome, 'needs-input'); assert.equal(value.status.armed, false); assert.equal(value.view.state, 'unavailable');
+  assert.doesNotMatch(JSON.stringify(result), /fixture-private/);
+});
+
+test('Claude Desktop preview only attaches to the public local origin without a startup command or session token', async () => {
+  const preview = JSON.parse(await readFile(new URL('../.claude/launch.json', import.meta.url), 'utf8'));
+  assert.deepEqual(preview, { version: '0.0.1', configurations: [{ name: 'Rebalance', port: 4663, url: 'http://127.0.0.1:4663' }] });
 });

@@ -20,6 +20,12 @@ export type PendingTransaction = {
 
 type LockRecord = { pid: number; createdAt: string; token?: string };
 
+const lockBusy = (message: string) => Object.assign(new Error(message), { code: 'REBALANCE_LOCK_BUSY' });
+export function isLiveLockContention(error: unknown): error is Error {
+  return error instanceof Error && Object.hasOwn(error, 'code') &&
+    (error as Error & { code: unknown }).code === 'REBALANCE_LOCK_BUSY';
+}
+
 function hasCode(error: unknown, code: string): boolean {
   return error !== null && typeof error === "object" && "code" in error && error.code === code;
 }
@@ -161,7 +167,7 @@ export async function acquireLock(
 
   const existing = await readLock(path);
   if (existing && processIsAlive(existing.pid)) {
-    throw new Error(`Lock ${name} is held by process ${existing.pid}`);
+    throw lockBusy(`Lock ${name} is held by process ${existing.pid}`);
   }
 
   // Serialize stale cleanup so a second reclaimer cannot remove a new holder.
@@ -178,7 +184,7 @@ export async function acquireLock(
   try {
     const current = await readLock(path);
     if (current) {
-      if (processIsAlive(current.pid)) throw new Error(`Lock ${name} is held by process ${current.pid}`);
+      if (processIsAlive(current.pid)) throw lockBusy(`Lock ${name} is held by process ${current.pid}`);
       await removeIfPresent(path);
     }
     try {

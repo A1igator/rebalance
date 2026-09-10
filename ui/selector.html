@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <meta name="referrer" content="no-referrer">
+    <title>Rebalance · Portfolios</title>
+    <link rel="stylesheet" href="/selector.css">
+    <script src="/view-client.js" defer></script>
+    <script src="/allocation-ring.js" defer></script>
+    <script src="/selector.js" defer></script>
+  </head>
+  <body>
+    <main aria-label="Portfolios">
+      <div class="selector-feedback">
+        <p id="view-notice" role="status"></p>
+        <p id="portfolio-status" role="status">Loading portfolios…</p>
+        <button id="reload-portfolios" class="text-button" type="button" hidden>Try again</button>
+      </div>
+      <div id="portfolio-grid" class="portfolio-grid" aria-label="Wallet portfolios"></div>
+    </main>
+    <dialog id="setup-dialog" aria-labelledby="setup-title" aria-describedby="setup-description">
+      <div class="dialog-heading"><h2 id="setup-title">New portfolio</h2><button id="close-setup" class="close-button" type="button" aria-label="Close setup">×</button></div>
+      <p id="setup-description">Choose how to sign. Setup finishes here after any browser or device approval.</p>
+      <div class="signer-options">
+        <button id="setup-private-key" class="signer-option" type="button"><strong>Local key</strong><span>A wallet managed on this computer</span></button>
+        <div id="privy-choice" class="privy-choice" role="group" tabindex="-1" data-limited="false">
+          <button id="setup-privy" class="signer-option" type="button"><strong>Privy</strong><span>Your Agent Sandbox wallet</span></button>
+          <span id="privy-limit" class="privy-limit" role="tooltip">Privy Agent Sandbox supports one Ethereum wallet per account. Your Privy wallet is already added.</span>
+        </div>
+        <button id="setup-ledger" class="signer-option" type="button"><strong>Ledger</strong><span>Verify an account on your Ledger</span></button>
+      </div>
+      <p id="setup-status" class="setup-status" role="status"></p>
+      <div id="setup-approval" class="setup-approval" hidden>
+        <span>Verify this code in Privy</span>
+        <strong id="setup-approval-code"></strong>
+        <a id="setup-approval-link" target="_blank" rel="noopener noreferrer">Open Privy approval</a>
+      </div>
+      <button id="open-existing-portfolio" class="text-button" type="button" hidden>Open existing portfolio</button>
+      <button id="retry-setup" class="text-button" type="button" hidden>Try again</button>
+    </dialog>
+  </body>
+</html>
