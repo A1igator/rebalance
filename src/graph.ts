@@ -5,7 +5,7 @@ export const GRAPH = {
   intent: ['config'], config: ['reconcile', 'wait'], reconcile: ['recover', 'observe', 'wait'],
   recover: ['observe', 'wait'],
   observe: ['plan'], plan: ['interval', 'wait'], interval: ['quote', 'wait'], quote: ['execute', 'wait'],
-  execute: ['receipt'], receipt: ['reconcile'], wait: ['config'], error: ['config'],
+  execute: ['receipt', 'wait'], receipt: ['reconcile'], wait: ['config'], error: ['config'],
 } as const;
 export type Node = keyof typeof GRAPH;
 export type GraphState = { node: Node; trace: Node[] };

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseTargets, percentToBps, validateConfig } from '../src/config.js';
+import { parseRebalanceFeeTargetUsd, parseTargets, percentToBps, validateConfig } from '../src/config.js';
 
 const config = {
   version: 1, chainId: 4663, wallet: '0x0000000000000000000000000000000000000001',
@@ -46,5 +46,34 @@ test('older configurations receive a one-hour rebalance interval without changin
   assert.equal(validateConfig({ ...config, rebalanceIntervalSeconds: 7200 }).rebalanceIntervalSeconds, 7200);
   for (const interval of [0, -1, 0.5, null, 604801]) {
     assert.throws(() => validateConfig({ ...config, rebalanceIntervalSeconds: interval }), /Invalid rebalanceIntervalSeconds/);
+  }
+});
+
+
+test('rebalance fee targets parse exact bounded USD amounts including zero', () => {
+  for (const [input, expected] of [
+    ['0.05', '5000000'], ['$0.05', '5000000'], ['0', '0'], ['0.00000000', '0'],
+    ['0001.23000000', '123000000'], ['1', '100000000'], ['0.00000001', '1'],
+    ['999999999999.99999999', '99999999999999999999'],
+  ]) assert.equal(parseRebalanceFeeTargetUsd(input!), expected, input);
+  for (const input of ['', ' ', ' 0.05', '0.05 ', '-1', '+1', '1e2', 'NaN', 'Infinity',
+    '0.000000001', '1000000000000', '1.', '.05', '$', '$$1', '1,000', null, 1]) {
+    assert.throws(() => parseRebalanceFeeTargetUsd(input as string), /nonnegative USD/);
+  }
+});
+
+test('fee targets are optional canonical integer USD units and do not change legacy defaults', () => {
+  const migrated = validateConfig(config);
+  assert.equal(Object.hasOwn(migrated, 'rebalanceFeeTargetUsdE8'), false);
+  assert.equal(Object.hasOwn(config, 'rebalanceFeeTargetUsdE8'), false);
+  for (const target of ['0', '1', '5000000', '99999999999999999999']) {
+    const next = validateConfig({ ...config, rebalanceFeeTargetUsdE8: target });
+    assert.equal(next.rebalanceFeeTargetUsdE8, target);
+    const { rebalanceFeeTargetUsdE8: _target, ...remaining } = next;
+    assert.deepEqual(remaining, migrated);
+  }
+  for (const target of [null, 0, 1n, '', '00', '01', '-1', '+1', '0.05', '1e8', ' 1', '1 ',
+    '100000000000000000000']) {
+    assert.throws(() => validateConfig({ ...config, rebalanceFeeTargetUsdE8: target }), /Invalid rebalanceFeeTargetUsdE8/);
   }
 });

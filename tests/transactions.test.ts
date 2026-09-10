@@ -434,3 +434,116 @@ test('Ledger late stop, expiry or abort inside the final intent check cannot bro
     } finally { mockedDate.mock.restore(); }
   }
 });
+
+// Fee tests use the same disposable public signer fixtures and in-memory RPC.
+async function feeConfiguration(target = '1') {
+  const config = validateConfig({ ...configuration(), rebalanceFeeTargetUsdE8: target });
+  await atomicWriteJson(CONFIG_PATH, config);
+  return config;
+}
+const feeResponse = (amount = '3000') => new Response(JSON.stringify({ data: { base: 'ETH', currency: 'USD', amount } }));
+
+test('an estimated fee above the configured target blocks before signing or submitting', async t => {
+  const config = await feeConfiguration(), h = mockedChain();
+  h.rpc.getGasPrice = async () => 1_000_000_000n;
+  const { FeeTargetError } = await import('../src/fee-target.js');
+  t.mock.method(globalThis, 'fetch', async () => feeResponse());
+  let signatures = 0;
+  const checks: import('../src/fee-target.js').FeeCheck[] = [];
+  await assert.rejects(dispatch(config, h.chain, transaction, async () => ({ address: wallet, signTransaction: async tx => {
+    signatures++; return privateKeyToAccount(key).signTransaction(tx);
+  } }), undefined, { swaps: 1, onCheck: async check => { checks.push(check); } }), error => {
+    assert.ok(error instanceof FeeTargetError); assert.equal(error.check.state, 'above-target'); return true;
+  });
+  assert.equal(checks.length, 1); assert.equal(checks[0].estimatedUsdE8, '81987120');
+  assert.equal(signatures, 0); assert.equal(h.sent.length, 0); assert.equal(await readJson(PENDING_PATH), null);
+});
+
+test('configured fee target fails closed before signer loading when projection context is missing', async t => {
+  const config = await feeConfiguration(), h = mockedChain();
+  const { FeeTargetError } = await import('../src/fee-target.js');
+  t.mock.method(globalThis, 'fetch', () => assert.fail('Missing projection must not query pricing'));
+  let signerLoads = 0;
+  for (const fees of [undefined, { swaps: null, onCheck: async () => {} }, { swaps: 0, onCheck: async () => {} }]) {
+    await assert.rejects(dispatch(config, h.chain, transaction, async () => {
+      signerLoads++; return { address: wallet, signTransaction: async () => assert.fail('Must not sign') };
+    }, undefined, fees), error => {
+      assert.ok(error instanceof FeeTargetError); assert.equal(error.check.state, 'unavailable'); return true;
+    });
+  }
+  assert.equal(signerLoads, 0); assert.equal(h.sent.length, 0); assert.equal(await readJson(PENDING_PATH), null);
+});
+
+test('fresh fee price unavailable blocks before signing and excludes provider text', async t => {
+  const config = await feeConfiguration('500000000'), h = mockedChain();
+  const { FeeTargetError } = await import('../src/fee-target.js');
+  t.mock.method(globalThis, 'fetch', async () => { throw new Error('private-provider-fixture'); });
+  let signatures = 0;
+  await assert.rejects(dispatch(config, h.chain, transaction, async () => ({ address: wallet, signTransaction: async tx => {
+    signatures++; return privateKeyToAccount(key).signTransaction(tx);
+  } }), undefined, { swaps: 1, onCheck: async () => {} }), error => {
+    assert.ok(error instanceof FeeTargetError); assert.equal(error.check.state, 'unavailable');
+    assert.ok(!error.message.includes('private-provider-fixture')); return true;
+  });
+  assert.equal(signatures, 0); assert.equal(h.sent.length, 0); assert.equal(await readJson(PENDING_PATH), null);
+});
+
+test('within-target fees permit the selected fixture signer and preserve ordinary pending tracking', async t => {
+  const config = await feeConfiguration('500000000'), h = mockedChain();
+  h.rpc.getGasPrice = async () => 1_000_000_000n;
+  let quotes = 0, signatures = 0;
+  t.mock.method(globalThis, 'fetch', async () => { quotes++; return feeResponse(); });
+  const checks: import('../src/fee-target.js').FeeCheck[] = [];
+  const result = await dispatch(config, h.chain, transaction, async () => ({ address: wallet, signTransaction: async tx => {
+    signatures++; return privateKeyToAccount(key).signTransaction(tx);
+  } }), undefined, { swaps: 1, onCheck: async check => { checks.push(check); } });
+  assert.equal(result.status, 'pending'); assert.equal(signatures, 1); assert.equal(h.sent.length, 1);
+  assert.equal(quotes, 1); assert.equal(checks[0].state, 'within-target');
+  assert.equal((await readJson<PendingTransaction>(PENDING_PATH))?.status, 'broadcast');
+});
+
+test('fee configuration never weakens the selected signer identity check', async t => {
+  const config = await feeConfiguration('500000000'), h = mockedChain();
+  t.mock.method(globalThis, 'fetch', () => assert.fail('Wrong signer must be rejected before fee pricing'));
+  await assert.rejects(dispatch(config, h.chain, transaction, async () => ({ address: otherWallet,
+    signTransaction: async () => assert.fail('Wrong signer must not sign') }), undefined, { swaps: 1, onCheck: async () => {} }), /key does not match/);
+  assert.equal(h.sent.length, 0); assert.equal(await readJson(PENDING_PATH), null);
+});
+
+test('a quote older than 30 seconds after signing is refreshed and can veto broadcast', async t => {
+  const config = await feeConfiguration('50000000'), h = mockedChain();
+  h.rpc.getGasPrice = async () => 1_000_000_000n;
+  const { FeeTargetError } = await import('../src/fee-target.js');
+  let now = Date.now(), quotes = 0, signatures = 0;
+  t.mock.method(Date, 'now', () => now);
+  t.mock.method(globalThis, 'fetch', async () => { quotes++; return feeResponse(quotes === 1 ? '1000' : '9999'); });
+  const checks: import('../src/fee-target.js').FeeCheck[] = [];
+  await assert.rejects(dispatch(config, h.chain, transaction, async () => ({ address: wallet, signTransaction: async tx => {
+    signatures++; now += 31_000; return privateKeyToAccount(key).signTransaction(tx);
+  } }), undefined, { swaps: 1, onCheck: async check => { checks.push(check); } }), error => {
+    assert.ok(error instanceof FeeTargetError); assert.equal(error.check.state, 'above-target'); return true;
+  });
+  assert.equal(quotes, 2); assert.equal(signatures, 1);
+  assert.deepEqual(checks.map(check => check.state), ['within-target', 'above-target']);
+  assert.equal(h.sent.length, 0); assert.equal(await readJson(PENDING_PATH), null);
+});
+
+test('a fee recheck veto after durable preparation removes only the known-unsent pending record', async t => {
+  const config = await feeConfiguration('50000000'), h = mockedChain();
+  h.rpc.getGasPrice = async () => 1_000_000_000n;
+  const { FeeTargetError } = await import('../src/fee-target.js');
+  const base = Date.now(); let quotes = 0;
+  t.mock.method(Date, 'now', () => base + (existsSync(PENDING_PATH) ? 31_000 : 0));
+  t.mock.method(globalThis, 'fetch', async () => { quotes++; return feeResponse(quotes === 1 ? '1000' : '9999'); });
+  await assert.rejects(dispatch(config, h.chain, transaction, undefined, undefined, { swaps: 1, onCheck: async () => {} }), error => {
+    assert.ok(error instanceof FeeTargetError); assert.equal(error.check.state, 'above-target'); return true;
+  });
+  assert.equal(quotes, 2); assert.equal(h.sent.length, 0); assert.equal(await readJson(PENDING_PATH), null);
+});
+
+test('an unset fee target preserves automatic dispatch without any price request', async t => {
+  t.mock.method(globalThis, 'fetch', () => assert.fail('Unset targets must not add a price dependency'));
+  const h = mockedChain();
+  assert.equal((await dispatch(configuration(), h.chain, transaction)).status, 'pending');
+  assert.equal(h.sent.length, 1);
+});

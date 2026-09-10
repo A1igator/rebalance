@@ -81,17 +81,26 @@ export function projectRebalanceFees(snapshot: Status, config: Config | null, no
         balance: uint256(position.balance), priceUsdE8: uint256(position.priceUsdE8), targetBps: position.targetBps,
       };
     });
-    let portfolio = evaluatePortfolio(positions);
-    if (portfolio.totalUsdE8 <= 0n) return null;
-    const identity = {
-      observedAt: snapshot.updatedAt, wallet: config.wallet,
+    const swaps = projectSwapCount(positions, config.driftThresholdBps);
+    return swaps === null ? null : { swaps, observedAt: snapshot.updatedAt, wallet: config.wallet,
       targets: Object.fromEntries(ids.map(id => [id, config.targets[id]])),
       balances: Object.fromEntries([...positions].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
         .map(position => [position.id, position.balance.toString()])),
     };
+  } catch { /* Malformed or nonconverging observations have no useful estimate. */ }
+  return null;
+}
+
+/** Fixed-price remaining swap estimate shared by display and the fee target. */
+export function projectSwapCount(input: AssetPosition[], threshold: number): number | null {
+  try {
+    if (!Number.isInteger(threshold) || threshold < 0 || threshold > 10000) return null;
+    const positions = input.map(position => ({ ...position }));
+    let portfolio = evaluatePortfolio(positions);
+    if (portfolio.totalUsdE8 <= 0n) return null;
     for (let swaps = 0; swaps <= MAX_SWAPS; swaps++) {
-      const trade = planTrade(portfolio, QUOTE_ASSET_ID, config.driftThresholdBps);
-      if (!trade) return withinThreshold(portfolio, config.driftThresholdBps) ? { swaps, ...identity } : null;
+      const trade = planTrade(portfolio, QUOTE_ASSET_ID, threshold);
+      if (!trade) return withinThreshold(portfolio, threshold) ? swaps : null;
       if (swaps === MAX_SWAPS) return null;
       const sell = positions.find(position => position.id === trade.sellAssetId)!;
       const buy = positions.find(position => position.id === trade.buyAssetId)!;
@@ -99,11 +108,10 @@ export function projectRebalanceFees(snapshot: Status, config: Config | null, no
       const amountOut = trade.amountIn * sell.priceUsdE8 * 10n ** BigInt(buy.decimals) /
         (10n ** BigInt(sell.decimals) * buy.priceUsdE8);
       if (amountOut <= 0n || buy.balance + amountOut > MAX_UINT256) return null;
-      sell.balance -= trade.amountIn;
-      buy.balance += amountOut;
+      sell.balance -= trade.amountIn; buy.balance += amountOut;
       portfolio = evaluatePortfolio(positions);
       if (portfolio.totalUsdE8 <= 0n) return null;
     }
-  } catch { /* Malformed or nonconverging observations have no useful estimate. */ }
+  } catch { /* Invalid or nonconverging portfolios have no useful estimate. */ }
   return null;
 }

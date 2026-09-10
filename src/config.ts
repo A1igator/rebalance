@@ -27,6 +27,7 @@ export type Config = {
   deadlineSeconds: number;
   pollSeconds: number;
   rebalanceIntervalSeconds: number;
+  rebalanceFeeTargetUsdE8?: string;
 };
 
 export function validateConfig(value: unknown): Config {
@@ -56,6 +57,10 @@ export function validateConfig(value: unknown): Config {
   ] as const) {
     if (!Number.isInteger(c[name]) || c[name] < min || c[name] > max) throw new Error(`Invalid ${name} (${min}–${max})`);
   }
+  if (c.rebalanceFeeTargetUsdE8 !== undefined && (typeof c.rebalanceFeeTargetUsdE8 !== 'string' ||
+      !/^(0|[1-9][0-9]{0,19})$/.test(c.rebalanceFeeTargetUsdE8))) {
+    throw new Error('Invalid rebalanceFeeTargetUsdE8: use a canonical unsigned integer below 100000000000000000000');
+  }
   if (c.allocation !== undefined) c.allocation = validateManagedAllocation(c.allocation, c.targets);
   return { ...c, wallet: getAddress(c.wallet) };
 }
@@ -76,6 +81,15 @@ export function percentToBps(value: string): number {
   const bps = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
   if (bps > 10000) throw new Error('Percentage cannot exceed 100');
   return bps;
+}
+
+/** Parse up to 12 whole USD digits and eight decimals without floating point. */
+export function parseRebalanceFeeTargetUsd(input: string): string {
+  if (typeof input !== 'string' || !/^\$?[0-9]{1,12}(?:\.[0-9]{1,8})?$/.test(input)) {
+    throw new Error('Use a nonnegative USD amount with at most 12 whole digits and eight decimal places');
+  }
+  const [whole, fraction = ''] = input.replace(/^\$/, '').split('.');
+  return (BigInt(whole!) * 100_000_000n + BigInt(fraction.padEnd(8, '0'))).toString();
 }
 
 export function parseTargets(input: string): Record<string, number> {

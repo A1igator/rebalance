@@ -1,3 +1,5 @@
+import { FeeTargetError, type FeeCheck } from './fee-target.js';
+import { projectSwapCount } from './fee-projection.js';
 import { resolve } from 'node:path';
 import { watch } from 'node:fs';
 import { createChain, type RouteQuote } from './chain.js';
@@ -12,7 +14,7 @@ export type { RebalanceCycle };
 import { runGraph, type GraphState } from './graph.js';
 import { atomicWriteJson, readJson, type PendingTransaction } from './storage.js';
 import { driveMonitor } from './monitor.js';
-import { dispatch, reconcile, type Operation } from './transactions.js';
+import { dispatch, reconcile, readRebalanceFee, type Operation, type FeeContext } from './transactions.js';
 import { LedgerExecution, readLedgerRequest, type LedgerRequest } from './ledger-request.js';
 import { LedgerSigningError } from './ledger-signing.js';
 import { watchLedgerPresence } from './ledger-onboarding.js';
@@ -23,7 +25,7 @@ export const STOP_PATH = resolve(DATA, 'stop.json');
 export type Status = {
   app: 'Rebalance'; chain: { id: 4663; name: 'Robinhood' };
   mode: Config['mode'] | null; wallet: string | null;
-  config: { targets: Record<string, number>; rebalanceIntervalSeconds: number; driftThresholdBps: number; allocation?: ReturnType<typeof allocationSummary> } | null;
+  config: { targets: Record<string, number>; rebalanceIntervalSeconds: number; driftThresholdBps: number; rebalanceFeeTargetUsdE8?: string; allocation?: ReturnType<typeof allocationSummary> } | null;
   cycle: RebalanceCycle | null;
   portfolio: Portfolio | null;
   operation: Operation | null;
@@ -36,6 +38,8 @@ export type Status = {
   valuationNote?: string;
   proposal?: TradePlan | null;
   ledgerRequest?: LedgerRequest | null;
+  feeCheck?: FeeCheck | null;
+  feeTargetVersion?: 1;
 };
 
 export async function initialStatus(): Promise<Status> {
@@ -66,6 +70,7 @@ export async function status(): Promise<Status> {
     state.mode = config.mode;
     state.config = { targets: config.targets, rebalanceIntervalSeconds: config.rebalanceIntervalSeconds,
       driftThresholdBps: config.driftThresholdBps,
+      ...(config.rebalanceFeeTargetUsdE8 !== undefined ? { rebalanceFeeTargetUsdE8: config.rebalanceFeeTargetUsdE8 } : {}),
       ...(config.allocation ? { allocation: allocationSummary(config) } : {}) };
     state.portfolio = withCurrentTargets(state.portfolio, config);
     if (!state.portfolio) {
@@ -76,6 +81,12 @@ export async function status(): Promise<Status> {
       delete state.proposal;
     }
     if (JSON.stringify(saved?.config?.targets) !== JSON.stringify(config.targets)) delete state.proposal;
+    if (saved?.config?.rebalanceFeeTargetUsdE8 !== config.rebalanceFeeTargetUsdE8 ||
+        saved?.config?.driftThresholdBps !== config.driftThresholdBps ||
+        JSON.stringify(saved?.config?.targets) !== JSON.stringify(config.targets)) {
+      delete state.feeCheck;
+      if (state.operation?.status === 'fee-target') state.operation = null;
+    }
   }
   if (config?.mode === 'ledger') state.ledgerRequest = await readLedgerRequest();
   state.cycle = publicCycle(await readCycle());
@@ -117,6 +128,7 @@ function runtimeAttention(state: Status): RebalanceAttention | null {
 /** Caller holds the single-run lock, including for an observation-only check. */
 export async function tick(execute: boolean, chainFor: typeof createChain = createChain, ledger?: LedgerExecution, signal?: AbortSignal, presence?: LedgerPresence): Promise<Status> {
   const state = await initialStatus();
+  state.feeTargetVersion = 1;
   const connectionRevision = presence?.revision;
   let previous: Status | null = null;
   let configured: Config | null;
@@ -134,6 +146,7 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
     Object.assign(state, {
       wallet: configured.wallet, mode: configured.mode, config: { targets: configured.targets, rebalanceIntervalSeconds: configured.rebalanceIntervalSeconds,
         driftThresholdBps: configured.driftThresholdBps,
+        ...(configured.rebalanceFeeTargetUsdE8 !== undefined ? { rebalanceFeeTargetUsdE8: configured.rebalanceFeeTargetUsdE8 } : {}),
         ...(configured.allocation ? { allocation: allocationSummary(configured) } : {}) },
       cycle: previous.cycle ?? null,
       portfolio: retained, updatedAt: retained ? previous.updatedAt : null,
@@ -162,6 +175,7 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
       state.wallet = config.wallet;
       state.config = { targets: config.targets, rebalanceIntervalSeconds: config.rebalanceIntervalSeconds,
         driftThresholdBps: config.driftThresholdBps,
+        ...(config.rebalanceFeeTargetUsdE8 !== undefined ? { rebalanceFeeTargetUsdE8: config.rebalanceFeeTargetUsdE8 } : {}),
         ...(config.allocation ? { allocation: allocationSummary(config) } : {}) };
       state.armed = execute;
       chain = chainFor(config);
@@ -208,7 +222,19 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
     quote: trade => chain.quote(trade),
     execute: async (trade, quote) => {
       if (await readJson(STOP_PATH)) return { status: 'stopping', message: 'Stop requested; no new transaction sent.' };
-      if (config.mode === 'ledger' && !ledger?.active) return { status: 'waiting-ledger', message: 'Drift detected. Connect Ledger and request a rebalance through your agent; every transaction requires physical confirmation.' };
+      if (config.mode === 'ledger' && !ledger?.active) {
+        // Keep unaffordable work local until a fresh public estimate permits a
+        // meaningful signing request; this never accesses the device or keys.
+        if (config.rebalanceFeeTargetUsdE8 !== undefined) {
+          const transaction = await chain.transaction(trade, quote as RouteQuote);
+          const swaps = state.portfolio ? projectSwapCount(state.portfolio.positions, config.driftThresholdBps) : null;
+          state.feeCheck = await readRebalanceFee(config, chain, transaction, swaps);
+          if (state.feeCheck.state !== 'within-target') throw new FeeTargetError(state.feeCheck);
+        }
+        if (await readJson(STOP_PATH)) return { status: 'stopping', message: 'Stop requested; no new transaction sent.' };
+        if (JSON.stringify(await loadConfig()) !== JSON.stringify(config)) return { status: 'configuration-changed', message: 'Configuration changed; refresh the portfolio before requesting Ledger attention.' };
+        return { status: 'waiting-ledger', message: 'Drift detected. Connect Ledger and request a rebalance through your agent; every transaction requires physical confirmation.' };
+      }
       if (config.mode === 'ledger') {
         if (!presence?.connected || presence.revision !== connectionRevision) {
           await ledger!.finish('device-changed');
@@ -217,6 +243,10 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
         await ledger!.assertReady(config);
       }
       const transaction = await chain.transaction(trade, quote as RouteQuote);
+      const fees: FeeContext | undefined = config.rebalanceFeeTargetUsdE8 === undefined ? undefined : {
+        swaps: state.portfolio ? projectSwapCount(state.portfolio.positions, config.driftThresholdBps) : null,
+        onCheck: async check => { state.feeCheck = check; await atomicWriteJson(STATE_PATH, state); },
+      };
       state.cycle = await beginRebalanceCycle(config);
       if (config.mode === 'ledger') await ledger!.bindCycle(state.cycle);
       const cycleDeadline = BigInt(Math.floor(Date.parse(state.cycle.activeUntil) / 1000));
@@ -228,9 +258,9 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
         const requestDeadline = BigInt(Math.floor(ledger!.expiresAt! / 1000));
         const quoteDeadline = BigInt(Math.floor(Date.now() / 1000) + config.deadlineSeconds);
         expiresAt = [expiresAt, requestDeadline, quoteDeadline].reduce((a, b) => a < b ? a : b);
-        return ledgerDispatch(config, chain, { ...transaction, expiresAt }, ledger!, signal, presence!, connectionRevision!);
+        return ledgerDispatch(config, chain, { ...transaction, expiresAt }, ledger!, signal, presence!, connectionRevision!, fees);
       }
-      return dispatch(config, chain, { ...transaction, expiresAt });
+      return dispatch(config, chain, { ...transaction, expiresAt }, undefined, undefined, fees);
     },
     publish: async (graph, operation) => {
       state.graph = graph;
@@ -238,11 +268,15 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
       await atomicWriteJson(STATE_PATH, state);
     },
   }).catch(async error => {
-    if (error instanceof LedgerSigningError) {
+    if (error instanceof FeeTargetError) {
+      state.error = null; state.feeCheck = error.check;
+      state.operation = { status: 'fee-target', message: error.message };
+      state.graph = { node: 'wait', trace: [...state.graph.trace.filter(node => node !== 'error'), 'wait'] };
+    } else if (error instanceof LedgerSigningError) {
       state.operation = { status: `ledger-${error.outcome}`, message: error.message };
       if (!['rejected', 'cancelled', 'timeout'].includes(error.outcome)) state.error = error.message;
     } else state.error = publicError(error);
-    await ledger?.finish(error instanceof LedgerSigningError ? error.outcome : 'failed');
+    await ledger?.finish(error instanceof FeeTargetError ? 'fee-target' : error instanceof LedgerSigningError ? error.outcome : 'failed');
     await atomicWriteJson(STATE_PATH, state);
   });
   if (configured?.mode === 'ledger') {
@@ -264,8 +298,9 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
     if (!state.error && configured && state.portfolio && state.proposal !== undefined) {
       if (configured.mode === 'ledger') {
         // A cooldown or device rejection does not clear and recreate an incident.
-        if (state.proposal === null) await ledgerCondition(configured.wallet, configured.targets, false);
-        else if (presence?.connected && !ledger?.active && state.operation?.status !== 'cooling-down') await ledgerCondition(configured.wallet, configured.targets, true);
+        if (state.proposal === null || state.operation?.status === 'fee-target') await ledgerCondition(configured.wallet, configured.targets, false);
+        else if (presence?.connected && !ledger?.active && !['cooling-down', 'fee-target', 'stopping', 'configuration-changed'].includes(state.operation?.status ?? '') &&
+            !await readJson(STOP_PATH) && JSON.stringify(await loadConfig()) === JSON.stringify(configured)) await ledgerCondition(configured.wallet, configured.targets, true);
       }
       const total = state.portfolio.totalUsdE8;
       const withinThreshold = total > 0n && state.portfolio.positions.every(position => {
@@ -285,7 +320,7 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
  * the send boundary. A missed file event is covered by the existing-scale local
  * watchdog; no RPC or signature retry runs here. */
 async function ledgerDispatch(config: Config, chain: ReturnType<typeof createChain>, tx: Awaited<ReturnType<typeof chain.transaction>>,
-  ledger: LedgerExecution, parent: AbortSignal | undefined, presence: LedgerPresence, revision: number): Promise<Operation> {
+  ledger: LedgerExecution, parent: AbortSignal | undefined, presence: LedgerPresence, revision: number, fees?: FeeContext): Promise<Operation> {
   const controller = new AbortController();
   const signal = parent ? AbortSignal.any([parent, controller.signal]) : controller.signal;
   const assertReady = async () => {
@@ -305,7 +340,7 @@ async function ledgerDispatch(config: Config, chain: ReturnType<typeof createCha
     Math.max(0, Number(tx.expiresAt!) * 1000 - Date.now()));
   try {
     await assertReady();
-    return await dispatch(config, chain, tx, undefined, { signal, assertReady });
+    return await dispatch(config, chain, tx, undefined, { signal, assertReady }, fees);
   } finally {
     clearInterval(watchdog); clearTimeout(deadline); watcher.close(); controller.abort();
   }

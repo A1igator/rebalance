@@ -8,7 +8,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { type Hex } from 'viem';
 import { ASSETS } from './assets.js';
 import { createChain, ROBINHOOD } from './chain.js';
-import { CONFIG_PATH, DATA, PENDING_PATH, createWallet, loadConfig, parseTargets, percentToBps, validateConfig, type Config } from './config.js';
+import { CONFIG_PATH, DATA, PENDING_PATH, createWallet, loadConfig, parseRebalanceFeeTargetUsd, parseTargets, percentToBps, validateConfig, type Config } from './config.js';
 import { redistributeTargets } from './core.js';
 import { readCycle } from './cadence.js';
 import { allocationStatus, previewAllocation, readAllocationInput, withAllocation, withoutAllocation } from './allocation-management.js';
@@ -48,6 +48,9 @@ const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
   allocation set <policy.json>          Save per-wallet policy and calculated targets together
   allocation status                    Read policy, assumptions and last calculation
   allocation manual                    Keep current targets; remove the allocation policy
+  fees target <USD>                    Set this wallet's estimated rebalance network-fee target
+  fees clear                           Remove this wallet's fee target
+  fees status                          Read the saved fee target; estimates are not guarantees
   ledger status                        Read the latest Ledger rebalance request
   ledger rebalance [--request-id UUID]   Request one device-confirmed rebalance on a running Ledger monitor
   check                                Fresh read/plan/quote; never sign
@@ -91,6 +94,14 @@ const requiredConfig = async () => { const c = await loadConfig(); if (!c) throw
 async function inLock<T>(name: string, action: () => Promise<T>): Promise<T> {
   const release = await acquireLock(DATA, name);
   try { return await action(); } finally { await release(); }
+}
+
+function feeTargetStatus(config: Config) {
+  const target = config.rebalanceFeeTargetUsdE8;
+  const fraction = target === undefined ? '' : (BigInt(target) % 100_000_000n).toString().padStart(8, '0').replace(/0+$/, '');
+  return { wallet: config.wallet, chainId: config.chainId, rebalanceFeeTargetUsdE8: target ?? null,
+    targetUsd: target === undefined ? null : `${BigInt(target) / 100_000_000n}${fraction ? `.${fraction}` : ''}`,
+    description: 'Target for estimated rebalance network fees in USD; estimates are not guaranteed final costs.' };
 }
 
 // Stop and the start command's older-stop removal must be ordered. In
@@ -303,6 +314,23 @@ async function main() {
       if (args[1] === 'ack' && args[2]) { await acknowledgeEvent(args[2]); print({ acknowledged: args[2] }); }
       else print(await events());
       return;
+    case 'fees': {
+      const action = args[1];
+      if (!action || !['target', 'clear', 'status'].includes(action) || args.length !== (action === 'target' ? 3 : 2)) {
+        throw new Error('Use fees target <USD>, fees clear or fees status');
+      }
+      for (const [name, value] of Object.entries(values)) {
+        if (value !== undefined && value !== false) throw new Error(`--${name} does not apply to fees commands`);
+      }
+      if (action === 'status') { print(feeTargetStatus(await requiredConfig())); return; }
+      const target = action === 'target' ? parseRebalanceFeeTargetUsd(args[2]!) : undefined;
+      await inLock('config.lock', async () => {
+        const { rebalanceFeeTargetUsdE8: _previousTarget, ...config } = await requiredConfig();
+        const next = validateConfig({ ...config, ...(target === undefined ? {} : { rebalanceFeeTargetUsdE8: target }) });
+        await atomicWriteJson(CONFIG_PATH, next);
+        print(feeTargetStatus(next));
+      }); return;
+    }
     case 'allocation': {
       const action = args[1];
       if (!action || !['preview', 'set', 'status', 'manual'].includes(action) ||
@@ -358,6 +386,7 @@ async function main() {
           rpcUrl: values.rpc ?? previous?.rpcUrl ?? ROBINHOOD.rpcUrls.default.http[0],
           targets: values.targets !== undefined ? parseTargets(values.targets) : previous?.targets,
           ...(values.targets === undefined && previous?.allocation ? { allocation: previous.allocation } : {}),
+          ...(previous?.rebalanceFeeTargetUsdE8 === undefined ? {} : { rebalanceFeeTargetUsdE8: previous.rebalanceFeeTargetUsdE8 }),
           driftThresholdBps: values.threshold ? percentToBps(values.threshold) : previous?.driftThresholdBps ?? 500,
           slippageBps: values.slippage ? percentToBps(values.slippage) : previous?.slippageBps ?? 50,
           deadlineSeconds: previous?.deadlineSeconds ?? 120,

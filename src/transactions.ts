@@ -1,3 +1,4 @@
+import { checkRebalanceFee, FeeTargetError, type FeeCheck } from './fee-target.js';
 import { rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { keccak256, TransactionReceiptNotFoundError, type Hex } from 'viem';
@@ -129,12 +130,49 @@ async function requireDispatchReady(tx: ChainTransaction): Promise<void> {
   requireFresh();
 }
 
+export type FeeContext = { swaps: number | null; onCheck(check: FeeCheck): Promise<void> };
+
+/** Passive Ledger fee assessment: public calls only, without loading a signer. */
+export async function readRebalanceFee(config: Config, chain: Chain, tx: ChainTransaction, swaps: number | null): Promise<FeeCheck> {
+  if (config.rebalanceFeeTargetUsdE8 === undefined) throw new Error('No fee target configured');
+  const unavailable: FeeCheck = { state: 'unavailable', targetUsdE8: config.rebalanceFeeTargetUsdE8,
+    estimatedUsdE8: null, gasPriceWei: null, ethUsdE8: null, observedAt: null };
+  if (swaps === null || !Number.isInteger(swaps) || swaps < 1 || swaps > 16 || (tx.kind !== 'approval' && tx.kind !== 'swap')) return unavailable;
+  try {
+    const rpc = chain.publicClient;
+    if (await rpc.getChainId() !== 4663) return unavailable;
+    const gasEstimate = await rpc.estimateGas({ account: config.wallet, to: tx.to, data: tx.data, value: tx.value });
+    const suggestedPrice = await rpc.getGasPrice();
+    if (typeof gasEstimate !== 'bigint' || typeof suggestedPrice !== 'bigint' || gasEstimate <= 0n || suggestedPrice <= 0n) return unavailable;
+    const gas = (gasEstimate * 120n + 99n) / 100n;
+    const gasPrice = (suggestedPrice * 120n + 99n) / 100n;
+    return await checkRebalanceFee({ targetUsdE8: config.rebalanceFeeTargetUsdE8, swaps, kind: tx.kind, gas, gasPrice });
+  } catch { return unavailable; }
+}
+
 /** The caller holds run.lock. The selected signer owns its credential handling. */
 export async function dispatch(config: Config, chain: Chain, tx: ChainTransaction, signer: typeof loadSigner = loadSigner,
-  ledger?: { signal?: AbortSignal; assertReady(): Promise<void> }): Promise<Operation> {
+  ledger?: { signal?: AbortSignal; assertReady(): Promise<void> }, fees?: FeeContext): Promise<Operation> {
   if (!['private-key', 'privy', 'ledger'].includes(config.mode)) throw new Error(`${config.mode} execution is not connected yet; no fallback signer was used`);
   if (config.mode === 'ledger' && !ledger) throw new Error('Ledger needs an explicit rebalance request; no fallback signer was used');
+  let feeInput: Parameters<typeof checkRebalanceFee>[0] | undefined;
+  let lastFeeCheck: FeeCheck | undefined;
+  const verifyFees = async () => {
+    if (config.rebalanceFeeTargetUsdE8 === undefined) return;
+    if (!fees || fees.swaps === null || fees.swaps < 1) {
+      const check: FeeCheck = { state: 'unavailable', targetUsdE8: config.rebalanceFeeTargetUsdE8,
+        estimatedUsdE8: null, gasPriceWei: null, ethUsdE8: null, observedAt: null };
+      await fees?.onCheck(check); throw new FeeTargetError(check);
+    }
+    if (!feeInput) return;
+    const observed = Date.parse(lastFeeCheck?.observedAt ?? '');
+    if (!lastFeeCheck || !Number.isFinite(observed) || Date.now() < observed || Date.now() - observed >= 30_000) {
+      lastFeeCheck = await checkRebalanceFee(feeInput); await fees.onCheck(lastFeeCheck);
+    }
+    if (lastFeeCheck.state !== 'within-target') throw new FeeTargetError(lastFeeCheck);
+  };
   const ready = async () => {
+    await verifyFees();
     if (config.mode === 'ledger') await ledger!.assertReady();
     await requireDispatchReady(tx);
     if (config.mode === 'ledger') ledger!.signal?.throwIfAborted();
@@ -162,6 +200,11 @@ export async function dispatch(config: Config, chain: Chain, tx: ChainTransactio
     // a retry/replacement policy: an uncertain send keeps its original hash.
     const gasPrice = (suggestedGasPrice * 120n + 99n) / 100n;
     if (gasPrice >= 2n ** 256n) throw new Error('Buffered gas price exceeds uint256; no transaction was signed');
+    if (config.rebalanceFeeTargetUsdE8 !== undefined) {
+      if (tx.kind !== 'approval' && tx.kind !== 'swap') throw new Error('Fee targets cover rebalance approvals and swaps only; no transaction was signed');
+      feeInput = { targetUsdE8: config.rebalanceFeeTargetUsdE8, swaps: fees!.swaps!, kind: tx.kind, gas, gasPrice };
+      await ready();
+    }
     const balance = await rpc.getBalance({ address: config.wallet, blockTag: 'pending' });
     if (gasPrice <= 0n || balance < tx.value + gas * gasPrice) throw new Error('Insufficient native ETH for this transaction and estimated gas');
     await ready();
