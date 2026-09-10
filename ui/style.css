@@ -3,7 +3,7 @@
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
   --ground: #0b0f0e; --lift: #111716; --rule: #1e2624; --track: #191f1d;
   --ink: #f2f6f3; --dim: #c3cfc7; --mute: #96a49b; --faint: #6d7a72;
-  --alert: #e8a87c;
+  --alert: #ef7f6d;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
   background: var(--ground); color: var(--ink);
 }
@@ -14,11 +14,13 @@ body { margin: 0; height: 100vh; height: 100dvh; display: flex; overflow: hidden
    never pushes it past the fold; the allocation area yields the space. */
 .app { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .measure { width: 100%; max-width: 54rem; margin: 0 auto; }
-.main { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: minmax(0, 1fr) 18rem; gap: clamp(8px, 4vw, 40px); align-content: center; padding: clamp(16px, 3vh, 40px) clamp(20px, 5vw, 40px); }
+.main { flex: 1 1 auto; min-height: 0; display: grid; place-items: center; padding: clamp(8px, 2vh, 24px) clamp(12px, 3vw, 32px); }
+/* A short window still scrolls, but never shows scrollbar chrome over the art. */
+.main, .panelin { scrollbar-width: none; }
+.main::-webkit-scrollbar, .panelin::-webkit-scrollbar { width: 0; height: 0; }
 @media (max-width: 720px) { .main { grid-template-columns: 1fr; gap: 20px; } }
 
-.ringwrap { display: grid; place-items: center; min-width: 0; }
-svg.ring { width: 100%; max-width: min(24rem, 52dvh); height: auto; display: block; }
+svg.ring { width: 100%; max-width: 40rem; max-height: 100%; height: auto; aspect-ratio: 560 / 480; display: block; }
 .track { stroke: var(--track); }
 .arc { fill: none; stroke-linecap: butt; transition: opacity .18s ease, stroke-dasharray .95s cubic-bezier(.32,.72,.24,1), stroke-dashoffset .95s cubic-bezier(.32,.72,.24,1); }
 .ring.dim .arc { opacity: .28; }
@@ -33,23 +35,15 @@ text { text-anchor: middle; fill: var(--ink); }
 .ctr-sub { font-size: 12px; fill: var(--mute); }
 .ctr-val { font-size: 10.5px; fill: var(--faint); }
 
-.holdings { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 0; }
-.hrow { display: grid; grid-template-columns: 9px 1fr auto; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; background: none; border: 0; width: 100%; text-align: left; font: inherit; color: inherit; cursor: default; transition: background .15s ease; }
-.hrow:hover, .hrow:focus-visible { background: var(--lift); }
-.hrow:focus-visible { outline: 2px solid #8dbafa; outline-offset: -2px; }
-.dot { width: 9px; height: 9px; border-radius: 50%; }
-.hname { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.htick { font-size: 13px; font-weight: 600; letter-spacing: .3px; }
-.bar { position: relative; height: 3px; background: var(--track); border-radius: 2px; }
-.bar i { position: absolute; top: 0; height: 3px; border-radius: 2px; background: var(--mute); transition: width .95s cubic-bezier(.32,.72,.24,1), left .95s cubic-bezier(.32,.72,.24,1), background .5s ease; }
-.bar u { position: absolute; top: -2px; left: 50%; width: 1px; height: 7px; background: var(--faint); transform: translateX(-.5px); }
-.hnums { text-align: right; display: flex; flex-direction: column; gap: 3px; font-variant-numeric: tabular-nums; }
-.hact { font-size: 13px; color: var(--dim); transition: color .5s ease; }
-.hdrift { font-size: 10.5px; color: var(--faint); transition: color .5s ease; }
-.out .hdrift { color: var(--alert); }
-.out .bar i { background: var(--alert); }
+/* A label can sit far from its slice, so it carries the slice colour.
+   The stylesheet fill would beat a presentation attribute; a custom property
+   keeps the out-of-band rule below able to override it. */
+.ticker { font-size: 14px; font-weight: 600; letter-spacing: .4px; fill: var(--tick, var(--ink)); }
+.weight { font-size: 12.5px; fill: var(--mute); font-variant-numeric: tabular-nums; }
+.label-out .ticker { fill: var(--alert); }
+.label-out .weight { fill: var(--alert); }
 
-.discl { border-top: 1px solid var(--rule); flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0; max-height: 72dvh; }
+.discl { border-top: 1px solid var(--rule); flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0; max-height: 62dvh; }
 .summary { display: flex; align-items: center; gap: 12px; width: 100%; padding: 15px clamp(20px, 5vw, 40px); background: none; border: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
 .summary:hover { background: var(--lift); }
 .summary:focus-visible { outline: 2px solid #8dbafa; outline-offset: -2px; }
@@ -65,8 +59,8 @@ text { text-anchor: middle; fill: var(--ink); }
 .panel { display: grid; min-height: 0; grid-template-rows: 0fr; transition: grid-template-rows .28s cubic-bezier(.2,.8,.3,1); background: var(--lift); }
 .panel.open { grid-template-rows: 1fr; }
 .panelin { overflow: hidden auto; min-height: 0; }
-.panelpad { padding: 20px clamp(20px, 5vw, 40px) 26px; display: flex; flex-direction: column; gap: 22px; border-top: 1px solid var(--rule); }
-.panelpad section { display: flex; flex-direction: column; gap: 12px; }
+.panelpad { padding: 18px clamp(20px, 5vw, 40px) 22px; display: flex; flex-direction: column; gap: 18px; border-top: 1px solid var(--rule); }
+.panelpad section { display: flex; flex-direction: column; gap: 10px; }
 .cap { font-size: 9.5px; letter-spacing: .13em; text-transform: uppercase; color: var(--faint); margin: 0; }
 .chain { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
 @media (max-width: 720px) { .chain { grid-template-columns: repeat(2, 1fr); } }
@@ -76,10 +70,10 @@ text { text-anchor: middle; fill: var(--ink); }
 .sval .un { color: var(--faint); }
 .sval .ok { color: #b4cbb8; }
 .foot { font-size: 10.5px; color: var(--faint); line-height: 1.55; margin: 0; }
-.kv { display: flex; flex-direction: column; gap: 8px; }
+.kv { display: flex; flex-direction: column; gap: 6px; }
 .kvline { font-size: 11.5px; color: var(--mute); font-variant-numeric: tabular-nums; }
 
 @media (prefers-reduced-motion: reduce) {
-  .arc, .bar i, .ghost, .chev, .panel { transition: none; }
+  .arc, .ghost, .chev, .panel { transition: none; }
   .arc.active { animation: none; }
 }

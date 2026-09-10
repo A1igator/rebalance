@@ -148,38 +148,37 @@ test('a single full allocation is drawn without an artificial seam', async () =>
   page.hide();
 });
 
-test('every asset gets one holdings row carrying its drift and out-of-band state', async () => {
+test('every asset gets one ring label, and only an out-of-band one is flagged', async () => {
   const page = await browser();
   const weights = [500, 2900, 2200, 2200, 2200];
   page.source.send({ ...current, config: { targets: allocation, driftThresholdBps: 500 },
     portfolio: { ...current.portfolio, positions: current.portfolio.positions.map((p, i) => ({ ...p, weightBps: weights[i] })) } });
-  const list = page.element('holdings').children;
-  assert.equal(list.length, 5, 'one row per asset, no radial labels');
-  const tickers = list.map(row => row.children[1]!.children[0]!.textContent);
-  assert.deepEqual(tickers, ['USDG', 'AAPL', 'NVDA', 'MSFT', 'AMD']);
-  const aapl = list[1]!;
-  assert.equal(aapl.children[2]!.children[0]!.textContent, '29%');
-  assert.equal(aapl.children[2]!.children[1]!.textContent, '+5.25');
-  assert.ok(aapl.classes.has('out'), 'a holding past the drift band is marked out of range');
-  assert.ok(!list[0]!.classes.has('out'), 'a holding inside the band is not');
-  assert.match(aapl.attrs['aria-label']!, /AAPL 29 percent, target 23.75 percent, over by 5.25 points/);
+  const groups = page.element('labels').children;
+  assert.equal(groups.length, 5, 'one label per asset, and no holdings list');
+  assert.deepEqual(groups.map(g => g.children[0]!.textContent), ['USDG', 'AAPL', 'NVDA', 'MSFT', 'AMD']);
+  assert.deepEqual(groups.map(g => g.children[1]!.textContent), ['5%', '29%', '22%', '22%', '22%']);
+  assert.equal(groups.filter(g => g.attrs.class === 'label-out').length, 1, 'only the holding past the band is flagged');
+  assert.equal(groups[1]!.attrs.class, 'label-out');
   page.hide();
 });
 
-test('the centre states whether holdings are on target, and against which band', async () => {
+test('ring labels clear the ring and stay inside the viewBox after collision spacing', async () => {
   const page = await browser();
-  page.source.send({ ...current, config: { targets: allocation, driftThresholdBps: 500 } });
-  assert.equal(page.element('c-state').textContent, 'On target');
-  assert.equal(page.element('c-sub').textContent, '0% off target');
-  assert.equal(page.element('set-band').textContent, 'Rebalance when off by · ±5%');
-  const weights = [500, 2900, 2200, 2200, 2200];
-  page.source.send({ ...current, config: { targets: allocation, driftThresholdBps: 500 },
-    portfolio: { ...current.portfolio, positions: current.portfolio.positions.map((p, i) => ({ ...p, weightBps: weights[i] })) } });
-  assert.equal(page.element('c-state').textContent, 'Off target');
-  assert.equal(page.element('c-sub').textContent, '5.25% off target');
-  page.source.send({ ...current, config: { targets: allocation } });
-  assert.equal(page.element('c-state').textContent, 'Holdings', 'no band means no on-target claim');
-  assert.equal(page.element('set-band').textContent, 'Rebalance when off by · unavailable');
+  for (const weights of [[500, 2375, 2375, 2375, 2375], [100, 9400, 200, 100, 200], [0, 10000, 0, 0, 0]]) {
+    page.source.send({ ...current, portfolio: { ...current.portfolio, positions: current.portfolio.positions.map((p, i) => ({ ...p, weightBps: weights[i] })) } });
+    for (const group of page.element('labels').children) {
+      const [ticker, weight] = group.children;
+      const x = Number(ticker!.attrs.x), y = Number(ticker!.attrs.y);
+      // The whole two-line block, not just its first line, must clear the ring.
+      const top = y - 12, bottom = y + 42;
+      const horizontal = Math.max(0, Math.abs(x - 210) - 40);
+      const vertical = top > 210 ? top - 210 : bottom < 210 ? 210 - bottom : 0;
+      assert.ok(Math.hypot(horizontal, vertical) >= 185.99, `${ticker!.textContent} text must clear the 172px outer ring`);
+      assert.equal(Number(weight!.attrs.x), x, 'both lines share one anchor');
+      assert.ok(x - 40 >= -60 && x + 40 <= 500, 'text stays inside the horizontal viewBox');
+      assert.ok(top >= -20 && bottom <= 460, 'text stays inside the vertical viewBox');
+    }
+  }
   page.hide();
 });
 
@@ -564,5 +563,34 @@ test('risk display adds no requests or timers and gas refresh preserves its capt
   await page.advance(60_000);
   assert.equal(page.element('risk-model').textContent, caption, 'saved user assumptions do not expire with ninety-second gas quotes');
   assert.ok(page.element('chart-description').textContent.includes(details));
+  page.hide();
+});
+
+test('a target the wallet does not hold still counts as drift', async () => {
+  const page = await browser();
+  // USDG has a 6% target and no balance; every held stock is only +1.5pp, so a
+  // drift read over holdings alone would claim "On target" while the engine
+  // sees USDG 600bps short and opens a cycle.
+  const targets = { USDG: 600, AAPL: 2350, NVDA: 2350, MSFT: 2350, AMD: 2350 };
+  const positions = current.portfolio.positions.map(p =>
+    ({ ...p, weightBps: p.id === 'USDG' ? 0 : 2500, balance: p.id === 'USDG' ? '0' : '1' }));
+  page.source.send({ ...current, config: { targets, driftThresholdBps: 500 },
+    portfolio: { ...current.portfolio, positions } });
+  assert.equal(page.element('c-state').textContent, 'Off target');
+  assert.equal(page.element('c-sub').textContent, 'USDG −6%');
+  page.hide();
+});
+
+test('the off-target boundary matches the engine, which trades above the band', async () => {
+  const page = await browser();
+  // One asset off by exactly `drift`, the three others absorbing it evenly, so
+  // the weights still total 10000 and AAPL is the only meaningful deviation.
+  const at = (drift: number) => ({ ...current, config: { targets: allocation, driftThresholdBps: 300 },
+    portfolio: { ...current.portfolio, positions: current.portfolio.positions.map(p =>
+      ({ ...p, weightBps: p.id === 'AAPL' ? 2375 + drift : p.id === 'USDG' ? 500 : 2375 - drift / 3 })) } });
+  page.source.send(at(300));
+  assert.equal(page.element('c-state').textContent, 'On target', 'exactly at the band does not trade, so it is not off target');
+  page.source.send(at(303));
+  assert.equal(page.element('c-state').textContent, 'Off target');
   page.hide();
 });

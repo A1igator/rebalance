@@ -153,6 +153,11 @@
     return element;
   }
 
+  const CENTRE = 210, LABEL_RADIUS = 200, ROW_GAP = 42, HALF_WIDTH = 40, CLEARANCE = 186;
+  // A label is always pushed at least this far off the vertical axis, so a pair
+  // that straddles 12 or 6 o'clock lands in different columns instead of on top
+  // of each other: per-side spacing alone never compares them.
+  const MIN_OFFSET = HALF_WIDTH + 46, TOP_Y = 14, BOTTOM_Y = 414;
   const arcStore = new Map(), tgtStore = new Map();
   function drawRing(entries, container, radius, width, cls, store) {
     const parent = byId(container);
@@ -163,7 +168,7 @@
       const share = total > 0 ? entry.weight / total * 100 : 0;
       let node = store.get(entry.id);
       if (!node) {
-        node = svgElement("circle", { cx: 190, cy: 190, r: radius, fill: "none", "stroke-width": width, pathLength: 100, class: cls });
+        node = svgElement("circle", { cx: CENTRE, cy: CENTRE, r: radius, fill: "none", "stroke-width": width, pathLength: 100, class: cls });
         store.set(entry.id, node);
       }
       if (node.parentNode !== parent) parent.append(node);
@@ -246,60 +251,51 @@
     return `${seconds}s`;
   }
 
-  const holdingRows = new Map();
-  function element(tag, className, parent) {
-    const node = document.createElement(tag);
-    if (className) node.setAttribute("class", className);
-    if (parent) parent.append(node);
-    return node;
-  }
-  function buildRow(id) {
-    const el = element("button", "hrow");
-    el.setAttribute("type", "button");
-    const dot = element("span", "dot", el);
-    const name = element("span", "hname", el);
-    const tick = element("span", "htick", name);
-    const bar = element("span", "bar", name);
-    const fill = element("i", "", bar);
-    element("u", "", bar);
-    const nums = element("span", "hnums", el);
-    const act = element("span", "hact", nums);
-    const drift = element("span", "hdrift", nums);
-    const highlight = (on) => {
-      byId("ring").classList.toggle("dim", on);
-      const arc = arcStore.get(id);
-      if (arc) arc.classList.toggle("on", on);
-    };
-    for (const [event, on] of [["mouseenter", true], ["mouseleave", false], ["focus", true], ["blur", false]]) {
-      el.addEventListener(event, () => highlight(on));
-    }
-    return { el, dot, tick, bar: fill, act, drift };
-  }
-  function drawHoldings(entries, targetMap, bandBps, funded) {
-    const host = byId("holdings");
-    const seen = new Set();
+  /** Ticker and weight only. Targets live on the inner ring; the drift that
+      matters is named in the centre, so a label never carries three lines. */
+  function drawLabels(entries, targetMap, bandBps, funded) {
+    const labels = byId("labels");
+    labels.replaceChildren();
+    const total = entries.reduce((sum, entry) => sum + entry.weight, 0);
+    if (total <= 0) return;
+    let offset = 0;
+    const placed = [];
     for (const entry of entries) {
-      let row = holdingRows.get(entry.id);
-      if (!row) { row = buildRow(entry.id); holdingRows.set(entry.id, row); }
-      if (row.el.parentNode !== host) host.append(row.el);
+      const share = entry.weight / total * 100;
+      const angle = ((offset + share / 2) / 100 * 360 - 90) * Math.PI / 180;
+      placed.push({ ...entry, x: CENTRE + Math.cos(angle) * LABEL_RADIUS, y: CENTRE + Math.sin(angle) * LABEL_RADIUS });
+      offset += share;
+    }
+    // Separate labels on each side when small holdings cluster together.
+    for (const side of [placed.filter((p) => p.x < CENTRE), placed.filter((p) => p.x >= CENTRE)]) {
+      if (!side.length) continue;
+      side.sort((a, b) => a.y - b.y);
+      for (let i = 1; i < side.length; i++) side[i].y = Math.max(side[i].y, side[i - 1].y + ROW_GAP);
+      // If the spread stack leaves the canvas, lay it out rigidly around its own
+      // centroid. Clamping one end instead would reopen a gap the pass just
+      // closed, and shifting both ends in turn just oscillates.
+      if (side[0].y < TOP_Y || side[side.length - 1].y > BOTTOM_Y) {
+        const span = (side.length - 1) * ROW_GAP;
+        const middle = side.reduce((sum, label) => sum + label.y, 0) / side.length;
+        const start = Math.min(Math.max(middle - span / 2, TOP_Y), Math.max(TOP_Y, BOTTOM_Y - span));
+        side.forEach((label, index) => { label.y = start + index * ROW_GAP; });
+      }
+    }
+    for (const entry of placed) {
+      // Push the whole two-line block clear of the ring, including after spacing.
+      const top = entry.y - 12, bottom = entry.y + 42;
+      const vertical = top > CENTRE ? top - CENTRE : bottom < CENTRE ? CENTRE - bottom : 0;
+      const clear = vertical < CLEARANCE ? Math.sqrt(CLEARANCE ** 2 - vertical ** 2) + HALF_WIDTH : 0;
+      const distance = Math.max(clear, MIN_OFFSET);
+      let x = entry.x < CENTRE ? Math.min(entry.x, CENTRE - distance) : Math.max(entry.x, CENTRE + distance);
+      x = Math.min(440, Math.max(-20, x));
       const target = Object.hasOwn(targetMap, entry.id) ? targetMap[entry.id] : null;
       const drift = funded && target !== null ? entry.weight - target : null;
-      row.dot.style.background = color(entry.id);
-      row.tick.textContent = entry.id;
-      row.act.textContent = `${percent.format(entry.weight / 100)}%`;
-      // Bars are comparable across assets: a full half-track is eight percentage points.
-      const magnitude = drift === null ? 0 : Math.min(Math.abs(drift) / 800, 1) * 50;
-      row.bar.style.width = `${magnitude}%`;
-      row.bar.style.left = `${drift !== null && drift < 0 ? 50 - magnitude : 50}%`;
-      row.el.classList.toggle("out", drift !== null && Math.abs(drift) >= bandBps);
-      row.drift.textContent = drift === null ? (funded ? "no target" : `target ${percent.format(entry.weight / 100)}%`)
-        : `${drift >= 0 ? "+" : "\u2212"}${percent.format(Math.abs(drift) / 100)}`;
-      row.el.setAttribute("aria-label", `${entry.id} ${percent.format(entry.weight / 100)} percent` +
-        (target === null ? "" : `, target ${percent.format(target / 100)} percent`) +
-        (drift === null ? "" : `, ${drift >= 0 ? "over" : "under"} by ${percent.format(Math.abs(drift) / 100)} points`));
-      seen.add(entry.id);
+      const group = svgElement("g", drift !== null && Math.abs(drift) > bandBps ? { class: "label-out" } : {});
+      group.append(svgElement("text", { x, y: entry.y, class: "ticker", style: `--tick:${color(entry.id)}` }, entry.id));
+      group.append(svgElement("text", { x, y: entry.y + 18, class: "weight" }, `${percent.format(entry.weight / 100)}%`));
+      labels.append(group);
     }
-    for (const [id, row] of holdingRows) if (!seen.has(id)) { row.el.remove(); holdingRows.delete(id); }
   }
 
   function render(snapshot, disconnected = false) {
@@ -314,19 +310,27 @@
     const entries = funded ? holdings : targets;
     const bandRaw = snapshot?.config?.driftThresholdBps;
     const band = Number.isInteger(bandRaw) && bandRaw >= 0 && bandRaw <= 10000 ? bandRaw : null;
-    let worst = 0;
-    if (funded) for (const entry of holdings) {
-      const target = Object.hasOwn(targetMap, entry.id) ? targetMap[entry.id] : null;
-      if (target !== null && Math.abs(entry.weight - target) > Math.abs(worst)) worst = entry.weight - target;
+    // Drift is measured over every target, not only the assets currently held:
+    // a target with no balance is dropped from `holdings` but still opens a
+    // cycle in the engine, so ignoring it would claim "On target" while the
+    // runner trades.
+    let worst = 0, worstId = null;
+    if (funded) for (const [id, target] of Object.entries(targetMap)) {
+      const held = holdings.find((row) => row.id === id);
+      const drift = (held ? held.weight : 0) - target;
+      if (Math.abs(drift) > Math.abs(worst)) { worst = drift; worstId = id; }
     }
 
     let state = "No allocation", sub = "Set targets through your agent", value = "";
     if (failed) { state = funded ? "Last known" : "Unavailable"; sub = "Update unavailable"; }
     else if (receiptWait) { state = "Rebalancing"; sub = receiptWait; }
     else if (funded) {
-      const off = `${percent.format(Math.abs(worst) / 100)}% off target`;
-      state = band === null ? "Holdings" : Math.abs(worst) >= band ? "Off target" : "On target";
-      sub = band === null ? "Drift band unavailable" : off;
+      const off = band !== null && Math.abs(worst) > band;
+      state = band === null ? "Holdings" : off ? "Off target" : "On target";
+      // Name the holding that is actually driving it, rather than five numbers.
+      sub = band === null ? "Drift band unavailable"
+        : off && worstId ? `${worstId} ${worst >= 0 ? "+" : "\u2212"}${percent.format(Math.abs(worst) / 100)}%`
+        : `${percent.format(Math.abs(worst) / 100)}% off target`;
     } else if (targets.length) {
       state = "Targets";
       sub = portfolio ? positions.some((p) => positive(p.balance)) ? "Holdings below precision" : "Wallet empty" : "Holdings not checked";
@@ -345,7 +349,7 @@
 
     drawRing(entries, "arcs", 150, 44, "arc", arcStore);
     drawRing(funded ? targets : [], "targets", 112, 5, "tgt", tgtStore);
-    drawHoldings(entries, targetMap, band === null ? 10001 : band, funded);
+    drawLabels(entries, targetMap, band === null ? Infinity : band, funded);
 
     // Motion reports settlement: an unconfirmed swap gets a ghost, never a moved arc.
     const moving = receiptWait ? snapshot?.proposal?.sellAssetId : null;
@@ -375,7 +379,7 @@
       pulse = "idle";
       const next = snapshot?.cycle?.nextEligibleAt ? new Date(snapshot.cycle.nextEligibleAt) : null;
       const at = next && Number.isFinite(next.getTime()) ? ` · next check ${time.format(next)}` : "";
-      summary = funded && band !== null && Math.abs(worst) < band ? `Monitoring · within range${at}` : `Monitoring${at}`;
+      summary = funded && band !== null && Math.abs(worst) <= band ? `Monitoring · within range${at}` : `Monitoring${at}`;
     }
     byId("stext").textContent = summary;
     byId("pulse").className = `pulse${pulse ? ` ${pulse}` : ""}`;

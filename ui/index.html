@@ -10,24 +10,24 @@
   </head>
   <body>
     <main class="app">
-      <div class="main measure">
-        <div class="ringwrap">
-          <svg class="ring" id="ring" viewBox="0 0 380 392" role="img" aria-labelledby="chart-title chart-description">
+      <div class="main">
+        <svg class="ring" id="ring" viewBox="-60 -20 560 480" role="img" aria-labelledby="chart-title chart-description">
+          <defs>
             <title id="chart-title">Allocation unavailable</title>
             <desc id="chart-description">Connecting to the local app.</desc>
-            <g transform="rotate(-90 190 190)">
-              <circle class="track" cx="190" cy="190" r="150" fill="none" stroke-width="44"/>
-              <g id="arcs"></g>
-              <g id="targets"></g>
-              <circle class="ghost" id="ghost" cx="190" cy="190" r="150" fill="none" stroke-width="44" pathLength="100"/>
-            </g>
-            <text class="ctr-state" id="c-state" x="190" y="184">Connecting</text>
-            <text class="ctr-sub" id="c-sub" x="190" y="206">Local allocation</text>
-            <text class="ctr-val" id="c-val" x="190" y="228"></text>
-            <text class="ctr-val" id="c-legend" x="190" y="378"></text>
-          </svg>
-        </div>
-        <div class="holdings" id="holdings"></div>
+          </defs>
+          <g transform="rotate(-90 210 210)">
+            <circle class="track" cx="210" cy="210" r="150" fill="none" stroke-width="44"/>
+            <g id="arcs"></g>
+            <g id="targets"></g>
+            <circle class="ghost" id="ghost" cx="210" cy="210" r="150" fill="none" stroke-width="44" pathLength="100"/>
+          </g>
+          <g id="labels"></g>
+          <text class="ctr-state" id="c-state" x="210" y="202">Connecting</text>
+          <text class="ctr-sub" id="c-sub" x="210" y="226">Local allocation</text>
+          <text class="ctr-val" id="c-val" x="210" y="249"></text>
+          <text class="ctr-val" id="c-legend" x="210" y="444"></text>
+        </svg>
       </div>
 
       <div class="discl">
