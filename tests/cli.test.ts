@@ -1,3 +1,4 @@
+import { assertTemporaryTestDirectory } from '../src/test-isolation.js';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -21,6 +22,7 @@ const config = { version: 1, chainId: 4663, wallet: '0x0000000000000000000000000
 
 async function fixture(t: TestContext) {
   const directory = await mkdtemp(join(tmpdir(), 'rebalance-cli-test-'));
+  assertTemporaryTestDirectory(directory);
   t.after(async () => {
     // A failed startup/readiness assertion must not leave its detached fixture
     // worker alive while its directory is removed.
@@ -54,7 +56,7 @@ async function fixture(t: TestContext) {
       while (!existsSync(join(directory, 'release-child'))) await delay(10);
     }
   `);
-  const env: NodeJS.ProcessEnv = { ...process.env, REBALANCE_DATA_DIR: directory,
+  const env: NodeJS.ProcessEnv = { ...process.env, REBALANCE_ROOT_DIR: directory, REBALANCE_DATA_DIR: directory,
     NODE_OPTIONS: `--import=${preload}` };
   delete env.REBALANCE_PRIVATE_KEY;
   async function command(args: string[], extra: NodeJS.ProcessEnv = {}) {
@@ -293,7 +295,9 @@ test('notification binding needs only the existing conversation and does not sta
 });
 
 
-test('notification test requires an enabled worker and publishes only a retained fixed connection-test event', { timeout: 15_000 }, async t => {
+// Several bounded CLI processes run serially here; whole-suite CPU contention
+// must not turn this functional eligibility check into a startup benchmark.
+test('notification test requires an enabled worker and publishes only a retained fixed connection-test event', { timeout: 45_000 }, async t => {
   const { directory, command } = await fixture(t);
   const records = ['config.json', 'stop.json', 'pending.json', 'cycle.json', 'recovery.json'];
   for (const file of records.slice(1)) await atomicWriteJson(join(directory, file), { fixture: file });

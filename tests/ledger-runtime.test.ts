@@ -14,6 +14,7 @@ import { mock } from 'node:test';
 import { keccak256, TransactionReceiptNotFoundError } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 const [base, scenario] = process.argv.slice(1);
 const path = name => new URL(name + '.ts', base).href;
 globalThis.fetch = () => { throw new Error('Network forbidden in Ledger runtime fixture'); };
@@ -28,7 +29,8 @@ mock.module(path('signers'), { namedExports: { loadSigner: async config => {
   return { address: account.address, signTransaction: async tx => {
     signatures++;
     assert.equal((await request.readLedgerRequest()).state, 'consumed');
-    assert.ok(await storage.readJson(configModule.DATA + '/config.lock'));
+    assert.equal(await storage.readJson(configModule.DATA + '/config.lock'), null,
+      'settings edits must remain available while the Ledger prompt is active');
     assert.equal(tx.chainId, 4663);
     if (scenario === 'rejected') throw new LedgerSigningError('rejected');
     if (scenario === 'stopped-during-sign') await storage.atomicWriteJson(runtime.STOP_PATH, { requestedAt: 'fixture-stop' });
@@ -54,6 +56,9 @@ const chain = {
   getChainId:async()=>4663, getTransactionCount:async()=>sends,
   estimateGas:async()=>21000n, getGasPrice:async()=>1n, getBalance:async()=>10n**18n,
   sendRawTransaction:async({serializedTransaction})=>{
+   // Inspect synchronously: the short send boundary ends before its response.
+   const lock=JSON.parse(readFileSync(configModule.DATA+'/config.lock','utf8'));
+   assert.equal(lock.pid,process.pid,'the selected runner owns the settings boundary when invoking send');
    sends++;
    if(scenario==='unknown-send') throw new Error('offline ambiguous response');
    const hash=keccak256(serializedTransaction), pending=await storage.readJson(configModule.PENDING_PATH);
@@ -131,6 +136,8 @@ try {
    if(scenario==='rejected') assert.equal((await events()).filter(e=>e.type==='ledger-rebalance-needed').length,0);
   }
  }
+ if(['rejected','stopped-during-sign','expired-during-sign'].includes(scenario)) assert.equal(signatures,1,
+   'the scenario must reach signing before its guard or device outcome prevents sending');
  if(!['sequence','unknown-send'].includes(scenario)) { assert.equal(sends,0); assert.equal(await storage.readJson(configModule.PENDING_PATH),null); }
  if(['no-intent','read-only-intent','restart','config-changed','quote-failed','ledger-alert-dedupe'].includes(scenario)) assert.equal(signatures,0);
  console.log(JSON.stringify({scenario,signatures,sends}));

@@ -1,3 +1,4 @@
+import { assertTemporaryTestDirectory } from '../src/test-isolation.js';
 import type { Status } from '../src/runtime.js';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
@@ -13,9 +14,12 @@ import { atomicWriteJson, readJson, type PendingTransaction } from '../src/stora
 
 // This suite has its own process/data directory. It never provisions a signer.
 const directory = await mkdtemp(join(tmpdir(), 'rebalance-runtime-test-'));
+assertTemporaryTestDirectory(directory);
 process.env.REBALANCE_DATA_DIR = directory;
 delete process.env.REBALANCE_PRIVATE_KEY;
-const { CONFIG_PATH, STATE_PATH, PENDING_PATH, LAST_TRANSACTION_PATH, validateConfig } = await import('../src/config.js');
+const { DATA, CONFIG_PATH, STATE_PATH, PENDING_PATH, LAST_TRANSACTION_PATH, validateConfig } = await import('../src/config.js');
+assert.equal(DATA, directory, 'captured DATA must belong to this disposable fixture');
+for (const path of [CONFIG_PATH, STATE_PATH, PENDING_PATH, LAST_TRANSACTION_PATH]) assert.equal(path.startsWith(`${directory}/`), true, 'captured file path must belong to this fixture');
 const { initialStatus, monitor, status, tick, STOP_PATH, CYCLE_PATH,
   rebalanceInterval, beginRebalanceCycle, finishRebalanceCycle, ACTIVE_CYCLE_SECONDS } = await import('../src/runtime.js');
 const { events, acknowledgeEvent } = await import('../src/events.js');

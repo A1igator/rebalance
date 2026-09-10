@@ -35,7 +35,7 @@ The existing legacy wallet stays directly in `.local/` on chart port 4663. Regis
 
 Commands and subprocesses receive the wallet directory, chart port and expected wallet identity explicitly. Background workers ignore later changes to chat attachment. Ordinary `configure --wallet` cannot retarget an existing portfolio; use add/connect. Signing-mode changes require the selected runner to be stopped. Invalid or missing configuration for one wallet is reported for that wallet and does not block stopping or inspecting another portfolio.
 
-Each wallet has its own chart URL. Two charts can stay open simultaneously without a global selected-wallet variable. The chart supports the existing Start/Stop and public address-copy controls. Ledger Start enables monitoring; signing requests remain in the agent conversation.
+Each wallet has its own chart URL. Two charts can stay open simultaneously without a global selected-wallet variable. The chart supports the existing Start/Stop and public wallet-explorer links. Ledger Start enables monitoring; signing requests remain in the agent conversation.
 
 ## Hooks and notifications
 

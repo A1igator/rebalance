@@ -89,6 +89,10 @@ export async function driveMonitor({ dataDir, signal, read, run, source = create
             chainAt = finished + MARKET_MIN_MS;
           }
         }
+        // The completed run may have waited through an edit whose filesystem
+        // event was lost. We already observed that newer config; schedule its
+        // serial traversal now instead of waiting for the control watchdog.
+        if (configKey !== fingerprint(current.config)) graphAt = finished;
       }
       controlAt = Date.now() + CONTROL_WATCHDOG_MS;
       if (signal.aborted) break;

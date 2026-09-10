@@ -1,3 +1,4 @@
+import { assertTestStorageEnvironment } from './test-isolation.js';
 import { constants } from 'node:fs';
 import { chmod, open } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -6,6 +7,8 @@ import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { acquireLock, atomicWriteJson, readJson } from './storage.js';
 import { ASSETS } from './assets.js';
 import { validateManagedAllocation, type ManagedAllocation } from './allocation-management.js';
+
+assertTestStorageEnvironment();
 
 export const DATA = resolve(process.env.REBALANCE_DATA_DIR || '.local');
 export const CONFIG_PATH = resolve(DATA, 'config.json');

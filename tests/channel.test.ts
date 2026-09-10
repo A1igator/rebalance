@@ -1,3 +1,4 @@
+import { assertTemporaryTestDirectory } from '../src/test-isolation.js';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -14,8 +15,10 @@ import { connectionPath } from '../scripts/profile-routing.mjs';
 
 const directory = await mkdtemp(join(tmpdir(), 'rebalance-channel-test-'));
 const previousDirectory = process.env.REBALANCE_DATA_DIR;
+assertTemporaryTestDirectory(directory);
 process.env.REBALANCE_DATA_DIR = directory;
 const { events, publishEvent } = await import('../src/events.js');
+assert.equal((await import('../src/config.js')).DATA, directory, 'captured DATA must belong to this disposable fixture');
 const sessions: Client[] = [];
 
 after(async () => {
@@ -134,7 +137,7 @@ test('a stalled stdio write ends the channel after its deadline and preserves un
     { id: 'unsent-second', type: 'rebalance-completed', createdAt: '2026-09-06T00:00:01.000Z', message: 'Still queued.' }];
   await writeFile(join(data, 'events.json'), JSON.stringify(queue));
   const child = spawn(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('../src/channel.ts', import.meta.url))], {
-    cwd: fileURLToPath(new URL('..', import.meta.url)), env: { ...process.env, REBALANCE_DATA_DIR: data }, stdio: ['pipe', 'pipe', 'pipe'],
+    cwd: fileURLToPath(new URL('..', import.meta.url)), env: { ...process.env, REBALANCE_ROOT_DIR: data, REBALANCE_DATA_DIR: data }, stdio: ['pipe', 'pipe', 'pipe'],
   });
   t.after(async () => { child.kill('SIGKILL'); await rm(root, { recursive: true, force: true }); });
   let stderr = '';

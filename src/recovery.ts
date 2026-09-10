@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { keccak256, TransactionNotFoundError, TransactionReceiptNotFoundError, type Hex } from 'viem';
 import { createChain } from './chain.js';
@@ -9,7 +9,8 @@ import { launch, type LaunchResult } from './launch.js';
 import { status, tick, type Status } from './runtime.js';
 import { noteSuccessfulSwap } from './cadence.js';
 import { acquireLock, atomicWriteJson, readJson, type PendingTransaction } from './storage.js';
-import { validatePending, type Operation } from './transactions.js';
+import { ConfigChangedError, validatePending, type Operation } from './transactions.js';
+import { acquireConfigLock, ConfigLockBusyError } from './config-lock.js';
 import { loadSigner, type TransactionSigner } from './signers.js';
 
 export type RecoveryOptions = { cancel?: boolean; requestId?: string; expectedStop?: string };
@@ -125,20 +126,30 @@ async function cancelOnce(config: Config, rpc: Rpc, original: PendingTransaction
   if (signer.address.toLowerCase() !== config.wallet.toLowerCase()) throw new RecoveryError('Signer differs from the selected wallet.');
   await guard();
   const serialized = await signer.signTransaction({ chainId: 4663, type: 'legacy', nonce: original.nonce, to: config.wallet, value: 0n, data: '0x', gas, gasPrice: fee });
+  await guard();
   const assessed = await core.assess();
   if (assessed.outcome !== 'cancellation-needed') return assessed;
   await guard();
   const hash = keccak256(serialized);
-  record.cancellation = { hash, gas: gas.toString(), gasPrice: fee.toString(), status: 'prepared' };
-  await atomicWriteJson(path('recovery.json'), record);
-  try { await guard(); }
-  catch (error) { record.cancellation.status = 'not-sent'; await atomicWriteJson(path('recovery.json'), record); throw error; }
-  onDispatch();
+  const release = await acquireConfigLock(dirname(path('recovery.json')));
+  let sending: Promise<{ hash: Hex } | { error: unknown }>;
   try {
-    const received = await rpc.sendRawTransaction({ serializedTransaction: serialized });
-    if (received.toLowerCase() !== hash.toLowerCase()) throw new Error('Unexpected cancellation hash');
-    record.cancellation.status = 'broadcast';
-  } catch { record.cancellation.status = 'unknown'; }
+    await guard();
+    record.cancellation = { hash, gas: gas.toString(), gasPrice: fee.toString(), status: 'prepared' };
+    await atomicWriteJson(path('recovery.json'), record);
+    try { await guard(); }
+    catch (error) { record.cancellation.status = 'not-sent'; await atomicWriteJson(path('recovery.json'), record); throw error; }
+    onDispatch();
+    // Invocation is serialized with settings edits; waiting for its response
+    // is not. A synchronous throw is also an uncertain send, never a retry.
+    try {
+      sending = Promise.resolve(rpc.sendRawTransaction({ serializedTransaction: serialized }))
+        .then(hash => ({ hash }), error => ({ error }));
+    } catch (error) { sending = Promise.resolve({ error }); }
+  } finally { await release(); }
+  const outcome = await sending;
+  record.cancellation.status = !('error' in outcome) && outcome.hash.toLowerCase() === hash.toLowerCase()
+    ? 'broadcast' : 'unknown';
   await atomicWriteJson(path('recovery.json'), record);
   return core.assess();
 }
@@ -178,7 +189,6 @@ export async function recover(options: RecoveryOptions = {}, overrides: Partial<
   const attempts = Math.max(1, Math.min(120, deps.attempts));
   let releaseRecovery: (() => Promise<void>) | undefined;
   let releaseRun: (() => Promise<void>) | undefined;
-  let releaseConfig: (() => Promise<void>) | undefined;
   let record: RecoveryRecord | null = null;
   let dispatched = false;
   let resumeAttempted = false;
@@ -270,13 +280,17 @@ export async function recover(options: RecoveryOptions = {}, overrides: Partial<
     }
     if (!releaseRun) throw new RecoveryError('Waiting for the existing runner to stop; no cancellation was sent. Submit a new recovery request after it stops.');
     result.armed = false;
-    releaseConfig = await acquireLock(deps.dataDir, 'config.lock');
-    if (JSON.stringify(await deps.config()) !== JSON.stringify(config)) throw new RecoveryError('Configuration changed during recovery; preserve records and inspect the selected account.');
+    if (JSON.stringify(await deps.config()) !== JSON.stringify(config)) throw new ConfigChangedError();
     pending = await readJson<PendingTransaction>(path('pending.json'));
     if (pending) { validatePending(pending, config); if (transactionIdentity(pending) !== transactionIdentity(original)) throw new RecoveryError('Pending identity changed during recovery.'); }
     // The runner may have reconciled the original while cooperatively stopping.
     assessed = await assessment();
-    const ensureStop = async () => { if (await currentStop() !== ownedStop) throw new RecoveryError('A newer stop arrived; no further recovery send or resume is authorized.'); };
+    const ensureStop = async () => {
+      if (await currentStop() !== ownedStop) throw new RecoveryError('A newer stop arrived; no further recovery send or resume is authorized.');
+      if (JSON.stringify(await deps.config()) !== JSON.stringify(config)) throw new ConfigChangedError();
+      const current = await readJson<PendingTransaction>(path('pending.json'));
+      if (!current || transactionIdentity(current) !== transactionIdentity(original)) throw new RecoveryError('Pending identity changed during recovery.');
+    };
     if (assessed.outcome === 'cancellation-needed') {
       if (!pending) throw new RecoveryError('The pending barrier disappeared without a validated original receipt.');
       if (!['unknown', 'prepared'].includes(original.status)) throw new RecoveryError('Explicit cancellation is limited to an uncertain original send.');
@@ -301,8 +315,7 @@ export async function recover(options: RecoveryOptions = {}, overrides: Partial<
       const refreshed = await deps.refresh();
       if (refreshed.error) result.messages.push('Recovery is confirmed, but the fresh holdings check failed; retained holdings remain stale.');
     } catch { result.messages.push('Recovery is confirmed, but public holdings could not be refreshed; retained observations remain stale.'); }
-    // Release execution/config locks before the ordinary conditional launcher.
-    await releaseConfig(); releaseConfig = undefined;
+    // Release execution ownership before the ordinary conditional launcher.
     await releaseRun(); releaseRun = undefined;
     if (record.originallyArmed && !record.resumeAttemptedAt && await currentStop() === ownedStop) {
       record.resumeAttemptedAt = new Date().toISOString();
@@ -318,11 +331,11 @@ export async function recover(options: RecoveryOptions = {}, overrides: Partial<
     if (record?.cancellation) result.cancellationHash = record.cancellation.hash;
     result.outcome = resumeAttempted && record?.resolution ? record.resolution : dispatched ? 'unknown' : 'blocked';
     result.messages.push(resumeAttempted ? 'Recovery is confirmed, but runner resumption could not be verified. No start will be repeated automatically.'
-      : error instanceof RecoveryError ? error.message : 'Recovery could not complete; preserve both transaction identities and inspect public status.');
+      : error instanceof RecoveryError || error instanceof ConfigChangedError || error instanceof ConfigLockBusyError ? error.message : 'Recovery could not complete; preserve both transaction identities and inspect public status.');
     try { const armed = await deps.armed(); result.armed = resumeAttempted && !armed ? null : armed; } catch { result.armed = null; }
     return result;
   } finally {
-    await releaseConfig?.(); await releaseRun?.(); await releaseRecovery?.();
+    await releaseRun?.(); await releaseRecovery?.();
   }
 }
 
@@ -342,7 +355,6 @@ export async function automaticRecovery(config: Config, chain: Pick<ReturnType<t
     now: Date.now, noteSuccessfulSwap, ...overrides };
   const path = (name: string) => resolve(deps.dataDir, name);
   let releaseRecovery: (() => Promise<void>) | undefined;
-  let releaseConfig: (() => Promise<void>) | undefined;
   let original: PendingTransaction | null = null;
   let record: RecoveryRecord | null = null;
   let runToken: string | undefined;
@@ -378,12 +390,11 @@ export async function automaticRecovery(config: Config, chain: Pick<ReturnType<t
     original = pending ?? record!.original;
     const rpc = chain.publicClient;
     if (await rpc.getChainId() !== 4663) throw new RecoveryError('Recovery RPC is not Robinhood mainnet.');
-    releaseConfig = await acquireLock(deps.dataDir, 'config.lock');
-    if (JSON.stringify(await deps.config()) !== JSON.stringify(config)) throw new RecoveryError('Configuration changed during automatic recovery; preserve the original records.');
+    if (JSON.stringify(await deps.config()) !== JSON.stringify(config)) throw new ConfigChangedError();
     const guard = async () => {
       await requireRunLock();
       if (await readJson(path('stop.json'))) throw new RecoveryError('Stop requested; no automatic cancellation will be sent.');
-      if (JSON.stringify(await deps.config()) !== JSON.stringify(config)) throw new RecoveryError('Configuration changed during automatic recovery; no cancellation was sent.');
+      if (JSON.stringify(await deps.config()) !== JSON.stringify(config)) throw new ConfigChangedError();
       const current = await readJson<PendingTransaction>(path('pending.json'));
       if (!current || transactionIdentity(current) !== transactionIdentity(original!)) throw new RecoveryError('Pending identity changed during automatic recovery.');
     };
@@ -419,8 +430,9 @@ export async function automaticRecovery(config: Config, chain: Pick<ReturnType<t
     await resolveRecovery(config, record, assessed, path, deps.noteSuccessfulSwap);
     return { blocked: false, operation: assessed.operation };
   } catch (error) {
+    if (error instanceof ConfigChangedError || error instanceof ConfigLockBusyError) return blocked('configuration-changed', error.message);
     return blocked('unresolved', error instanceof RecoveryError ? error.message : 'Automatic recovery could not complete. Both transaction identities remain retained; inspect public status.');
   } finally {
-    await releaseConfig?.(); await releaseRecovery?.();
+    await releaseRecovery?.();
   }
 }

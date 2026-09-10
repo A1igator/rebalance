@@ -1,4 +1,5 @@
 import { checkRebalanceFee, FeeTargetError, type FeeCheck } from './fee-target.js';
+import { acquireConfigLock } from './config-lock.js';
 import { rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { keccak256, TransactionReceiptNotFoundError, type Hex } from 'viem';
@@ -6,10 +7,16 @@ import { createChain, type ChainTransaction } from './chain.js';
 import { noteSuccessfulSwap } from './cadence.js';
 import { DATA, LAST_TRANSACTION_PATH, PENDING_PATH, loadConfig, type Config } from './config.js';
 import { loadSigner } from './signers.js';
-import { acquireLock, atomicWriteJson, readJson, type DispatchFailure, type PendingTransaction } from './storage.js';
+import { atomicWriteJson, readJson, type DispatchFailure, type PendingTransaction } from './storage.js';
 
 export type Operation = { status: string; hash?: string; message?: string; kind?: string; blockNumber?: string; wallet?: string; chainId?: 4663; sendFailure?: DispatchFailure };
 export type Chain = ReturnType<typeof createChain>;
+
+/** Expected local control change, never a failed financial operation. */
+export class ConfigChangedError extends Error {
+  constructor() { super('Configuration changed; rebuild from the latest settings.'); this.name = 'ConfigChangedError'; }
+}
+class FeeQuoteExpiredError extends Error {}
 
 const SEND_FAILURE_MESSAGES: Record<DispatchFailure, string> = {
   underpriced: 'RPC reported a fee that was too low.',
@@ -157,7 +164,15 @@ export async function dispatch(config: Config, chain: Chain, tx: ChainTransactio
   if (config.mode === 'ledger' && !ledger) throw new Error('Ledger needs an explicit rebalance request; no fallback signer was used');
   let feeInput: Parameters<typeof checkRebalanceFee>[0] | undefined;
   let lastFeeCheck: FeeCheck | undefined;
-  const verifyFees = async () => {
+  const capturedConfig = JSON.stringify(config);
+  const requireConfig = async () => {
+    if (JSON.stringify(await loadConfig()) !== capturedConfig) throw new ConfigChangedError();
+  };
+  const feeExpired = () => {
+    const observed = Date.parse(lastFeeCheck?.observedAt ?? '');
+    return !lastFeeCheck || !Number.isFinite(observed) || Date.now() < observed || Date.now() - observed >= 30_000;
+  };
+  const verifyFees = async (refresh = true) => {
     if (config.rebalanceFeeTargetUsdE8 === undefined) return;
     if (!fees || fees.swaps === null || fees.swaps < 1) {
       const check: FeeCheck = { state: 'unavailable', targetUsdE8: config.rebalanceFeeTargetUsdE8,
@@ -165,24 +180,30 @@ export async function dispatch(config: Config, chain: Chain, tx: ChainTransactio
       await fees?.onCheck(check); throw new FeeTargetError(check);
     }
     if (!feeInput) return;
-    const observed = Date.parse(lastFeeCheck?.observedAt ?? '');
-    if (!lastFeeCheck || !Number.isFinite(observed) || Date.now() < observed || Date.now() - observed >= 30_000) {
+    if (!lastFeeCheck || feeExpired()) {
+      if (!refresh) throw new FeeQuoteExpiredError();
       lastFeeCheck = await checkRebalanceFee(feeInput); await fees.onCheck(lastFeeCheck);
     }
     if (lastFeeCheck.state !== 'within-target') throw new FeeTargetError(lastFeeCheck);
   };
-  const ready = async () => {
-    await verifyFees();
-    if (config.mode === 'ledger') await ledger!.assertReady();
+  const ready = async (refresh = true) => {
+    await requireConfig();
+    await verifyFees(refresh);
+    if (config.mode === 'ledger') {
+      try { await ledger!.assertReady(); }
+      catch (error) { await requireConfig(); throw error; }
+    }
+    await requireConfig();
     await requireDispatchReady(tx);
+    await requireConfig();
+    if (!refresh && feeInput && feeExpired()) throw new FeeQuoteExpiredError();
     if (config.mode === 'ledger') ledger!.signal?.throwIfAborted();
   };
-  const release = await acquireLock(DATA, 'config.lock');
-  try {
-    if (JSON.stringify(await loadConfig()) !== JSON.stringify(config)) throw new Error('Configuration changed; rebuild the transaction on the next cycle');
+  {
     if (await readJson(PENDING_PATH)) throw new Error('Reconcile the existing pending transaction first');
     await ready();
-    const account = await signer(config, config.mode === 'ledger' ? { signal: ledger?.signal } : {});
+    const account = await signer(config, config.mode === 'ledger' ? { signal: ledger?.signal } : {})
+      .catch(async error => { await requireConfig(); throw error; });
     if (account.address.toLowerCase() !== config.wallet.toLowerCase()) throw new Error('Selected key does not match the configured public wallet');
     const rpc = chain.publicClient;
     if (await rpc.getChainId() !== 4663) throw new Error('RPC is not Robinhood mainnet');
@@ -209,23 +230,43 @@ export async function dispatch(config: Config, chain: Chain, tx: ChainTransactio
     if (gasPrice <= 0n || balance < tx.value + gas * gasPrice) throw new Error('Insufficient native ETH for this transaction and estimated gas');
     await ready();
     const serialized = await account.signTransaction({ chainId: 4663, type: 'legacy', nonce, gas, gasPrice,
-      to: tx.to, data: tx.data, value: tx.value });
+      to: tx.to, data: tx.data, value: tx.value })
+      .catch(async error => { await requireConfig(); throw error; });
     await ready();
     const hash = keccak256(serialized);
     const pending: PendingTransaction = { chainId: 4663, wallet: config.wallet, hash, nonce,
       kind: tx.kind, createdAt: new Date().toISOString(), status: 'prepared', gas: gas.toString(), gasPrice: gasPrice.toString() };
-    // A crash anywhere after this durable write leaves the known hash to reconcile.
-    await atomicWriteJson(PENDING_PATH, pending);
-    try {
+    // Long RPC and signer waits stay outside the configuration lock. Only the
+    // local preparation and initiation of a send serialize with settings edits.
+    let sending: Promise<{ hash: Hex } | { error: unknown }>;
+    while (true) {
       await ready();
-    } catch (error) {
-      // No send was attempted; this known-unbroadcast record need not block forever.
-      await rm(PENDING_PATH);
-      throw error;
+      const release = await acquireConfigLock(DATA, { signal: ledger?.signal });
+      let prepared = false;
+      try {
+        await ready(false);
+        if (await readJson(PENDING_PATH)) throw new Error('Reconcile the existing pending transaction first');
+        await atomicWriteJson(PENDING_PATH, pending);
+        prepared = true;
+        await ready(false);
+        // Attach both outcomes immediately, including a synchronous transport
+        // throw. Once invocation starts, its hash is retained until reconciled.
+        try {
+          sending = Promise.resolve(rpc.sendRawTransaction({ serializedTransaction: serialized }))
+            .then(hash => ({ hash }), error => ({ error }));
+        } catch (error) { sending = Promise.resolve({ error }); }
+        break;
+      } catch (error) {
+        if (prepared) await rm(PENDING_PATH);
+        if (!(error instanceof FeeQuoteExpiredError)) throw error;
+        // A price that aged during contention/local persistence is refreshed
+        // outside this lock before another guarded attempt with this signature.
+      } finally { await release(); }
     }
+    const outcome = await sending;
     try {
-      const receivedHash = await rpc.sendRawTransaction({ serializedTransaction: serialized });
-      if (receivedHash.toLowerCase() !== hash.toLowerCase()) throw new Error('RPC returned an unexpected transaction hash');
+      if ('error' in outcome) throw outcome.error;
+      if (outcome.hash.toLowerCase() !== hash.toLowerCase()) throw new Error('RPC returned an unexpected transaction hash');
       await atomicWriteJson(PENDING_PATH, { ...pending, status: 'broadcast' });
       return { status: 'pending', hash, kind: tx.kind, message: `${tx.kind} submitted; waiting for its receipt` };
     } catch (error) {
@@ -234,5 +275,5 @@ export async function dispatch(config: Config, chain: Chain, tx: ChainTransactio
       await atomicWriteJson(PENDING_PATH, { ...pending, status: 'unknown', sendFailure, message });
       return { status: 'unresolved', hash, kind: tx.kind, sendFailure, message };
     }
-  } finally { await release(); }
+  }
 }

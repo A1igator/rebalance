@@ -1,3 +1,4 @@
+import { assertTemporaryTestDirectory } from '../src/test-isolation.js';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -8,7 +9,7 @@ import { test, type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { addPortfolio, connectPortfolio } from '../src/profiles.js';
-import { atomicWriteJson, readJson } from '../src/storage.js';
+import { acquireLock, atomicWriteJson, readJson } from '../src/storage.js';
 
 const execute = promisify(execFile);
 const repository = fileURLToPath(new URL('..', import.meta.url));
@@ -30,6 +31,7 @@ const policy = (reverse = false) => ({
 
 async function fixture(t: TestContext) {
   const root = await mkdtemp(join(tmpdir(), 'rebalance-allocation-cli-'));
+  assertTemporaryTestDirectory(root);
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 3 }));
   await atomicWriteJson(join(root, 'config.json'), configuration());
   const preload = join(root, 'offline.mjs');
@@ -126,23 +128,31 @@ test('invalid and infeasible allocation requests preserve configuration bytes', 
   assert.equal(await f.bytes(), before); f.isolated();
 });
 
-test('pending transactions and active cycles prevent allocation adoption without changing their records', async t => {
-  const f = await fixture(t); const path = await f.input('policy', policy()); const before = await f.bytes();
+test('allocation adoption and manual edits work during pending receipts and active or cooling cycles', async t => {
+  const f = await fixture(t); const path = await f.input('policy', policy());
   const pending = { chainId: 4663, wallet: one, hash: `0x${'1'.repeat(64)}`, nonce: 1,
     kind: 'swap', status: 'broadcast', createdAt: new Date().toISOString() };
-  await atomicWriteJson(join(f.root, 'pending.json'), pending);
-  await assert.rejects(f.command(['allocation', 'set', path]));
-  assert.equal(await f.bytes(), before); assert.deepEqual(await readJson(join(f.root, 'pending.json')), pending);
-  await rm(join(f.root, 'pending.json'));
   const now = Date.now();
-  const cycle = { wallet: one, startedAt: now, activeUntil: now + 600_000, nextEligibleAt: now + 3_600_000 };
-  await atomicWriteJson(join(f.root, 'cycle.json'), cycle);
-  await assert.rejects(f.command(['allocation', 'set', path]));
-  assert.equal(await f.bytes(), before); assert.deepEqual(await readJson(join(f.root, 'cycle.json')), cycle);
-  const corrupt = { ...cycle, activeUntil: 'not-a-date' };
-  await atomicWriteJson(join(f.root, 'cycle.json'), corrupt);
-  await assert.rejects(f.command(['allocation', 'set', path]));
-  assert.equal(await f.bytes(), before); assert.deepEqual(await readJson(join(f.root, 'cycle.json')), corrupt);
+  const records = { 'pending.json': pending, 'recovery.json': { fixture: 'retained-recovery' },
+    'stop.json': { requestId: 'preserved-stop' },
+    'cycle.json': { wallet: one, startedAt: now, activeUntil: now + 600_000, nextEligibleAt: now + 3_600_000 } };
+  for (const [name, value] of Object.entries(records)) await atomicWriteJson(join(f.root, name), value);
+  const release = await acquireLock(f.root);
+  try {
+    for (const activeUntil of [now + 600_000, now]) {
+      records['cycle.json'].activeUntil = activeUntil;
+      await atomicWriteJson(join(f.root, 'cycle.json'), records['cycle.json']);
+      const recordBytes = await Promise.all(Object.keys(records).map(name => readFile(join(f.root, name), 'utf8')));
+      const managed = JSON.parse((await f.command(['allocation', 'set', path])).stdout);
+      assert.equal(managed.mode, 'managed'); assert.equal((await f.saved())!.wallet, one);
+      assert.deepEqual((await f.saved())!.allocation.policy, policy());
+      assert.deepEqual(JSON.parse((await f.command(['allocation', 'manual'])).stdout).targets, managed.targets);
+      assert.equal((await f.saved())!.allocation, undefined);
+      await f.command(['targets', 'replace', targetArgument]);
+      assert.deepEqual((await f.saved())!.targets, targets);
+      assert.deepEqual(await Promise.all(Object.keys(records).map(name => readFile(join(f.root, name), 'utf8'))), recordBytes);
+    }
+  } finally { await release(); }
   f.isolated();
 });
 

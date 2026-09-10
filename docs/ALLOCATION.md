@@ -29,7 +29,7 @@ npm run cli -- allocation status
 npm run cli -- allocation manual
 ```
 
-The agent writes the policy JSON locally from the user's stated inputs and runs these commands; the user need not use a CLI. Preview changes nothing. `set` calculates against the latest saved targets and atomically writes policy, calculation provenance and targets under the existing configuration lock. It does not start trading. An already armed runner consumes changed targets on its next eligible graph evaluation. Pending transactions and an active multi-leg cycle defer adoption, without resetting their records or cooldown.
+The agent writes the policy JSON locally from the user's stated inputs and runs these commands; the user need not use a CLI. Preview changes nothing. `set` calculates against the latest saved targets and atomically writes policy, calculation provenance and targets under the existing configuration lock. It does not start trading. An already armed runner consumes changed targets on its next eligible graph evaluation. Policy changes can be saved during pending transactions or an active multi-leg cycle. The next evaluation uses the new policy targets, while submitted transactions, recorded cycle timing and cooldown remain intact. See [live settings](LIVE_SETTINGS.md).
 
 `manual` removes the policy while retaining its last target split. Explicit `targets set`, `targets replace` and `configure --targets` also switch to manual in the same write. Unrelated configuration changes preserve the policy. Each wallet owns its policy independently; changing the chat connection never changes it.
 

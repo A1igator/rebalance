@@ -1,16 +1,30 @@
+import { assertTemporaryTestDirectory } from '../src/test-isolation.js';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { test } from 'node:test';
+import { test, type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const { handleClaudePrompt, selectClaudeLaunchRequest } = await import(new URL('../scripts/rebalance-claude-hook.mjs', import.meta.url).href);
 // Sanitized fields from the official native hook contract, not a captured live invocation:
 // https://code.claude.com/docs/en/hooks#userpromptexpansion
 // prompt_id requires Claude Code >=2.1.196; no turn_id or transcript read is needed.
+
+function pinFixtureRepository(t: TestContext, root: string) {
+  assertTemporaryTestDirectory(root);
+  const previousRoot = process.env.REBALANCE_ROOT_DIR;
+  const previousData = process.env.REBALANCE_DATA_DIR;
+  process.env.REBALANCE_ROOT_DIR = join(root, '.local');
+  process.env.REBALANCE_DATA_DIR = join(root, '.local');
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.REBALANCE_ROOT_DIR; else process.env.REBALANCE_ROOT_DIR = previousRoot;
+    if (previousData === undefined) delete process.env.REBALANCE_DATA_DIR; else process.env.REBALANCE_DATA_DIR = previousData;
+  });
+}
+
 const event = {
   hook_event_name: 'UserPromptExpansion', expansion_type: 'slash_command',
   command_name: 'rebalance', command_args: '', command_source: 'project', prompt: '/rebalance',
@@ -75,6 +89,7 @@ test('Plan mode and missing native identity block before setup without a guessed
 
 test('native expansion routes to the shared launcher once with pre-bootstrap stop generation', async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-claude-hook-')));
+  pinFixtureRepository(t, root);
   t.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(join(root, 'nested'));
   const input = { ...event, cwd: join(root, 'nested') };
@@ -100,6 +115,7 @@ test('native expansion routes to the shared launcher once with pre-bootstrap sto
 
 test('Claude normalized session selects a wallet and preserves that route after reconnecting the same prompt', async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-claude-wallet-route-')));
+  pinFixtureRepository(t, root);
   t.after(() => rm(root, { recursive: true, force: true }));
   const rootDir = join(root, '.local');
   const walletA = `0x${'1'.repeat(40)}`;
@@ -140,6 +156,7 @@ test('Claude normalized session selects a wallet and preserves that route after 
 
 test('outside workspaces and symlinks escaping the project never launch', async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-claude-root-')));
+  pinFixtureRepository(t, root);
   const outside = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-claude-outside-')));
   t.after(() => Promise.all([root, outside].map(path => rm(path, { recursive: true, force: true }))));
   await symlink(outside, join(root, 'escape'));
@@ -150,6 +167,7 @@ test('outside workspaces and symlinks escaping the project never launch', async 
 
 test('lost dispatch output preserves unknown start state without leaking subprocess errors', async t => {
   const root = await mkdtemp(join(tmpdir(), 'rebalance-claude-unknown-'));
+  pinFixtureRepository(t, root);
   t.after(() => rm(root, { recursive: true, force: true }));
   const result = await handleClaudePrompt({ ...event, cwd: root }, { repository: root, runView: async () => undefined,
     readStopToken: async () => 'none', ensureDependencies: async () => {},
@@ -164,6 +182,7 @@ test('lost dispatch output preserves unknown start state without leaking subproc
 
 test('dependency failures return fixed blocked context without entering the launcher', async t => {
   const root = await mkdtemp(join(tmpdir(), 'rebalance-claude-deps-'));
+  pinFixtureRepository(t, root);
   t.after(() => rm(root, { recursive: true, force: true }));
   const result = await handleClaudePrompt({ ...event, cwd: root }, { repository: root, runView: async () => undefined,
     readStopToken: async () => 'none',
@@ -250,6 +269,7 @@ test('prepared Claude command reaches only an isolated unconfigured CLI and repl
 
 test('Claude view integration opens the returned session URL only after the deterministic launch result', async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-claude-view-')));
+  pinFixtureRepository(t, root);
   t.after(() => rm(root, { recursive: true, force: true }));
   const calls: string[] = [];
   const view = { state: 'ready', url: `http://127.0.0.1:4663/#view=${'a'.repeat(64)}`,
@@ -272,6 +292,7 @@ test('Claude view integration opens the returned session URL only after the dete
 
 test('Claude native-pane failure preserves the launch outcome without leaking host errors', async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-claude-view-failure-')));
+  pinFixtureRepository(t, root);
   t.after(() => rm(root, { recursive: true, force: true }));
   const launched = { app: 'Rebalance', outcome: 'armed', status: { armed: true }, messages: [] };
   const result = await handleClaudePrompt({ ...event, cwd: root }, { repository: root,
@@ -286,6 +307,7 @@ test('Claude native-pane failure preserves the launch outcome without leaking ho
 
 test('Claude view preparation failure never repeats launch or attempts a pane', async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-claude-view-prepare-')));
+  pinFixtureRepository(t, root);
   t.after(() => rm(root, { recursive: true, force: true }));
   let launches = 0;
   const result = await handleClaudePrompt({ ...event, cwd: root }, { repository: root,

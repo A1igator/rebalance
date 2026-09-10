@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,6 +12,7 @@ import { automaticRecovery, AUTO_RECOVERY_GRACE_MS, recover, type AutomaticRecov
 import { acquireLock, atomicWriteJson, readJson, type PendingTransaction } from '../src/storage.js';
 import type { LaunchResult } from '../src/launch.js';
 import type { Status } from '../src/runtime.js';
+import { acquireConfigLock } from '../src/config-lock.js';
 
 // Public disposable fixture account. Every provider method below is mocked;
 // neither the real application directory nor a network transport is used.
@@ -75,8 +77,8 @@ async function fixture(t: TestContext, active = false) {
     },
     getBalance: async () => 10n ** 18n,
     sendRawTransaction: async ({ serializedTransaction }: { serializedTransaction: Hex }) => {
-      assert.ok(await readJson(path('run.lock')), 'signing/sending holds execution lock');
-      assert.ok(await readJson(path('config.lock')), 'configuration is locked through send');
+      assert.ok(existsSync(path('config.lock')), 'configuration serializes initiation of send');
+      assert.ok(await readJson(path('run.lock')), 'sending retains execution ownership');
       const hash = keccak256(serializedTransaction);
       const record = await readJson<RecoveryRecord>(path('recovery.json'));
       assert.equal(record?.original.hash, originalHash);
@@ -703,4 +705,72 @@ test('Privy signer latency cannot bypass a newer stop, changed config or origina
       assert.equal(f.successfulNotes, 1);
     } else assert.deepEqual(await readJson(f.path('pending.json')), f.pending);
   }
+});
+
+async function editableRecovery(f: Awaited<ReturnType<typeof fixture>>) {
+  await atomicWriteJson(f.path('config.json'), config);
+  f.deps.config = async () => readJson<typeof config>(f.path('config.json'));
+  return async () => {
+    const release = await acquireConfigLock(f.deps.dataDir);
+    try { await atomicWriteJson(f.path('config.json'), { ...config, driftThresholdBps: 900, rebalanceIntervalSeconds: 7200 }); }
+    finally { await release(); }
+  };
+}
+
+for (const execution of ['automatic', 'manual'] as const) {
+  for (const boundary of ['RPC preparation', 'signing'] as const) {
+    test(`${execution} recovery permits settings edits during ${boundary} and discards obsolete cancellation`, async t => {
+      const f = await fixture(t), edit = await editableRecovery(f);
+      let signatures = 0;
+      if (boundary === 'RPC preparation') f.rpc.getBalance = async () => { await edit(); return 10n ** 18n; };
+      f.deps.signer = async () => ({ address: account.address, signTransaction: async tx => {
+        signatures++; if (boundary === 'signing') await edit();
+        return account.signTransaction(tx);
+      } });
+      if (execution === 'automatic') {
+        const result = await auto(f);
+        assert.equal(result?.operation?.status, 'configuration-changed'); assert.equal(result?.blocked, true);
+      } else {
+        const result = await recover({ cancel: true }, f.deps);
+        assert.equal(result.outcome, 'blocked'); assert.match(result.messages.join(' '), /Configuration changed/);
+      }
+      assert.equal(signatures, boundary === 'signing' ? 1 : 0); assert.equal(f.sent.length, 0);
+      assert.deepEqual(await readJson(f.path('pending.json')), f.pending);
+      assert.deepEqual(await readJson(f.path('cycle.json')), f.cycle);
+      assert.equal((await readJson<RecoveryRecord>(f.path('recovery.json')))?.cancellation, undefined);
+      assert.equal(await readJson(f.path('config.lock')), null);
+    });
+  }
+}
+
+for (const execution of ['automatic', 'manual'] as const) test(`${execution} cancellation send releases config while retaining both hashes on an uncertain response`, async t => {
+  const f = await fixture(t), edit = await editableRecovery(f);
+  let invoked!: () => void, finish!: () => void;
+  const started = new Promise<void>(resolve => { invoked = resolve; });
+  const response = new Promise<void>(resolve => { finish = resolve; });
+  f.mineOnSend = false;
+  const send = f.rpc.sendRawTransaction;
+  f.rpc.sendRawTransaction = async args => {
+    const original = send(args); invoked();
+    await response; await original;
+    throw new Error('fixture lost cancellation response');
+  };
+  const recovering = execution === 'automatic' ? auto(f) : recover({ cancel: true }, f.deps);
+  await started;
+  const before = await readJson<RecoveryRecord>(f.path('recovery.json'));
+  assert.equal(before?.cancellation?.status, 'prepared');
+  try {
+    await edit();
+    assert.deepEqual(await readJson(f.path('pending.json')), f.pending);
+    assert.equal((await readJson<RecoveryRecord>(f.path('recovery.json')))?.cancellation?.hash, before?.cancellation?.hash);
+  } finally { finish(); }
+  await recovering;
+  assert.equal(f.sent.length, 1);
+  assert.equal((await readJson<RecoveryRecord>(f.path('recovery.json')))?.cancellation?.status, 'unknown');
+  const next = (await f.deps.config())!;
+  if (execution === 'automatic') await auto(f, {}, next);
+  else await recover({ cancel: true }, f.deps);
+  assert.equal(f.sent.length, 1, 'later recovery is receipt-only with the retained cancellation identity');
+  assert.deepEqual(await readJson(f.path('pending.json')), f.pending);
+  assert.deepEqual(await readJson(f.path('cycle.json')), f.cycle);
 });

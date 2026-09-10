@@ -14,6 +14,8 @@ The [human request](prompts/028-event-driven-execution.md) replaces unconditiona
 | RPC error | Backoff grows from two to 30 seconds after a traversal; chain events do not bypass it, while changed controls remain responsive |
 | Chart | Initial state and public-file changes over local server-sent events; five-second polling only while the stream is unavailable |
 
+Targets and settings can be saved while running, including during receipt and signing waits. A known newer configuration triggers an immediate serial re-evaluation; existing cycle timing is retained. See [live settings](LIVE_SETTINGS.md).
+
 The scheduler retains one execution lock and runs one graph traversal at a time. Incoming activity is coalesced, not queued as thousands of future trades. After a receipt confirms, that same traversal refreshes holdings and can dispatch the next required approval/swap if the active window still allows it. Stops and pending barriers remain enforced before sending. No timer or event extends the ten-minute active window or changes successful-swap hourly cadence.
 
 The official [public sequencer feed](https://docs.robinhood.com/chain/connecting/) supplies activity hints only; the app does not decode them into portfolio decisions, trust their transaction outcome, or claim light-client verification. RPC remains the source of balances, quotes and canonical receipt evidence. Feed connections reconnect with bounded backoff; unavailable local watches and feed outages retain watchdog behavior. This is event-driven with explicit fallbacks, not guaranteed push availability on every host.

@@ -10,7 +10,7 @@ import { ASSETS } from './assets.js';
 import { createChain, ROBINHOOD } from './chain.js';
 import { CONFIG_PATH, DATA, PENDING_PATH, createWallet, loadConfig, parseRebalanceFeeTargetUsd, parseTargets, percentToBps, validateConfig, type Config } from './config.js';
 import { redistributeTargets } from './core.js';
-import { readCycle } from './cadence.js';
+import { acquireConfigLock, ConfigLockBusyError } from './config-lock.js';
 import { allocationStatus, previewAllocation, readAllocationInput, withAllocation, withoutAllocation } from './allocation-management.js';
 import { GRAPH } from './graph.js';
 import { events, acknowledgeEvent, publishEvent } from './events.js';
@@ -41,7 +41,7 @@ const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
   configure --targets USDG=5,AAPL=23.75,NVDA=23.75,MSFT=23.75,AMD=23.75
                                        Set explicit percentages (example only)
     [--wallet 0x...] [--mode private-key|privy|ledger] [--rpc https://...]
-    [--threshold 5] [--slippage 0.5] [--poll 30] [--rebalance-interval-seconds 3600]
+    [--threshold 5] [--slippage 0.5] [--deadline 120] [--poll 30] [--rebalance-interval-seconds 3600]
   targets set AAPL 30                   Change one percentage; redistribute the rest
   targets replace <ASSET=percent,...>   Replace all five targets explicitly
   allocation preview <policy.json>      Calculate targets from explicit inputs; no changes
@@ -79,7 +79,7 @@ Privy uses its logged-in agent CLI; Ledger requires physical confirmation for ev
 const { values, positionals: args } = parseArgs({ allowPositionals: true, options: {
   background: { type: 'boolean', default: false }, targets: { type: 'string' }, wallet: { type: 'string' },
   mode: { type: 'string' }, rpc: { type: 'string' }, threshold: { type: 'string' },
-  slippage: { type: 'string' }, poll: { type: 'string' }, help: { type: 'boolean' },
+  slippage: { type: 'string' }, deadline: { type: 'string' }, poll: { type: 'string' }, help: { type: 'boolean' },
   'rebalance-interval-seconds': { type: 'string' },
   'resume-start': { type: 'boolean', default: false },
   'setup-only': { type: 'boolean', default: false }, 'request-id': { type: 'string' },
@@ -92,7 +92,7 @@ const print = (value: unknown) => process.stdout.write(stringifyJson(value));
 const requiredConfig = async () => { const c = await loadConfig(); if (!c) throw new Error('Configure explicit targets through the agent first'); return c; };
 
 async function inLock<T>(name: string, action: () => Promise<T>): Promise<T> {
-  const release = await acquireLock(DATA, name);
+  const release = await (name === 'config.lock' ? acquireConfigLock(DATA) : acquireLock(DATA, name));
   try { return await action(); } finally { await release(); }
 }
 
@@ -354,52 +354,49 @@ async function main() {
           await atomicWriteJson(CONFIG_PATH, manual);
           print(allocationStatus(manual)); return;
         }
-        const assertAdoptionReady = async () => {
-          if (await readJson(PENDING_PATH)) throw new Error('Reconcile the pending operation before adopting an allocation policy');
-          const cycle = await readCycle();
-          if (cycle && cycle.activeUntil > Date.now()) throw new Error('Wait for the active rebalance cycle before adopting an allocation policy');
-        };
-        await assertAdoptionReady();
         const next = validateConfig(withAllocation(config, input));
-        // Dispatch shares config.lock and checks its captured config. Cycle
-        // preparation can precede that lock, so recheck after the calculation.
-        await assertAdoptionReady();
         await atomicWriteJson(CONFIG_PATH, next);
         print({ ...allocationStatus(next), effective: 'next graph evaluation; existing cycle timing is preserved' });
       }); return;
     }
     case 'configure':
       await inLock('config.lock', async () => {
-        if (await readJson(PENDING_PATH)) throw new Error('Reconcile the pending operation before changing wallet or configuration');
         const previous = await loadConfig();
+        if (!previous && await readJson(PENDING_PATH)) throw new Error('Reconcile the pending operation before configuring a portfolio');
         if (previous && values.wallet !== undefined && values.wallet.toLowerCase() !== previous.wallet.toLowerCase()) {
           throw new Error('A portfolio belongs to one wallet. Use wallet add/connect to select another portfolio.');
         }
-        if (previous && values.mode !== undefined && values.mode !== previous.mode && await readJson(resolve(DATA, 'run.lock'))) {
-          throw new Error('Stop this wallet runner before changing its signing mode.');
+        let releaseSignerChange: (() => Promise<void>) | undefined;
+        if (previous && values.mode !== undefined && values.mode !== previous.mode) {
+          try { releaseSignerChange = await acquireLock(DATA, 'run.lock'); }
+          catch { throw new Error('Stop this wallet runner before changing its signing mode.'); }
         }
-        const wallet = await readJson<{ address: string }>(resolve(DATA, 'wallet.json'));
-        if (values.targets === undefined && !previous) throw new Error('Specify the target percentages');
-        const config = validateConfig({ version: 1, chainId: 4663,
-          wallet: values.wallet ?? previous?.wallet ?? wallet?.address,
-          mode: values.mode ?? previous?.mode ?? 'private-key',
-          rpcUrl: values.rpc ?? previous?.rpcUrl ?? ROBINHOOD.rpcUrls.default.http[0],
-          targets: values.targets !== undefined ? parseTargets(values.targets) : previous?.targets,
-          ...(values.targets === undefined && previous?.allocation ? { allocation: previous.allocation } : {}),
-          ...(previous?.rebalanceFeeTargetUsdE8 === undefined ? {} : { rebalanceFeeTargetUsdE8: previous.rebalanceFeeTargetUsdE8 }),
-          driftThresholdBps: values.threshold ? percentToBps(values.threshold) : previous?.driftThresholdBps ?? 500,
-          slippageBps: values.slippage ? percentToBps(values.slippage) : previous?.slippageBps ?? 50,
-          deadlineSeconds: previous?.deadlineSeconds ?? 120,
-          pollSeconds: values.poll ? Number(values.poll) : previous?.pollSeconds ?? 30,
-          rebalanceIntervalSeconds: values['rebalance-interval-seconds'] !== undefined
-            ? Number(values['rebalance-interval-seconds']) : previous?.rebalanceIntervalSeconds ?? 3600,
-        });
-        if (process.env.REBALANCE_PROFILE_WALLET && config.wallet.toLowerCase() !== process.env.REBALANCE_PROFILE_WALLET.toLowerCase()) {
-          throw new Error('Configuration wallet differs from this pinned portfolio; no other wallet was selected.');
-        }
-        await atomicWriteJson(CONFIG_PATH, config);
-        print({ wallet: config.wallet, mode: config.mode, targets: config.targets, chainId: 4663,
-          driftThresholdBps: config.driftThresholdBps, rebalanceIntervalSeconds: config.rebalanceIntervalSeconds });
+        try {
+          if (releaseSignerChange && await readJson(PENDING_PATH)) throw new Error('Reconcile the pending operation before changing the signing mode.');
+          const wallet = await readJson<{ address: string }>(resolve(DATA, 'wallet.json'));
+          if (values.targets === undefined && !previous) throw new Error('Specify the target percentages');
+          const config = validateConfig({ version: 1, chainId: 4663,
+            wallet: values.wallet ?? previous?.wallet ?? wallet?.address,
+            mode: values.mode ?? previous?.mode ?? 'private-key',
+            rpcUrl: values.rpc ?? previous?.rpcUrl ?? ROBINHOOD.rpcUrls.default.http[0],
+            targets: values.targets !== undefined ? parseTargets(values.targets) : previous?.targets,
+            ...(values.targets === undefined && previous?.allocation ? { allocation: previous.allocation } : {}),
+            ...(previous?.rebalanceFeeTargetUsdE8 === undefined ? {} : { rebalanceFeeTargetUsdE8: previous.rebalanceFeeTargetUsdE8 }),
+            driftThresholdBps: values.threshold ? percentToBps(values.threshold) : previous?.driftThresholdBps ?? 500,
+            slippageBps: values.slippage ? percentToBps(values.slippage) : previous?.slippageBps ?? 50,
+            deadlineSeconds: values.deadline !== undefined ? Number(values.deadline) : previous?.deadlineSeconds ?? 120,
+            pollSeconds: values.poll ? Number(values.poll) : previous?.pollSeconds ?? 30,
+            rebalanceIntervalSeconds: values['rebalance-interval-seconds'] !== undefined
+              ? Number(values['rebalance-interval-seconds']) : previous?.rebalanceIntervalSeconds ?? 3600,
+          });
+          if (process.env.REBALANCE_PROFILE_WALLET && config.wallet.toLowerCase() !== process.env.REBALANCE_PROFILE_WALLET.toLowerCase()) {
+            throw new Error('Configuration wallet differs from this pinned portfolio; no other wallet was selected.');
+          }
+          await atomicWriteJson(CONFIG_PATH, config);
+          print({ wallet: config.wallet, mode: config.mode, targets: config.targets, chainId: 4663,
+            driftThresholdBps: config.driftThresholdBps, slippageBps: config.slippageBps, deadlineSeconds: config.deadlineSeconds,
+            pollSeconds: config.pollSeconds, rebalanceIntervalSeconds: config.rebalanceIntervalSeconds });
+        } finally { await releaseSignerChange?.(); }
       }); return;
     case 'targets':
       await inLock('config.lock', async () => {
@@ -453,6 +450,6 @@ async function main() {
 }
 
 main().catch(error => {
-  const message = error instanceof Error && error.constructor === Error ? error.message : 'Operation failed; no credential or provider payload has been printed';
+  const message = (error instanceof Error && error.constructor === Error) || error instanceof ConfigLockBusyError ? error.message : 'Operation failed; no credential or provider payload has been printed';
   process.stderr.write(stringifyJson({ error: message })); process.exitCode = 1;
 });

@@ -1,3 +1,4 @@
+import { assertTemporaryTestDirectory } from '../src/test-isolation.js';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -6,16 +7,19 @@ import { after, beforeEach, test } from 'node:test';
 import { keccak256, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { evaluatePortfolio } from '../src/core.js';
-import { acquireLock, atomicWriteJson, readJson } from '../src/storage.js';
+import { acquireLock, atomicWriteJson, readJson, stringifyJson } from '../src/storage.js';
 import { ETH_USD_SPOT_URL } from '../src/gas-display.js';
 
 // Public disposable signer vector. All chain and ETH/USD responses are offline fixtures.
 const key = `0x${'1'.padStart(64, '0')}` as const;
 const wallet = privateKeyToAccount(key).address;
 const dataDir = await mkdtemp(join(tmpdir(), 'rebalance-fee-runtime-'));
+assertTemporaryTestDirectory(dataDir);
 process.env.REBALANCE_DATA_DIR = dataDir;
 process.env.REBALANCE_PRIVATE_KEY = key;
-const { CONFIG_PATH, STATE_PATH, PENDING_PATH, validateConfig } = await import('../src/config.js');
+const { DATA, CONFIG_PATH, STATE_PATH, PENDING_PATH, validateConfig } = await import('../src/config.js');
+assert.equal(DATA, dataDir, 'captured DATA must belong to this disposable fixture');
+for (const path of [CONFIG_PATH, STATE_PATH, PENDING_PATH]) assert.equal(path.startsWith(`${dataDir}/`), true, 'captured file path must belong to this fixture');
 const { tick, status, CYCLE_PATH } = await import('../src/runtime.js');
 const { LedgerExecution, LEDGER_REQUEST_PATH } = await import('../src/ledger-request.js');
 const { events } = await import('../src/events.js');
@@ -236,7 +240,7 @@ for (const change of ['stop', 'configuration'] as const) {
     const release = await acquireLock(dataDir);
     try {
       const state = await tick(true, () => f.chain, ledger, undefined, { connected: true, revision: 1 });
-      assert.equal(state.error, null); assert.equal(state.feeCheck?.state, 'within-target');
+      assert.equal(state.error, null); assert.equal(state.feeCheck?.state, change === 'stop' ? 'within-target' : undefined);
       assert.equal(state.operation?.status, change === 'stop' ? 'stopping' : 'configuration-changed');
       assert.equal(state.ledgerRequest, null); assert.equal(state.cycle, null); assert.equal(ledger.active, false);
       assert.deepEqual(await events(), [], 'a superseded quote must not request Ledger attention');
@@ -250,3 +254,105 @@ for (const change of ['stop', 'configuration'] as const) {
     } finally { await release(); }
   });
 }
+
+
+test('inactive Ledger transaction-read failures stay local and suppress raw RPC text on repeated checks', { timeout: 5_000 }, async t => {
+  await atomicWriteJson(CONFIG_PATH, { ...config, mode: 'ledger' });
+  const f = fixture(); const ledger = new LedgerExecution();
+  const rawText = 'PASSIVE_RPC_PAYLOAD: allowance request failed at https://provider-fixture.invalid/opaque-body';
+  const preparation = t.mock.method(f.chain, 'transaction', async () => { throw new Error(rawText); });
+  const readiness = t.mock.method(ledger, 'assertReady', async () => assert.fail('Failed passive preparation cannot enter signing readiness'));
+  const binding = t.mock.method(ledger, 'bindCycle', async () => assert.fail('Failed passive preparation cannot bind a signing cycle'));
+  const price = t.mock.method(globalThis, 'fetch', async () => assert.fail('Failed preparation has no transaction to price'));
+  const release = await acquireLock(dataDir);
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const state = await tick(true, () => f.chain, ledger, undefined, { connected: true, revision: 1 });
+      assert.equal(state.error, null); assert.equal(state.operation?.status, 'fee-target');
+      assert.equal(state.graph.node, 'wait'); assert.ok(!state.graph.trace.includes('error'));
+      assert.deepEqual(state.feeCheck, { state: 'unavailable', targetUsdE8: '1', estimatedUsdE8: null,
+        gasPriceWei: null, ethUsdE8: null, observedAt: null });
+      assert.match(state.operation!.message!, /estimate is unavailable/);
+      assert.doesNotMatch(stringifyJson(state), /PASSIVE_RPC_PAYLOAD|provider-fixture/);
+      assert.doesNotMatch(await readFile(STATE_PATH, 'utf8'), /PASSIVE_RPC_PAYLOAD|provider-fixture/);
+      assert.equal(ledger.active, false); assert.equal(state.ledgerRequest, null); assert.equal(state.cycle, null);
+      assert.equal(await readJson(PENDING_PATH), null); assert.equal(await readJson(CYCLE_PATH), null);
+      assert.equal(await readJson(LEDGER_REQUEST_PATH), null); assert.deepEqual(await events(), []);
+    }
+    assert.equal(preparation.mock.callCount(), 2); assert.equal(price.mock.callCount(), 0);
+    assert.equal(readiness.mock.callCount(), 0); assert.equal(binding.mock.callCount(), 0);
+    assert.equal(f.sent.length, 0);
+  } finally { await release(); }
+});
+
+
+for (const boundary of ['snapshot', 'quote', 'transaction'] as const) {
+  test(`live configuration edit during ${boundary} discards old work before creating a cycle`, async t => {
+    const f = fixture();
+    const next = { ...config, driftThresholdBps: 600, rebalanceIntervalSeconds: 7200,
+      targets: { ...targets, USDG: 1000, AAPL: 1875 } };
+    const original = f.chain[boundary].bind(f.chain) as (...args: unknown[]) => Promise<unknown>;
+    t.mock.method(f.chain, boundary, async (...args: unknown[]) => {
+      const value = await original(...args);
+      await atomicWriteJson(CONFIG_PATH, next);
+      return value;
+    });
+    t.mock.method(globalThis, 'fetch', async () => assert.fail('Stale preparation must not price or sign'));
+    const release = await acquireLock(dataDir);
+    try {
+      const result = await tick(true, () => f.chain);
+      assert.equal(result.error, null); assert.equal(result.operation?.status, 'configuration-changed');
+      assert.equal(result.graph.node, 'wait'); assert.equal(result.proposal, undefined);
+      assert.equal(await readJson(CYCLE_PATH), null); assert.equal(await readJson(PENDING_PATH), null);
+      assert.equal(f.sent.length, 0); assert.deepEqual(await events(), []);
+      assert.deepEqual((await status()).config?.targets, next.targets);
+      assert.deepEqual(await readJson(CONFIG_PATH), next);
+    } finally { await release(); }
+  });
+}
+
+test('an obsolete balanced observation cannot close a successful active cycle or announce completion', async t => {
+  const f = fixture();
+  const now = Date.now();
+  const cycle = { wallet, startedAt: now - 10_000, activeUntil: now + 590_000,
+    nextEligibleAt: now + 3_590_000, swapConfirmed: true };
+  await atomicWriteJson(CYCLE_PATH, cycle);
+  await atomicWriteJson(join(dataDir, 'last-transaction.json'), { status: 'confirmed', kind: 'swap',
+    hash: `0x${'a'.repeat(64)}`, wallet, chainId: 4663 });
+  const next = { ...config, targets: { ...targets, USDG: 3000, AAPL: 0, NVDA: 2250 } };
+  t.mock.method(f.chain, 'snapshot', async () => {
+    const portfolio = evaluatePortfolio(Object.entries(targets).map(([id, targetBps]) => ({
+      id, symbol: id, decimals: 6, balance: BigInt(targetBps) * 10_000n,
+      priceUsdE8: 100_000_000n, targetBps,
+    })));
+    await atomicWriteJson(CONFIG_PATH, next);
+    return { portfolio, nativeBalance: 0n, blockNumber: 100n, valuationNote: 'Offline old-target observation' };
+  });
+  const release = await acquireLock(dataDir);
+  try {
+    const result = await tick(true, () => f.chain);
+    assert.equal(result.error, null); assert.equal(result.operation?.status, 'configuration-changed');
+    assert.deepEqual(await readJson(CYCLE_PATH), cycle);
+    assert.equal(await readJson(PENDING_PATH), null); assert.equal(f.sent.length, 0);
+    assert.deepEqual(await events(), [], 'An old balanced snapshot cannot announce completion for newly edited targets');
+  } finally { await release(); }
+});
+
+test('a fee target edited during pricing causes a quiet fresh traversal without a stale send', async t => {
+  const generous = { ...config, rebalanceFeeTargetUsdE8: '200000000' };
+  await atomicWriteJson(CONFIG_PATH, generous);
+  const f = fixture();
+  t.mock.method(globalThis, 'fetch', async () => {
+    await atomicWriteJson(CONFIG_PATH, config);
+    return new Response(JSON.stringify({ data: { base: 'ETH', currency: 'USD', amount: '100' } }));
+  });
+  const release = await acquireLock(dataDir);
+  try {
+    const result = await tick(true, () => f.chain);
+    assert.equal(result.error, null); assert.equal(result.operation?.status, 'configuration-changed');
+    assert.equal(result.graph.node, 'wait'); assert.equal(result.feeCheck, undefined);
+    assert.equal(await readJson(PENDING_PATH), null); assert.equal(f.sent.length, 0);
+    assert.deepEqual(await events(), []);
+    assert.equal((await status()).config?.rebalanceFeeTargetUsdE8, '1');
+  } finally { await release(); }
+});

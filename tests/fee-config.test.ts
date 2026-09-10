@@ -1,9 +1,11 @@
+import { assertTemporaryTestDirectory } from '../src/test-isolation.js';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { test, type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -25,10 +27,21 @@ const configuration = (wallet: string = one) => validateConfig({
 
 async function fixture(t: TestContext) {
   const root = await mkdtemp(join(tmpdir(), 'rebalance-fee-config-'));
+  assertTemporaryTestDirectory(root);
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 3 }));
   await atomicWriteJson(join(root, 'config.json'), configuration());
   const preload = join(root, 'offline.mjs');
-  await writeFile(preload, `import {writeFileSync} from 'node:fs'; import {join} from 'node:path';
+  await writeFile(preload, `import {existsSync,writeFileSync} from 'node:fs'; import {join,basename} from 'node:path';
+import filesystem from 'node:fs/promises'; import {syncBuiltinESMExports} from 'node:module';
+const originalOpen=filesystem.open;
+filesystem.open=async function(path,...args){
+  if(process.env.REBALANCE_TEST_CONFIG_WAIT && basename(String(path))==='config.lock' && args[0]==='wx') {
+    const marker=join(process.env.REBALANCE_DATA_DIR,'config-attempt-'+process.env.REBALANCE_TEST_CONFIG_WAIT);
+    if(!existsSync(marker))writeFileSync(marker,'attempted');
+  }
+  return originalOpen.call(this,path,...args);
+};
+syncBuiltinESMExports();
 globalThis.fetch=async()=>{writeFileSync(join(process.env.REBALANCE_DATA_DIR,'unexpected-network'),'blocked');throw new Error('Fee config fixture network is disabled');};`);
   const env: NodeJS.ProcessEnv = { ...process.env };
   for (const name of ['REBALANCE_PRIVATE_KEY', 'REBALANCE_SESSION_ID', 'CODEX_THREAD_ID', 'REBALANCE_PROFILE_WALLET', 'REBALANCE_CHART_PORT']) delete env[name];
@@ -111,17 +124,17 @@ test('invalid fee command arguments never change configuration', async t => {
   f.isolated();
 });
 
-test('fee mutations share the configuration lock while fee status stays read-only', async t => {
+test('fee mutations wait for the short configuration boundary while status stays read-only', async t => {
   const f = await fixture(t); const before = await f.bytes();
   const release = await acquireLock(f.root, 'config.lock');
-  try {
-    for (const args of [['fees', 'target', '0.05'], ['fees', 'clear']]) {
-      await assert.rejects(f.command(args)); assert.equal(await f.bytes(), before);
-    }
-    assert.equal(JSON.parse((await f.command(['fees', 'status'])).stdout).rebalanceFeeTargetUsdE8, null);
-    assert.equal(await f.bytes(), before);
-  } finally { await release(); }
-  await f.command(['fees', 'target', '0.05']);
+  t.after(release);
+  const editing = f.command(['fees', 'target', '0.05'], { REBALANCE_TEST_CONFIG_WAIT: 'fee' });
+  const completed = editing.then(() => true, () => true);
+  await until(() => existsSync(join(f.root, 'config-attempt-fee')));
+  assert.equal(await f.bytes(), before);
+  assert.equal(await Promise.race([completed, delay(50).then(() => false)]), false);
+  assert.equal(JSON.parse((await f.command(['fees', 'status'])).stdout).rebalanceFeeTargetUsdE8, null);
+  await release(); await editing;
   assert.equal((await f.saved())!.rebalanceFeeTargetUsdE8, '5000000');
   f.isolated();
 });
@@ -144,4 +157,66 @@ test('fee targets stay with the selected wallet across chat attachment and expli
   assert.equal((await f.saved())!.rebalanceFeeTargetUsdE8, undefined);
   assert.equal(await f.bytes(second.dataDir), secondConfigured);
   f.isolated(f.root, second.dataDir);
+});
+
+
+async function until(condition: () => boolean) {
+  const deadline = Date.now() + 5_000;
+  while (!condition()) {
+    assert.ok(Date.now() < deadline, 'Fixture command did not reach its configuration lock');
+    await delay(10);
+  }
+}
+
+test('concurrent settings writers preserve each other and read changes made before lock release', async t => {
+  const f = await fixture(t); const release = await acquireLock(f.root, 'config.lock'); t.after(release);
+  const fee = f.command(['fees', 'target', '0.05'], { REBALANCE_TEST_CONFIG_WAIT: 'fee' });
+  const settings = f.command(['configure', '--threshold', '7', '--deadline', '180'], { REBALANCE_TEST_CONFIG_WAIT: 'settings' });
+  const complete = Promise.all([fee, settings]); complete.catch(() => {});
+  await until(() => existsSync(join(f.root, 'config-attempt-fee')) && existsSync(join(f.root, 'config-attempt-settings')));
+  await atomicWriteJson(join(f.root, 'config.json'), { ...configuration(), slippageBps: 99 });
+  await release(); await complete;
+  const saved = (await f.saved())!;
+  assert.equal(saved.rebalanceFeeTargetUsdE8, '5000000'); assert.equal(saved.driftThresholdBps, 700);
+  assert.equal(saved.deadlineSeconds, 180); assert.equal(saved.slippageBps, 99);
+  assert.deepEqual(saved.targets, targets); f.isolated();
+});
+
+test('all ordinary configure settings and targets remain editable while active with pending recovery', async t => {
+  const f = await fixture(t); const now = Date.now();
+  const records = { 'pending.json': { fixture: 'unresolved-send' }, 'recovery.json': { fixture: 'retained-recovery' },
+    'cycle.json': { wallet: one, startedAt: now, activeUntil: now + 600000, nextEligibleAt: now + 3600000 },
+    'stop.json': { requestId: 'preserve-new-stop' } };
+  for (const [name, value] of Object.entries(records)) await atomicWriteJson(join(f.root, name), value);
+  const before = await Promise.all(Object.keys(records).map(name => readFile(join(f.root, name), 'utf8')));
+  const release = await acquireLock(f.root); const runBytes = await readFile(join(f.root, 'run.lock'), 'utf8');
+  try {
+    await f.command(['fees', 'target', '0.05']);
+    const changed = JSON.parse((await f.command(['configure', '--threshold', '3', '--slippage', '0.75',
+      '--deadline', '240', '--poll', '45', '--rebalance-interval-seconds', '7200', '--rpc', 'http://edited-fixture.invalid',
+      '--targets', 'USDG=20,AAPL=20,NVDA=20,MSFT=20,AMD=20', '--mode', 'private-key'])).stdout);
+    const saved = (await f.saved())!;
+    assert.equal(saved.wallet, one); assert.equal(saved.mode, 'private-key');
+    assert.equal(saved.driftThresholdBps, 300); assert.equal(saved.slippageBps, 75);
+    assert.equal(saved.deadlineSeconds, 240); assert.equal(saved.pollSeconds, 45);
+    assert.equal(saved.rebalanceIntervalSeconds, 7200); assert.equal(saved.rebalanceFeeTargetUsdE8, '5000000');
+    assert.equal(saved.rpcUrl, 'http://edited-fixture.invalid');
+    assert.deepEqual(saved.targets, { USDG: 2000, AAPL: 2000, NVDA: 2000, MSFT: 2000, AMD: 2000 });
+    assert.equal(changed.deadlineSeconds, 240);
+    const configBytes = await f.bytes();
+    for (const args of [['configure', '--deadline', '14'], ['configure', '--deadline', '601'],
+      ['configure', '--wallet', two], ['configure', '--mode', 'ledger']]) {
+      await assert.rejects(f.command(args)); assert.equal(await f.bytes(), configBytes);
+    }
+    assert.equal(await readFile(join(f.root, 'run.lock'), 'utf8'), runBytes);
+    assert.deepEqual(await Promise.all(Object.keys(records).map(name => readFile(join(f.root, name), 'utf8'))), before);
+  } finally { await release(); }
+  const configBytes = await f.bytes();
+  await assert.rejects(f.command(['configure', '--mode', 'ledger']), error => /pending operation/.test((error as { stderr: string }).stderr));
+  assert.equal(await f.bytes(), configBytes);
+  await rm(join(f.root, 'pending.json'));
+  const changedMode = JSON.parse((await f.command(['configure', '--mode', 'ledger'])).stdout);
+  assert.equal(changedMode.mode, 'ledger'); assert.equal((await f.saved())!.wallet, one);
+  for (const [name, value] of Object.entries(records)) if (name !== 'pending.json') assert.deepEqual(await readJson(join(f.root, name)), value);
+  f.isolated();
 });

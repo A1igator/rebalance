@@ -21,7 +21,12 @@ process.env.REBALANCE_DATA_DIR = data;
 process.env.REBALANCE_PRIVATE_KEY = key;
 // These modules capture DATA at import time, after the isolated environment exists.
 const { CONFIG_PATH, KEY_PATH, PENDING_PATH, LAST_TRANSACTION_PATH, validateConfig } = await import('../src/config.js');
-const { classifyDispatchFailure, dispatch, reconcile, validatePending } = await import('../src/transactions.js');
+const { acquireConfigLock } = await import('../src/config-lock.js');
+// Fail before any fixture write if a future static import captures config early.
+for (const [name, path] of Object.entries({ CONFIG_PATH, KEY_PATH, PENDING_PATH, LAST_TRANSACTION_PATH })) {
+  assert.equal(path.startsWith(`${data}/`), true, `${name} must belong to this disposable fixture`);
+}
+const { ConfigChangedError, classifyDispatchFailure, dispatch, reconcile, validatePending } = await import('../src/transactions.js');
 type Chain = Parameters<typeof dispatch>[1];
 const blockHash = `0x${'ab'.repeat(32)}` as Hex;
 const fixtureHash = `0x${'cd'.repeat(32)}` as Hex;
@@ -532,8 +537,8 @@ test('a fee recheck veto after durable preparation removes only the known-unsent
   const config = await feeConfiguration('50000000'), h = mockedChain();
   h.rpc.getGasPrice = async () => 1_000_000_000n;
   const { FeeTargetError } = await import('../src/fee-target.js');
-  const base = Date.now(); let quotes = 0;
-  t.mock.method(Date, 'now', () => base + (existsSync(PENDING_PATH) ? 31_000 : 0));
+  const base = Date.now(); let quotes = 0, aged = false;
+  t.mock.method(Date, 'now', () => { aged ||= existsSync(PENDING_PATH); return base + (aged ? 31_000 : 0); });
   t.mock.method(globalThis, 'fetch', async () => { quotes++; return feeResponse(quotes === 1 ? '1000' : '9999'); });
   await assert.rejects(dispatch(config, h.chain, transaction, undefined, undefined, { swaps: 1, onCheck: async () => {} }), error => {
     assert.ok(error instanceof FeeTargetError); assert.equal(error.check.state, 'above-target'); return true;
@@ -546,4 +551,137 @@ test('an unset fee target preserves automatic dispatch without any price request
   const h = mockedChain();
   assert.equal((await dispatch(configuration(), h.chain, transaction)).status, 'pending');
   assert.equal(h.sent.length, 1);
+});
+
+// Config edits use the same short lock as the CLI, with fixture public state.
+const editConfig = async (next: ReturnType<typeof configuration>) => {
+  const release = await acquireConfigLock(data);
+  try { await atomicWriteJson(CONFIG_PATH, next); } finally { await release(); }
+};
+const liveChanges = {
+  'fee target': (c: ReturnType<typeof configuration>) => ({ ...c, rebalanceFeeTargetUsdE8: '5000000' }),
+  'target weights': (c: ReturnType<typeof configuration>) => ({ ...c, targets: { ...c.targets, USDG: 9000, AAPL: 1000 } }),
+  'drift trigger': (c: ReturnType<typeof configuration>) => ({ ...c, driftThresholdBps: 750 }),
+  'cycle interval': (c: ReturnType<typeof configuration>) => ({ ...c, rebalanceIntervalSeconds: 7200 }),
+};
+for (const [label, change] of Object.entries(liveChanges)) {
+  for (const boundary of ['RPC preparation', 'signing'] as const) {
+    test(`${label} can change during ${boundary} and prevents an obsolete broadcast`, async () => {
+      const c = configuration(), h = mockedChain(); let signatures = 0;
+      if (boundary === 'RPC preparation') h.rpc.getBalance = async () => {
+        await editConfig(change(c)); return 10n ** 18n;
+      };
+      await assert.rejects(dispatch(c, h.chain, transaction, async () => ({ address: wallet, signTransaction: async tx => {
+        signatures++;
+        if (boundary === 'signing') await editConfig(change(c));
+        return privateKeyToAccount(key).signTransaction(tx);
+      } })), ConfigChangedError);
+      assert.equal(signatures, boundary === 'signing' ? 1 : 0);
+      assert.equal(h.sent.length, 0); assert.equal(await readJson(PENDING_PATH), null);
+      assert.deepEqual(await readJson(CONFIG_PATH), change(c));
+      assert.equal(await readJson(join(data, 'config.lock')), null);
+    });
+  }
+}
+
+for (const mode of ['privy', 'ledger'] as const) test(`${mode} signing waits permit settings edits without broadcasting their old signature`, async () => {
+  const c = { ...configuration(), mode }, h = mockedChain();
+  await atomicWriteJson(CONFIG_PATH, c);
+  let signatures = 0;
+  await assert.rejects(dispatch(c, h.chain, transaction, async () => ({ address: wallet, signTransaction: async tx => {
+    signatures++; await editConfig({ ...c, driftThresholdBps: 1000 });
+    return privateKeyToAccount(key).signTransaction(tx);
+  } }), mode === 'ledger' ? { assertReady: async () => {} } : undefined), ConfigChangedError);
+  assert.equal(signatures, 1); assert.equal(h.sent.length, 0); assert.equal(await readJson(PENDING_PATH), null);
+});
+
+test('a setting saved while dispatch waits for the final lock wins over its prepared signature', async () => {
+  const c = configuration(), h = mockedChain();
+  let releaseWriter!: () => Promise<void>, signed!: () => void;
+  const signatureReady = new Promise<void>(resolve => { signed = resolve; });
+  const dispatching = dispatch(c, h.chain, transaction, async () => ({ address: wallet, signTransaction: async tx => {
+    releaseWriter = await acquireConfigLock(data);
+    const serialized = await privateKeyToAccount(key).signTransaction(tx);
+    signed(); return serialized;
+  } }));
+  const rejected = assert.rejects(dispatching, ConfigChangedError);
+  await signatureReady;
+  try { await atomicWriteJson(CONFIG_PATH, { ...c, driftThresholdBps: 900 }); }
+  finally { await releaseWriter(); }
+  await rejected;
+  assert.equal(h.sent.length, 0); assert.equal(await readJson(PENDING_PATH), null);
+});
+
+for (const response of ['success', 'unknown'] as const) test(`edits during an in-flight ${response} send preserve its original receipt barrier`, async () => {
+  const c = configuration(), h = mockedChain();
+  let invoked!: () => void, finish!: () => void;
+  const started = new Promise<void>(resolve => { invoked = resolve; });
+  const waitResponse = new Promise<void>(resolve => { finish = resolve; });
+  h.rpc.sendRawTransaction = async ({ serializedTransaction }) => {
+    assert.equal(existsSync(join(data, 'config.lock')), true, 'the actual invocation serializes with setting writers');
+    assert.equal(existsSync(PENDING_PATH), true);
+    h.sent.push(serializedTransaction); invoked();
+    await waitResponse;
+    if (response === 'unknown') throw new Error('fixture response lost');
+    return keccak256(serializedTransaction);
+  };
+  const dispatching = dispatch(c, h.chain, transaction);
+  await started;
+  const barrier = await readJson<PendingTransaction>(PENDING_PATH);
+  assert.equal(barrier?.status, 'prepared');
+  const next = { ...c, driftThresholdBps: 900, rebalanceIntervalSeconds: 7200 };
+  try {
+    await editConfig(next);
+    assert.deepEqual(await readJson(PENDING_PATH), barrier);
+  } finally { finish(); }
+  const result = await dispatching;
+  assert.equal(result.status, response === 'success' ? 'pending' : 'unresolved');
+  assert.equal(h.sent.length, 1);
+  assert.equal((await readJson<PendingTransaction>(PENDING_PATH))?.hash, barrier?.hash);
+  assert.deepEqual(await readJson(CONFIG_PATH), next);
+  assert.equal((await reconcile(next, h.chain)).operation?.status, 'confirmed');
+  assert.equal(await readJson(PENDING_PATH), null);
+});
+
+test('a synchronous send invocation failure remains uncertain after the config lock releases', async () => {
+  const h = mockedChain();
+  h.rpc.sendRawTransaction = () => { throw new Error('fixture synchronous transport failure'); };
+  const result = await dispatch(configuration(), h.chain, transaction);
+  assert.equal(result.status, 'unresolved');
+  assert.equal((await readJson<PendingTransaction>(PENDING_PATH))?.status, 'unknown');
+  assert.equal(await readJson(join(data, 'config.lock')), null);
+});
+
+test('configuration change after durable preparation removes only the known-unsent barrier', async t => {
+  const c = configuration(), h = mockedChain(), now = Date.now();
+  const next = { ...c, driftThresholdBps: 900 };
+  t.mock.method(Date, 'now', () => {
+    if (existsSync(PENDING_PATH)) writeFileSync(CONFIG_PATH, JSON.stringify(next));
+    return now;
+  });
+  await assert.rejects(dispatch(c, h.chain, { ...transaction, expiresAt: BigInt(Math.floor(now / 1000) + 60) }), ConfigChangedError);
+  assert.equal(h.sent.length, 0); assert.equal(await readJson(PENDING_PATH), null);
+  assert.deepEqual(await readJson(CONFIG_PATH), next);
+});
+
+test('a Ledger intent error caused by a settings edit is classified as a quiet config change', async () => {
+  const c = { ...configuration(), mode: 'ledger' as const }, h = mockedChain();
+  await atomicWriteJson(CONFIG_PATH, c);
+  await assert.rejects(dispatch(c, h.chain, transaction, async () => assert.fail('No signer should be loaded'), {
+    assertReady: async () => {
+      await editConfig({ ...c, driftThresholdBps: 900 });
+      throw new Error('The previous device intent ended');
+    },
+  }), ConfigChangedError);
+  assert.equal(h.sent.length, 0); assert.equal(await readJson(PENDING_PATH), null);
+});
+
+test('an aborted Ledger signer after a config edit is classified without a stale broadcast', async () => {
+  const c = { ...configuration(), mode: 'ledger' as const }, h = mockedChain();
+  await atomicWriteJson(CONFIG_PATH, c);
+  await assert.rejects(dispatch(c, h.chain, transaction, async () => ({ address: wallet, signTransaction: async () => {
+    await editConfig({ ...c, driftThresholdBps: 900 });
+    throw new Error('Fixture device prompt aborted');
+  } }), { assertReady: async () => {} }), ConfigChangedError);
+  assert.equal(h.sent.length, 0); assert.equal(await readJson(PENDING_PATH), null);
 });

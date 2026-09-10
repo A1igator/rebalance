@@ -1,3 +1,4 @@
+import { assertTemporaryTestDirectory } from '../src/test-isolation.js';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -10,8 +11,10 @@ import type { RebalanceEvent } from '../src/events.js';
 // Set the data directory before importing modules that capture it at load time.
 const directory = await mkdtemp(join(tmpdir(), 'rebalance-events-test-'));
 const previousDirectory = process.env.REBALANCE_DATA_DIR;
+assertTemporaryTestDirectory(directory);
 process.env.REBALANCE_DATA_DIR = directory;
 const { events, publishEvent, acknowledgeEvent, ledgerCondition, rebalanceCompleted, attentionCondition, transactionRecovered } = await import('../src/events.js');
+assert.equal((await import('../src/config.js')).DATA, directory, 'captured DATA must belong to this disposable fixture');
 const queuePath = join(directory, 'events.json');
 const conditionPath = join(directory, 'notification-state.json');
 

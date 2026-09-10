@@ -1,3 +1,4 @@
+import { assertTemporaryTestDirectory } from '../src/test-isolation.js';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
@@ -8,11 +9,14 @@ import { promisify } from 'node:util';
 import { atomicWriteJson, readJson, type PendingTransaction } from '../src/storage.js';
 
 const directory = await mkdtemp(join(tmpdir(), 'rebalance-cadence-test-'));
+assertTemporaryTestDirectory(directory);
 process.env.REBALANCE_DATA_DIR = directory;
 delete process.env.REBALANCE_PRIVATE_KEY;
-const { validateConfig } = await import('../src/config.js');
+const { DATA, validateConfig } = await import('../src/config.js');
+assert.equal(DATA, directory, 'captured DATA must belong to this disposable fixture');
 const { CYCLE_PATH, beginRebalanceCycle, finishRebalanceCycle, noteSuccessfulSwap, readCycle,
   rebalanceInterval } = await import('../src/cadence.js');
+assert.equal(CYCLE_PATH, join(directory, 'cycle.json'));
 const wallet = '0x0000000000000000000000000000000000000001';
 const config = validateConfig({ version: 1, chainId: 4663, wallet, mode: 'ledger', rpcUrl: 'http://fixture.invalid',
   targets: { USDG: 2000, TSLA: 2000, AAPL: 2000, NVDA: 2000, AMZN: 2000 },

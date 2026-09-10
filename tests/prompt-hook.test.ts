@@ -1,3 +1,4 @@
+import { assertTemporaryTestDirectory } from '../src/test-isolation.js';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -5,11 +6,24 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve as resolvePath } from 'node:path';
-import { test } from 'node:test';
+import { test, type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const { handlePrompt: realHandlePrompt, launchPromptFormat, recoveryPromptFormat, selectLaunchRequest, selectRecoveryRequest } = await import(new URL('../scripts/rebalance-hook.mjs', import.meta.url).href);
 const handlePrompt = (input: unknown, overrides: Record<string, unknown> = {}) => realHandlePrompt(input, { runView: async () => undefined, ...overrides });
+
+function pinFixtureRepository(t: TestContext, root: string) {
+  assertTemporaryTestDirectory(root);
+  const previousRoot = process.env.REBALANCE_ROOT_DIR;
+  const previousData = process.env.REBALANCE_DATA_DIR;
+  process.env.REBALANCE_ROOT_DIR = join(root, '.local');
+  process.env.REBALANCE_DATA_DIR = join(root, '.local');
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.REBALANCE_ROOT_DIR; else process.env.REBALANCE_ROOT_DIR = previousRoot;
+    if (previousData === undefined) delete process.env.REBALANCE_DATA_DIR; else process.env.REBALANCE_DATA_DIR = previousData;
+  });
+}
+
 const event = { hook_event_name: 'UserPromptSubmit', prompt: '$rebalance', permission_mode: 'default',
   session_id: 'fixture-session', turn_id: 'fixture-turn', cwd: '/fixture' };
 const skillPrompt = (root: string) => `[$rebalance](${resolvePath(root, 'skills/rebalance/SKILL.md')})`;
@@ -117,6 +131,7 @@ test('ambient framing excludes metadata commands, malformed wrappers and every n
 
 test('a bare command routes directly to the launcher with stable opaque request identity', async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-hook-test-')));
+  pinFixtureRepository(t, root);
   t.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(join(root, 'nested'));
   const calls: string[] = [];
@@ -144,6 +159,7 @@ test('a bare command routes directly to the launcher with stable opaque request 
 test('launch and recovery pin the wallet before stop/bootstrap and reuse it after chat reattachment', async t => {
   for (const action of ['launch', 'recovery']) await t.test(action, async t => {
     const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-hook-frozen-wallet-')));
+    pinFixtureRepository(t, root);
     t.after(() => rm(root, { recursive: true, force: true }));
     const first = walletProfile(root, '1', 4664);
     const second = walletProfile(root, '2', 4665);
@@ -195,6 +211,7 @@ test('launch and recovery pin the wallet before stop/bootstrap and reuse it afte
 
 test('independent native sessions route the same turn label to different wallet state', async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-hook-wallet-sessions-')));
+  pinFixtureRepository(t, root);
   t.after(() => rm(root, { recursive: true, force: true }));
   const profiles = { 'session-a': walletProfile(root, '1', 4664), 'session-b': walletProfile(root, '2', 4665) };
   const visits: string[] = [];
@@ -225,6 +242,7 @@ test('independent native sessions route the same turn label to different wallet 
 test('legacy handled request records retain legacy wallet affinity after the chat selects another wallet', async t => {
   for (const action of ['launch', 'recovery']) await t.test(action, async t => {
     const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-hook-legacy-route-')));
+    pinFixtureRepository(t, root);
     t.after(() => rm(root, { recursive: true, force: true }));
     const attached = walletProfile(root, '2', 4665);
     const input = { ...event, cwd: root, prompt: action === 'recovery' ? '$rebalance recover' : '$rebalance' };
@@ -256,6 +274,7 @@ test('legacy handled request records retain legacy wallet affinity after the cha
 
 test('route persistence failure blocks before stop state, dependency bootstrap or dispatch', async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-hook-route-failure-')));
+  pinFixtureRepository(t, root);
   t.after(() => rm(root, { recursive: true, force: true }));
   const profile = walletProfile(root, '1', 4664);
   await mkdir(profile.rootDir, { recursive: true });
@@ -272,6 +291,7 @@ test('route persistence failure blocks before stop state, dependency bootstrap o
 
 test('explicit recovery forms route only to recovery with stable identity and the original stop generation', async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-hook-recovery-')));
+  pinFixtureRepository(t, root);
   t.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(join(root, 'nested'));
   const forms = [['$rebalance recover', 'typed'], [`${skillPrompt(root)} recover`, 'canonical-skill-link'],
@@ -307,6 +327,7 @@ test('explicit recovery forms route only to recovery with stable identity and th
 
 test('recovery requires an exact user command, valid identity, execution mode and selected workspace', async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-hook-recovery-gates-')));
+  pinFixtureRepository(t, root);
   const outside = await mkdtemp(join(tmpdir(), 'rebalance-hook-recovery-outside-'));
   t.after(() => Promise.all([root, outside].map(path => rm(path, { recursive: true, force: true }))));
   const overrides = { repository: root,
@@ -337,6 +358,7 @@ test('recovery requires an exact user command, valid identity, execution mode an
 
 test('post-dispatch recovery failure reports unknown state without leaking errors or launching a fallback', async t => {
   const root = await mkdtemp(join(tmpdir(), 'rebalance-hook-recovery-failure-'));
+  pinFixtureRepository(t, root);
   t.after(() => rm(root, { recursive: true, force: true }));
   const result = await handlePrompt({ ...event, cwd: root, prompt: '$rebalance recover' }, { repository: root,
     readStopToken: async () => 'none', ensureDependencies: async () => {},
@@ -353,6 +375,7 @@ test('post-dispatch recovery failure reports unknown state without leaking error
 
 test('a standalone skill-picker link routes to the same launcher request as the literal command', async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance hook picker-')));
+  pinFixtureRepository(t, root);
   t.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(join(root, 'nested'));
   const calls: string[] = [];
@@ -380,6 +403,7 @@ test('a standalone skill-picker link routes to the same launcher request as the 
 
 test('ambient framing routes only the entire bare user request with the same stable launch identity', async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-hook-ambient-')));
+  pinFixtureRepository(t, root);
   t.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(join(root, 'nested'));
   const literal = { ...event, cwd: join(root, 'nested') };
@@ -412,6 +436,7 @@ test('ambient framing routes only the entire bare user request with the same sta
 
 test('hook does not launch when installed outside its selected workspace', async t => {
   const root = await mkdtemp(join(tmpdir(), 'rebalance-hook-root-'));
+  pinFixtureRepository(t, root);
   const unrelated = await mkdtemp(join(tmpdir(), 'rebalance-hook-unrelated-'));
   t.after(() => Promise.all([root, unrelated].map(path => rm(path, { recursive: true, force: true }))));
   for (const prompt of ['$rebalance', skillPrompt(root), ambientPrompt('$rebalance'), ambientPrompt(skillPrompt(root))]) {
@@ -424,6 +449,7 @@ test('hook does not launch when installed outside its selected workspace', async
 
 test('dependency failure prevents launch and failed structured outcomes are reported without claiming success', async t => {
   const root = await mkdtemp(join(tmpdir(), 'rebalance-hook-failure-'));
+  pinFixtureRepository(t, root);
   t.after(() => rm(root, { recursive: true, force: true }));
   const failed = await handlePrompt({ ...event, cwd: root }, { repository: root,
     ensureDependencies: async () => { throw new Error('fixture-secret-install-error'); },
@@ -443,6 +469,7 @@ test('dependency failure prevents launch and failed structured outcomes are repo
 
 test('a failure after launch dispatch reports unknown state without exposing the exception or claiming unarmed', async t => {
   const root = await mkdtemp(join(tmpdir(), 'rebalance-hook-dispatch-'));
+  pinFixtureRepository(t, root);
   t.after(() => rm(root, { recursive: true, force: true }));
   const result = await handlePrompt({ ...event, cwd: root }, { repository: root,
     ensureDependencies: async () => {},
@@ -458,6 +485,7 @@ test('a failure after launch dispatch reports unknown state without exposing the
 
 test('saved stop-state failures return a public blocked result before dependencies or launch', async t => {
   const root = await mkdtemp(join(tmpdir(), 'rebalance-hook-stop-failure-'));
+  pinFixtureRepository(t, root);
   t.after(() => rm(root, { recursive: true, force: true }));
   const result = await handlePrompt({ ...event, cwd: root }, { repository: root,
     readStopToken: async () => { throw new Error('fixture-secret-record-error'); },
@@ -502,6 +530,7 @@ test('malformed input and nonexistent cwd exit successfully with safe structured
 
 test('hook captures the stop generation before dependency installation and passes it unchanged', async t => {
   const root = await mkdtemp(join(tmpdir(), 'rebalance-hook-stop-'));
+  pinFixtureRepository(t, root);
   t.after(() => rm(root, { recursive: true, force: true }));
   let current = 'none';
   const calls: string[] = [];
@@ -595,7 +624,7 @@ test('prepared hook command reaches the actual CLI in an isolated unconfigured f
   const root = fileURLToPath(new URL('..', import.meta.url));
   const definition = JSON.parse(await readFile(new URL('../.codex/hooks.json', import.meta.url), 'utf8'));
   const command = definition.hooks.UserPromptSubmit[0].hooks[0].command;
-  const env: NodeJS.ProcessEnv = { ...process.env, REBALANCE_DATA_DIR: directory, NODE_OPTIONS: `--import=${preload}` };
+  const env: NodeJS.ProcessEnv = { ...process.env, REBALANCE_ROOT_DIR: directory, REBALANCE_DATA_DIR: directory, NODE_OPTIONS: `--import=${preload}` };
   delete env.REBALANCE_PRIVATE_KEY;
   const forms = [['$rebalance', 'typed'], [skillPrompt(root), 'canonical-skill-link'],
     [ambientPrompt('$rebalance'), 'ambient-typed'], [ambientPrompt(skillPrompt(root)), 'ambient-canonical-skill-link'],
@@ -605,7 +634,9 @@ test('prepared hook command reaches the actual CLI in an isolated unconfigured f
   for (const [index, [prompt, expectedFormat]] of forms.entries()) {
     const input = { ...event, prompt, cwd: root, turn_id: `fixture-entry-${index}` };
     const output = await new Promise<string>((resolve, reject) => {
-      const child = execFile('/bin/sh', ['-c', command], { cwd: root, env, timeout: 10_000 }, (error, stdout) => {
+      // This fixture invokes both the hook and a cold CLI process. Keep its
+      // harness limit separate from the unchanged production hook deadlines.
+      const child = execFile('/bin/sh', ['-c', command], { cwd: root, env, timeout: 30_000 }, (error, stdout) => {
         if (error) reject(error); else resolve(stdout);
       });
       child.stdin!.end(JSON.stringify(input));

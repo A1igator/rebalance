@@ -17,7 +17,8 @@ async function harness(t: TestContext, pending = false) {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: epoch });
   const abort = new AbortController();
   let wake: (reason: WakeReason) => void = () => {};
-  let calls = 0, reads = 0, closed = false, concurrent = 0, peak = 0;
+  let calls = 0, reads = 0, closed = false, concurrent = 0, peak = 0, sources = 0;
+  const started: MonitorInput[] = [];
   const config = configuration();
   let input: MonitorInput = { config, cycle: null, stopped: false,
     pending: pending ? { createdAt: new Date(epoch).toISOString() } as MonitorInput['pending'] : null };
@@ -25,12 +26,13 @@ async function harness(t: TestContext, pending = false) {
   let block: Promise<void> | undefined;
   const done = driveMonitor({ dataDir: '/fixture', signal: abort.signal,
     read: async () => { reads++; return input; },
-    run: async () => { calls++; peak = Math.max(peak, ++concurrent); await block; concurrent--; return result; },
-    source: options => { wake = options.onWake; return { close: () => { closed = true; }, state: () => ({ feed: 'connected', files: 'watching', lastActivityAt: null }) }; },
+    run: async () => { calls++; started.push(structuredClone(input)); peak = Math.max(peak, ++concurrent); await block; concurrent--; return result; },
+    source: options => { sources++; wake = options.onWake; return { close: () => { closed = true; }, state: () => ({ feed: 'connected', files: 'watching', lastActivityAt: null }) }; },
   });
   t.after(async () => { abort.abort(); await done; });
   await flush();
   return {
+    get started() { return started; }, get sources() { return sources; },
     get calls() { return calls; }, get reads() { return reads; }, get peak() { return peak; }, get closed() { return closed; },
     wake: (reason: WakeReason) => wake(reason),
     change: (patch: Partial<MonitorInput>) => { input = { ...input, ...patch }; },
@@ -180,4 +182,83 @@ test('a Ledger request or USB revision wakes a cooled monitor immediately withou
   await h.advance(0); assert.equal(h.calls, 4, 'USB presence prompts a fresh observation, never authorization');
   h.change({ ledgerRequest: 'request-two:1' });
   await h.advance(5000); assert.equal(h.calls, 5, 'missed request file event is covered by local control watchdog');
+});
+
+
+const liveEdits: [string, (config: Config) => Config][] = [
+  ['fee target added', config => ({ ...config, rebalanceFeeTargetUsdE8: '5000000' })],
+  ['fee target changed', config => ({ ...config, rebalanceFeeTargetUsdE8: '10000000' })],
+  ['fee target removed', config => { const { rebalanceFeeTargetUsdE8: _fee, ...withoutFee } = config; return withoutFee; }],
+  ['full targets replaced', config => ({ ...config, targets: { USDG: 1000, TSLA: 2500, AMZN: 2500, MSFT: 2000, AMD: 2000 } })],
+  ['drift trigger', config => ({ ...config, driftThresholdBps: 250 })],
+  ['cycle interval', config => ({ ...config, rebalanceIntervalSeconds: 7200 })],
+  ['slippage', config => ({ ...config, slippageBps: 100 })],
+  ['poll interval', config => ({ ...config, pollSeconds: 5 })],
+  ['transaction deadline', config => ({ ...config, deadlineSeconds: 300 })],
+];
+
+for (const barrier of ['pending', 'cooldown'] as const) {
+  test(`all live settings immediately refresh the same serial monitor while retaining its ${barrier} barrier`, async t => {
+    const h = await harness(t, barrier === 'pending');
+    const cycle = { startedAt: new Date(epoch - 3500000).toISOString(), activeUntil: new Date(epoch - 2900000).toISOString(),
+      nextEligibleAt: new Date(epoch + 60000).toISOString() };
+    h.change({ cycle }); h.result({ cycle, operation: { status: barrier === 'pending' ? 'pending' : 'cooling-down' } });
+    h.wake('cycle'); await h.advance(0);
+    let config = configuration();
+    const originalPending = h.started.at(-1)!.pending;
+    for (const [name, edit] of liveEdits) {
+      const before = h.calls;
+      config = edit(config); h.change({ config });
+      for (let event = 0; event < 20; event++) h.wake('config');
+      await h.advance(0);
+      assert.equal(h.calls, before + 1, `${name} receives an immediate traversal`);
+      assert.deepEqual(h.started.at(-1)!.config, config);
+      assert.deepEqual(h.started.at(-1)!.cycle, cycle, 'settings do not reset recorded cadence');
+      assert.deepEqual(h.started.at(-1)!.pending, originalPending, 'settings do not release the receipt barrier');
+      h.wake('config'); await h.advance(0);
+      assert.equal(h.calls, before + 1, 'duplicate file events do not rerun the same config');
+    }
+    assert.equal(h.sources, 1, 'settings reuse the existing monitor and event source');
+    assert.equal(h.peak, 1);
+    const beforeDeadline = h.calls;
+    await h.advance(barrier === 'pending' ? 2999 : 59999);
+    assert.equal(h.calls, beforeDeadline, 'the original receipt watchdog or cycle deadline still applies');
+    await h.advance(1); assert.equal(h.calls, beforeDeadline + 1);
+  });
+}
+
+test('every setting edit during a running traversal is queued once with the latest config and no overlap', async t => {
+  const h = await harness(t);
+  let config = configuration();
+  for (const [name, edit] of liveEdits) {
+    let release!: () => void;
+    h.block(new Promise<void>(resolve => { release = resolve; }));
+    const before = h.calls;
+    h.wake('chain'); await h.advance(5000);
+    assert.equal(h.calls, before + 1);
+    const previous = config;
+    config = edit(config); h.change({ config });
+    for (let event = 0; event < 20; event++) h.wake('config');
+    await h.advance(0);
+    assert.equal(h.calls, before + 1, `${name} waits for the current traversal to settle`);
+    release(); h.block(); await flush(); await h.advance(0);
+    assert.equal(h.calls, before + 2);
+    assert.deepEqual(h.started.at(-2)!.config, previous);
+    assert.deepEqual(h.started.at(-1)!.config, config);
+  }
+  assert.equal(h.peak, 1); assert.equal(h.sources, 1);
+});
+
+test('a config change observed after a blocked run refreshes immediately even when its file event is missed', async t => {
+  const h = await harness(t);
+  let release!: () => void;
+  h.block(new Promise<void>(resolve => { release = resolve; }));
+  h.wake('chain'); await h.advance(5000);
+  assert.equal(h.calls, 2);
+  const updated = { ...configuration(), rebalanceFeeTargetUsdE8: '5000000' };
+  h.change({ config: updated });
+  release(); h.block(); await flush(); await h.advance(0);
+  assert.equal(h.calls, 3, 'the post-run read already knows a fresh traversal is required');
+  assert.deepEqual(h.started.at(-1)!.config, updated);
+  assert.equal(h.sources, 1); assert.equal(h.peak, 1);
 });
