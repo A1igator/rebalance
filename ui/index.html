@@ -16,14 +16,13 @@
       <nav class="chart-nav" aria-label="Portfolio navigation">
         <a id="portfolios-back" href="/">← Portfolios</a>
         <div class="portfolio-actions">
-          <button id="copy-address" class="address-button" type="button" disabled>
-            <svg class="control-icon" viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M13 5V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h1"/></svg>
-            <span id="copy-address-label">Address</span>
-          </button>
+          <a id="wallet-explorer" class="address-link" role="link" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" aria-disabled="true" tabindex="-1">
+            <svg class="control-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M11 3h6v6M17 3l-8 8M8 4H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-3"/></svg>
+            <span id="wallet-explorer-label">Address</span>
+          </a>
           <button id="portfolio-run" class="run-button" type="button" disabled>Unavailable</button>
         </div>
       </nav>
-      <div id="funding-fallback" class="funding-fallback" hidden><input id="funding-address" readonly aria-label="Funding address on Robinhood chain 4663" spellcheck="false"></div>
 
       <div class="main">
         <svg class="ring" id="ring" viewBox="-60 -20 560 480" role="img" aria-labelledby="chart-title chart-description">
@@ -51,11 +50,6 @@
           <svg class="chev" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button></div>
         <div class="panel" id="panel"><div class="panelin"><div class="panelpad measure">
-          <section>
-            <p class="cap">Latest trade</p>
-            <p class="sval" id="why-trade">—</p>
-            <p class="sval mono" id="why-receipt">—</p>
-          </section>
           <div class="pair">
             <section>
               <p class="cap">Fees</p>

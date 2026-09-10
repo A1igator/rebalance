@@ -27,8 +27,9 @@ type Response = { ok: boolean; json: () => Promise<unknown> };
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
 async function browser(options: { gas?: () => Promise<Response>; status?: () => Promise<Response> } = {}) {
-  const [ringScript, script] = await Promise.all(['allocation-ring.js', 'app.js']
+  const [ringScript, script, html] = await Promise.all(['allocation-ring.js', 'app.js', 'index.html']
     .map(file => readFile(new URL(`../ui/${file}`, import.meta.url), 'utf8')));
+  const htmlIds = new Set([...html!.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]));
   const elements = new Map<string, DisplayNode>();
   const lifecycle = new Map<string, () => void>();
   const timers = new Map<number, { fn: () => void; at: number }>();
@@ -79,7 +80,7 @@ async function browser(options: { gas?: () => Promise<Response>; status?: () => 
     },
     window: { addEventListener: (name: string, handler: () => void) => lifecycle.set(name, handler) },
     document: {
-      getElementById: (id: string) => { if (id === 'arcs') pieRenders++; if (!elements.has(id)) elements.set(id, node('text', id)); return elements.get(id); },
+      getElementById: (id: string) => { if (!htmlIds.has(id)) return null; if (id === 'arcs') pieRenders++; if (!elements.has(id)) elements.set(id, node('text', id)); return elements.get(id); },
       createElementNS: (_namespace: string, tag: string) => node(tag),
     },
   });
@@ -204,17 +205,15 @@ test('ring labels clear the ring and stay inside the viewBox after collision spa
   page.hide();
 });
 
-test('an unconfirmed send never renders as a bare receipt hash', async () => {
+test('receipt progress stays in the center and a pending swap uses only a ghost arc', async () => {
   const page = await browser();
   const hash = `0x${'a'.repeat(64)}`;
   page.source.send({ ...current, operation: { status: 'pending', kind: 'swap', hash }, proposal: { sellAssetId: 'AAPL', buyAssetId: 'USDG', amountIn: '1', reason: 'Sell overweight AAPL into USDG' } });
   assert.equal(page.element('c-state').textContent, 'Rebalancing');
-  assert.match(page.element('why-receipt').textContent, /unconfirmed$/);
   assert.equal(page.element('c-sub').textContent, 'AAPL → USDG', 'the centre names the pair, not a second copy of the state');
   assert.equal(page.element('c-val').textContent, 'Waiting for receipt', 'mid-trade the send state replaces the portfolio total');
   assert.ok(page.element('ghost').classes.has('show'), 'a pending swap shows where the holding is heading');
   page.source.send({ ...current, operation: { status: 'confirmed', hash, blockNumber: '55516741' } });
-  assert.equal(page.element('why-receipt').textContent, `✓ ${hash.slice(0, 8)}… blk 55516741`);
   assert.ok(!page.element('ghost').classes.has('show'), 'a settled swap moves the arc instead of ghosting it');
   page.hide();
 });
@@ -630,7 +629,6 @@ test('missing or inconsistent valuation preserves holdings without an exact on-t
     assert.equal(page.element('c-sub').textContent, 'Exact drift unavailable');
     assert.equal(page.element('arcs').children.length, 5);
     assert.equal(page.element('labels').children.filter(g => g.attrs.class === 'label-out').length, 0);
-    assert.doesNotMatch(page.element('why-trade').textContent, /No trade needed/);
   }
   page.hide();
 });
@@ -644,20 +642,17 @@ test('Ledger monitoring and queued or consumed requests never imply an automatic
   const page = await browser();
   page.source.send({ ...ledgerSnapshot, operation: { status: 'waiting-ledger' } });
   assert.equal(page.element('c-state').textContent, 'Ledger needed');
-  assert.match(page.element('why-trade').textContent, /Monitoring only/);
   page.source.send({ ...ledgerSnapshot, ledgerRequest, operation: { status: 'ledger-rejected' } });
   assert.equal(page.element('c-sub').textContent, 'Queued for a fresh check', 'a new request supersedes the prior request outcome');
   page.source.send({ ...ledgerSnapshot, ledgerRequest: { ...ledgerRequest, state: 'consumed' }, graph: { node: 'execute' } });
   assert.equal(page.element('c-state').textContent, 'Ledger request');
   assert.equal(page.element('c-sub').textContent, 'Physical confirmation required');
-  assert.match(page.element('why-trade').textContent, /Preparing a transaction or awaiting Ledger confirmation/);
   assert.ok(!page.element('ghost').classes.has('show'));
   for (const [outcome, label] of [['rejected', 'Request rejected'], ['cancelled', 'Request cancelled'], ['timeout', 'Request timed out'], ['expired', 'Request expired']]) {
     page.source.send({ ...ledgerSnapshot, operation: { status: `ledger-${outcome}` },
       ledgerRequest: { ...ledgerRequest, state: 'finished', outcome } });
     assert.equal(page.element('c-state').textContent, label);
     assert.equal(page.element('c-sub').textContent, 'New request required');
-    assert.match(page.element('why-trade').textContent, /No automatic signing retry/);
     page.source.send({ ...ledgerSnapshot, operation: { status: 'waiting-ledger' }, ledgerRequest: { ...ledgerRequest, state: 'finished', outcome } });
     assert.equal(page.element('c-state').textContent, label, 'a later monitoring check retains the ended-request explanation');
   }
@@ -686,17 +681,11 @@ test('Ledger receipt barriers override signing intent and distinguish approvals 
       operation: { status, kind: 'approval', hash } });
     assert.equal(page.element('c-state').textContent, 'Approval pending');
     assert.equal(page.element('c-sub').textContent, 'Token spending approval');
-    assert.match(page.element('why-receipt').textContent, /unconfirmed$/);
-    assert.match(page.element('why-trade').textContent, /awaiting a verified receipt/);
-    assert.doesNotMatch(page.element('why-trade').textContent, /Ledger confirmation/);
     assert.ok(!page.element('ghost').classes.has('show'), 'an approval does not predict changed holdings');
   }
   page.source.send({ ...ledgerSnapshot, proposal: undefined, operation: { status: 'reverted', kind: 'swap', hash } });
   assert.equal(page.element('c-state').textContent, 'Transaction reverted');
   assert.equal(page.element('c-sub').textContent, 'Receipt recovery required');
-  assert.match(page.element('why-trade').textContent, /verify and acknowledge the failed receipt/);
-  assert.match(page.element('why-receipt').textContent, / · reverted$/);
-  assert.doesNotMatch(page.element('why-receipt').textContent, /unconfirmed/);
   assert.ok(!page.element('ghost').classes.has('show'));
   page.hide();
 });

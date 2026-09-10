@@ -249,9 +249,6 @@
     const amount = unsigned(value);
     return amount === null ? null : usdFormat.format(Number(amount / 1000000n) / 100);
   }
-  function shortHash(hash) {
-    return typeof hash === "string" && /^0x[0-9a-fA-F]{64}$/.test(hash) ? `${hash.slice(0, 8)}…` : null;
-  }
   function duration(seconds) {
     if (!Number.isSafeInteger(seconds) || seconds <= 0) return null;
     if (seconds % 3600 === 0) { const hours = seconds / 3600; return `${hours} ${hours === 1 ? "hour" : "hours"}`; }
@@ -296,13 +293,13 @@
       const deadline = request.state === "requested" ? request.queueExpiresAt : request.expiresAt;
       if (!Number.isSafeInteger(deadline) || deadline <= Date.now()) outcome = "expired";
       else return request.state === "requested"
-        ? { state: "Ledger request", sub: "Queued for a fresh check", detail: "A rebalance was requested. The runner will check current holdings before any transaction." }
-        : { state: "Ledger request", sub: "Physical confirmation required", detail: "Preparing a transaction or awaiting Ledger confirmation. Review every approval and swap on the device when prompted." };
+        ? { state: "Ledger request", sub: "Queued for a fresh check" }
+        : { state: "Ledger request", sub: "Physical confirmation required" };
     }
     const ended = { rejected: "Request rejected", cancelled: "Request cancelled", timeout: "Request timed out", expired: "Request expired",
       "device-changed": "Device changed", "runner-restarted": "Request ended", invalidated: "Request ended", "cycle-invalidated": "Request ended" }[outcome];
-    if (ended) return { state: ended, sub: "New request required", detail: `${ended}. No automatic signing retry; request a fresh rebalance through your agent when ready.` };
-    if (needed) return { state: "Ledger needed", sub: "Request rebalance through agent", detail: "Monitoring only. Connect Ledger and request a rebalance through your agent; every approval and swap requires physical confirmation." };
+    if (ended) return { state: ended, sub: "New request required" };
+    if (needed) return { state: "Ledger needed", sub: "Request rebalance through agent" };
     return null;
   }
 
@@ -442,24 +439,6 @@
       ghost.setAttribute("stroke-dashoffset", -offset);
     }
     ghost.classList.toggle("show", Boolean(ghostTarget));
-
-    const hash = shortHash(snapshot?.operation?.hash);
-    const trade = snapshot?.proposal?.reason;
-    byId("why-trade").textContent = reverted
-      ? snapshot?.mode === "ledger" ? "Transaction reverted. Ask your agent to verify and acknowledge the failed receipt before another rebalance request."
-        : "Transaction reverted. Receipt recovery must complete before another trade."
-      : receiptWait ? `${transaction} awaiting a verified receipt.${trade ? ` ${trade}.` : ""}`
-      : ledger?.detail || trade || (funded ? deviation && !outside ? "No trade needed" : "No current trade proposal" : "\u2014");
-    // An unconfirmed send never renders as a bare hash; uncertainty stays visible.
-    const receipt = byId("why-receipt");
-    if (hash) {
-      const block = snapshot?.operation?.blockNumber;
-      const confirmed = snapshot?.operation?.status === "confirmed";
-      const settled = { reverted: "reverted", "recovered-revert": "reverted · recovered", cancelled: "cancelled" }[snapshot?.operation?.status];
-      receipt.textContent = `${confirmed ? "\u2713 " : ""}${hash}${block ? ` blk ${block}` : ""}${confirmed ? "" : settled ? ` · ${settled}` : " · unconfirmed"}`;
-    } else {
-      receipt.textContent = receiptWait ? "pending\u2026" : "\u2014";
-    }
 
     byId("set-band").textContent = band === null ? "unavailable" : `\u00b1${percent.format(band / 100)}%`;
     const every = duration(snapshot?.config?.rebalanceIntervalSeconds);

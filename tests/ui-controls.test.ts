@@ -19,7 +19,7 @@ function deferred<T = void>() {
   return { promise, resolve, reject };
 }
 class Node {
-  textContent = ''; title = ''; hidden = false; disabled = false; value = ''; readOnly = false; selected = 0; focused = 0;
+  textContent = ''; title = ''; hidden = false; disabled = false;
   attrs: Record<string, string> = {}; dataset: Record<string, string> = {};
   handlers = new Map<string, (() => void)[]>();
   setAttribute(name: string, value: string) { this.attrs[name] = value; }
@@ -27,17 +27,17 @@ class Node {
   addEventListener(name: string, handler: () => void) { this.handlers.set(name, [...this.handlers.get(name) || [], handler]); }
   click() { if (!this.disabled) this.dispatch('click'); }
   dispatch(name: string) { for (const handler of this.handlers.get(name) || []) handler(); }
-  focus() { this.focused++; }
-  select() { this.selected++; }
-  setSelectionRange(_start: number, _end: number) { this.selected++; }
 }
 type Controls = { updateStatus: (value: unknown, disconnected?: boolean) => void; updateRunner: (value: unknown, disconnected?: boolean) => void };
-async function browser(options: { token?: string | null; clipboard?: false | ((text: string) => Promise<void>); reply?: (call: Call) => Promise<Reply | undefined> } = {}) {
+async function browser(options: { token?: string | null; reply?: (call: Call) => Promise<Reply | undefined> } = {}) {
   const nodes = new Map<string, Node>(), events = new Map<string, (() => void)[]>(), subscribers = new Set<(value: unknown) => void>();
-  const timers = new Map<number, () => void>(), calls: Call[] = [], copied: string[] = [];
+  const timers = new Map<number, () => void>(), calls: Call[] = [];
+  const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const ids = new Set([...html.matchAll(/id="([^"]+)"/g)].map(match => match[1]));
   let uuidCalls = 0, timerId = 0;
   const byId = (id: string) => {
-    if (!nodes.has(id)) { const node = new Node(); node.hidden = ['funding-fallback', 'control-message'].includes(id); nodes.set(id, node); }
+    assert.ok(ids.has(id), `Control references missing markup: ${id}`);
+    if (!nodes.has(id)) { const node = new Node(); node.hidden = id === 'control-message'; nodes.set(id, node); }
     return nodes.get(id)!;
   };
   const window: { rebalanceControls?: Controls; rebalanceView: { token: string | null; subscribe: (callback: (value: unknown) => void) => () => void }; addEventListener: (name: string, handler: () => void) => void } = {
@@ -45,11 +45,8 @@ async function browser(options: { token?: string | null; clipboard?: false | ((t
       subscribe: callback => { subscribers.add(callback); return () => subscribers.delete(callback); } },
     addEventListener: (name, handler) => events.set(name, [...events.get(name) || [], handler]),
   };
-  const clipboard = options.clipboard === false ? undefined : { writeText: async (text: string) => {
-    copied.push(text); if (options.clipboard) await options.clipboard(text);
-  } };
   runInNewContext(await readFile(new URL('../ui/portfolio-controls.js', import.meta.url), 'utf8'), {
-    window, document: { getElementById: byId }, navigator: { clipboard }, AbortController, URL,
+    window, document: { getElementById: byId }, AbortController, URL,
     crypto: { randomUUID: () => `00000000-0000-4000-8000-${String(++uuidCalls).padStart(12, '0')}` },
     setTimeout: (callback: () => void) => { timers.set(++timerId, callback); return timerId; },
     clearTimeout: (id: number) => timers.delete(id),
@@ -64,7 +61,7 @@ async function browser(options: { token?: string | null; clipboard?: false | ((t
   await flush();
   const controls = window.rebalanceControls!;
   assert.ok(controls, 'the chart controls expose their input boundary');
-  return { byId, calls, copied, timers, get uuidCalls() { return uuidCalls; },
+  return { byId, calls, timers, get uuidCalls() { return uuidCalls; },
     posts: () => calls.filter(call => call.method === 'POST'),
     async status(value: unknown = chart(), disconnected = false) { controls.updateStatus(value, disconnected); await flush(); },
     async runner(value: unknown = runner(), disconnected = false) { controls.updateRunner(value, disconnected); await flush(); },
@@ -201,45 +198,58 @@ test('an attachment change during a pending action cannot re-enable controls for
   assert.equal(page.posts().length, 1); assert.equal(page.uuidCalls, 1);
 });
 
-test('address copying uses the full displayed wallet and shows Copied only after clipboard success', async () => {
-  const gate = deferred();
-  const page = await browser({ clipboard: () => gate.promise });
+test('explorer link uses the full displayed wallet without requiring runner or chat authorization', async () => {
+  const page = await browser({ token: null });
   await page.status();
-  assert.match(page.byId('copy-address-label').textContent, /0x1111.*1111/);
-  await page.click('copy-address');
-  assert.deepEqual(page.copied, [wallet]);
-  assert.doesNotMatch(page.byId('copy-address-label').textContent, /Copied/i);
-  gate.resolve(); await flush();
-  assert.match(page.byId('copy-address-label').textContent, /Copied/i);
-  assert.equal(page.byId('funding-fallback').hidden, true);
-  assert.equal(page.posts().length, 0);
+  assert.equal(page.byId('wallet-explorer').attrs.href, `https://robinhoodchain.blockscout.com/address/${wallet}`);
+  assert.match(page.byId('wallet-explorer-label').textContent, /0x1111.*1111/);
+  assert.match(page.byId('wallet-explorer').attrs['aria-label'], new RegExp(wallet));
+  assert.match(page.byId('wallet-explorer').attrs['aria-label'], /opens in a new tab/);
+  assert.equal(page.byId('wallet-explorer').attrs['aria-disabled'], 'false');
+  assert.equal(page.byId('wallet-explorer').attrs.tabindex, undefined);
+  assert.equal(page.byId('portfolio-run').disabled, true);
+  await page.click('wallet-explorer');
+  assert.equal(page.calls.length, 0); assert.equal(page.uuidCalls, 0);
 });
 
-test('denied or unavailable clipboard exposes and selects the exact address without claiming it was copied', async () => {
-  for (const clipboard of [false as const, async () => { throw new Error('Clipboard denied'); }]) {
-    const page = await browser({ clipboard }); await page.status();
-    await page.click('copy-address');
-    assert.equal(page.byId('funding-fallback').hidden, false);
-    assert.equal(page.byId('funding-address').value, wallet);
-    assert.ok(page.byId('funding-address').selected > 0);
-    assert.doesNotMatch(page.byId('copy-address-label').textContent, /Copied/i);
-    assert.equal(page.posts().length, 0);
-  }
+test('explorer link stays pinned to the chart wallet when runner and attachment refer to another wallet', async () => {
+  const page = await browser(); await page.status();
+  await page.runner(runner('running', otherWallet));
+  await page.view({ snapshot: { connectedWallet: otherWallet } });
+  assert.equal(page.byId('wallet-explorer').attrs.href, `https://robinhoodchain.blockscout.com/address/${wallet}`);
+  await page.status(chart(otherWallet));
+  assert.equal(page.byId('wallet-explorer').attrs.href, `https://robinhoodchain.blockscout.com/address/${otherWallet}`);
+  assert.match(page.byId('wallet-explorer-label').textContent, /0x2222.*2222/);
+  await page.status(chart(otherWallet), true);
+  assert.equal(page.byId('wallet-explorer').attrs.href, `https://robinhoodchain.blockscout.com/address/${otherWallet}`, 'a known public wallet remains useful when status updates disconnect');
+  assert.equal(page.byId('portfolio-run').disabled, true);
+  assert.equal(page.calls.length, 0);
 });
 
-test('missing or malformed chart wallet cannot copy an address or expose a stale funding address', async () => {
+test('missing, malformed and wrong-chain wallets remove any prior explorer destination', async () => {
   const page = await browser();
-  await page.click('copy-address', true); assert.deepEqual(page.copied, []);
-  await page.status(); await page.status({ wallet: 'not-an-address' });
-  assert.equal(page.byId('copy-address').disabled, true);
-  await page.click('copy-address', true); assert.deepEqual(page.copied, []);
-  assert.equal(page.byId('funding-fallback').hidden, true);
-  assert.equal(page.byId('funding-address').value, '');
+  assert.equal(page.byId('wallet-explorer').attrs.href, undefined);
+  for (const snapshot of [null, { wallet }, { chain: { id: 1 }, wallet }, { chain: { id: '4663' }, wallet },
+    chart('bad-wallet'), chart(`${wallet}/transactions`), chart(`${wallet}#view=${token}`), chart('javascript:alert(1)')]) {
+    await page.status(); await page.status(snapshot);
+    assert.equal(page.byId('wallet-explorer').attrs.href, undefined);
+    assert.equal(page.byId('wallet-explorer').attrs['aria-disabled'], 'true');
+    assert.equal(page.byId('wallet-explorer').attrs.tabindex, '-1');
+    assert.equal(page.byId('wallet-explorer-label').textContent, 'Address');
+    await page.click('wallet-explorer', true);
+  }
+  assert.equal(page.calls.length, 0); assert.equal(page.uuidCalls, 0);
 });
 
-test('chart markup gives copy fallback a readonly selectable field and loads controls before chart updates', async () => {
-  const [html, app] = await Promise.all(['index.html', 'app.js'].map(file => readFile(new URL(`../ui/${file}`, import.meta.url), 'utf8')));
-  assert.match(html!, /<input[^>]*id="funding-address"[^>]*readonly/);
+test('chart uses a native external link and Details contains only Fees and When it trades', async () => {
+  const [html, app, controls] = await Promise.all(['index.html', 'app.js', 'portfolio-controls.js'].map(file => readFile(new URL(`../ui/${file}`, import.meta.url), 'utf8')));
+  const anchor = html!.match(/<a\b[^>]*id="wallet-explorer"[^>]*>/)?.[0];
+  assert.ok(anchor);
+  assert.match(anchor, /target="_blank"/); assert.match(anchor, /rel="noopener noreferrer"/);
+  assert.match(anchor, /referrerpolicy="no-referrer"/); assert.doesNotMatch(anchor, /\bhref=/);
+  assert.doesNotMatch(html!, /copy-address|funding-fallback|funding-address|Latest trade|why-trade|why-receipt/);
+  assert.match(html!, />Fees</); assert.match(html!, />When it trades</);
+  assert.doesNotMatch(controls!, /clipboard|window\.open/);
   assert.match(html!, /id="control-message"[^>]*role="status"/);
   assert.ok(html!.indexOf('/portfolio-controls.js') >= 0);
   assert.ok(html!.indexOf('/portfolio-controls.js') < html!.indexOf('/app.js'));
@@ -301,34 +311,24 @@ test('restoring a chart requires fresh attachment and both fresh status inputs b
   assert.equal(page.posts().length, 0); assert.equal(page.uuidCalls, 0);
 });
 
-test('an old clipboard operation cannot claim success or expose a previous wallet after the displayed address changes', async () => {
-  for (const fail of [false, true]) {
-    const copy = deferred();
-    const page = await browser({ clipboard: () => copy.promise });
-    await page.status(); await page.click('copy-address');
-    await page.status(chart(otherWallet));
-    if (fail) copy.reject(new Error('Late clipboard denial')); else copy.resolve();
-    await flush();
-    assert.deepEqual(page.copied, [wallet]);
-    assert.match(page.byId('copy-address-label').textContent, /0x2222.*2222/);
-    assert.doesNotMatch(page.byId('copy-address-label').textContent, /Copied/i);
-    assert.equal(page.byId('funding-fallback').hidden, true);
-    assert.equal(page.byId('funding-address').value, '');
-    assert.equal(page.byId('copy-address').disabled, false);
-  }
+test('late runner replies cannot retarget the explorer link after the chart wallet changes', async () => {
+  const pending = deferred<Reply>();
+  const page = await browser({ reply: async call => call.method === 'POST' ? pending.promise : ok(runner('running')) });
+  await page.ready(); await page.click('portfolio-run');
+  await page.status(chart(otherWallet));
+  pending.resolve(ok(result())); await flush();
+  assert.equal(page.byId('wallet-explorer').attrs.href, `https://robinhoodchain.blockscout.com/address/${otherWallet}`);
+  assert.match(page.byId('wallet-explorer-label').textContent, /0x2222.*2222/);
+  assert.equal(page.posts().length, 1);
 });
 
-test('an earlier copy confirmation timeout cannot hide a newer runner-control error', async () => {
-  const page = await browser({ reply: async call => {
-    if (call.method === 'POST') throw new Error('Connection interrupted');
-    return undefined;
-  } });
-  await page.ready(); await page.click('copy-address');
-  assert.match(page.byId('copy-address-label').textContent, /Copied/i);
-  await page.click('portfolio-run');
-  assert.match(page.byId('control-message').textContent, /could not confirm/i);
+test('page suspension removes the explorer destination and restoration never triggers a request', async () => {
+  const page = await browser(); await page.status();
+  await page.lifecycle('pagehide');
+  assert.equal(page.byId('wallet-explorer').attrs.href, undefined);
+  assert.equal(page.byId('wallet-explorer').attrs['aria-disabled'], 'true');
+  await page.lifecycle('pageshow');
+  assert.equal(page.byId('wallet-explorer').attrs.href, `https://robinhoodchain.blockscout.com/address/${wallet}`);
   await page.timersRun();
-  assert.equal(page.byId('control-message').hidden, false);
-  assert.match(page.byId('control-message').textContent, /could not confirm/i);
-  assert.equal(page.posts().length, 1);
+  assert.equal(page.calls.length, 0); assert.equal(page.uuidCalls, 0);
 });
