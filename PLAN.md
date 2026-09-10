@@ -140,3 +140,7 @@ An optional per-wallet policy now derives target weights from the user's explici
 ## Privy provider scope — September 7 correction
 
 The human requires agents.privy.io exclusively. The proposed developer-app API path in [prompt 049](docs/prompts/049-additional-privy-wallets.md) was withdrawn and its uncommitted implementation removed. Keep the existing Agent Sandbox signer/session; no developer dashboard or app secrets are part of this project. The current Sandbox website and CLI expose no verified additional-Ethereum-wallet creation flow. Clearly describe connection/reuse and preserve existing wallets rather than claiming new wallet creation. See [the Privy guide](docs/PRIVY.md).
+
+## Ledger execution wiring — September 10
+
+[Prompt 053](docs/prompts/053-ledger-execution.md) resumes Ledger work after physical onboarding. Reuse the pinned DMK/HID/Ethereum signer and verified indexed account. Start enables public monitoring; an explicit per-rebalance request permits a bounded sequence of fresh approval/swap transactions, each confirmed physically. Requests are durably consumed and bound to one wallet/config/runner, with no restart replay or automatic signing after rejection. Preserve receipt barriers, cadence and independent raw-key/Privy runners. Hardware swap/display/rejection evidence remains a separate live validation step.
