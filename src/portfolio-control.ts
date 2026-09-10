@@ -27,7 +27,7 @@ const messages: Record<Outcome, string> = {
   'stop-requested': 'Stop requested. Any transaction already submitted can still settle.',
   blocked: 'Startup was blocked. Existing transaction and recovery records were preserved.',
   busy: 'An existing launch is still in progress. No second launch was dispatched.',
-  deferred: 'Ledger execution is currently deferred. No automatic signer was substituted.',
+  deferred: 'This earlier Ledger Start request was deferred. Use a new Start request to begin monitoring.',
   uncertain: 'The control outcome could not be verified. This request will not be replayed automatically.',
 };
 export class PortfolioControlError extends Error {
@@ -135,15 +135,18 @@ export class PortfolioControls {
         (item.action === 'stop' || item.expectedStop === generation));
       const inFlight = pending?.outcome === 'prepared' && this.active.has(key(pending));
       if (stopped !== null && (pending?.action !== 'start' || (run && saved?.armed === true))) {
-        return { wallet, state: run || launch || spawning || inFlight ? 'stopping' : config.mode === 'ledger' ? 'deferred' : 'stopped',
-          message: run || launch || spawning || inFlight ? messages['stop-requested'] : config.mode === 'ledger' ? messages.deferred : undefined };
+        return { wallet, state: run || launch || spawning || inFlight ? 'stopping' : 'stopped',
+          message: run || launch || spawning || inFlight ? messages['stop-requested'] : undefined };
       }
-      if (run) return { wallet, state: saved?.wallet?.toLowerCase() === wallet && saved.armed === true ? 'running' : 'starting',
-        ...(config.mode === 'ledger' ? { message: 'Ledger monitoring is active; hardware execution remains deferred.' } : {}) };
+      if (run) {
+        const running = saved?.wallet?.toLowerCase() === wallet && saved.armed === true;
+        return { wallet, state: running ? 'running' : 'starting',
+          ...(config.mode === 'ledger' && running ? { message: 'Ledger monitoring is active. Each rebalance requires a separate request and physical confirmation of every transaction.' } : {}) };
+      }
       if (launch || spawning) return { wallet, state: 'starting', message: messages.starting };
       if (pending) return inFlight
         ? { wallet, state: pending.action === 'start' ? 'starting' : 'stopping', message: messages.prepared } : unavailable(wallet);
-      return { wallet, state: config.mode === 'ledger' ? 'deferred' : 'stopped', ...(config.mode === 'ledger' ? { message: messages.deferred } : {}) };
+      return { wallet, state: 'stopped' };
     } catch { return unavailable(wallet); }
   }
   async command(input: RunnerRequest): Promise<RunnerResult> {
@@ -179,8 +182,7 @@ export class PortfolioControls {
         if (entries.length >= 10_000) throw new PortfolioControlError(409, 'Runner request history is full; preserve it before continuing.');
         const sinceStop = entries.slice(entries.findLastIndex(item => item.outcome === 'stop-requested') + 1)
           .filter(item => item.action === 'stop' || item.expectedStop === entry.expectedStop);
-        if (entry.action === 'start' && config.mode === 'ledger') entry.outcome = 'deferred';
-        else if (entry.action === 'start' && sinceStop.some(item => ['prepared','uncertain','starting'].includes(item.outcome))) {
+        if (entry.action === 'start' && sinceStop.some(item => ['prepared','uncertain','starting'].includes(item.outcome))) {
           entry.outcome = sinceStop.some(item => item.outcome === 'prepared' && this.active.has(key(item))) ? 'busy' : 'uncertain';
         }
         entries.push(entry);

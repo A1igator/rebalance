@@ -5,7 +5,7 @@ import type { PendingTransaction } from './storage.js';
 import { AUTO_RECOVERY_GRACE_MS } from './recovery.js';
 import { createWakeSource, type WakeReason } from './wake.js';
 
-export type MonitorInput = { config: Config | null; cycle: RebalanceCycle | null; pending: PendingTransaction | null; stopped: boolean };
+export type MonitorInput = { config: Config | null; cycle: RebalanceCycle | null; pending: PendingTransaction | null; stopped: boolean; ledgerRequest?: unknown };
 export type MonitorDependencies = {
   dataDir: string; signal: AbortSignal;
   read(): Promise<MonitorInput>;
@@ -30,6 +30,7 @@ export async function driveMonitor({ dataDir, signal, read, run, source = create
   let controlAt = 0;
   let configKey: string | undefined;
   let cycleKey: string | undefined;
+  let ledgerKey: string | undefined;
   let errors = 0;
   const deadline = () => Math.min(graphAt, controlAt, chainDirty ? chainAt : Infinity, localDirty ? Date.now() : Infinity);
   const schedule = () => {
@@ -52,7 +53,7 @@ export async function driveMonitor({ dataDir, signal, read, run, source = create
       if (signal.aborted || input.stopped || !input.config) break;
       events ??= source({ dataDir, signal, onWake: notify });
       const now = Date.now();
-      const changed = configKey !== fingerprint(input.config) || cycleKey !== fingerprint(input.cycle);
+      const changed = configKey !== fingerprint(input.config) || cycleKey !== fingerprint(input.cycle) || ledgerKey !== fingerprint(input.ledgerRequest);
       if (changed || now >= graphAt || (chainDirty && now >= chainAt)) {
         chainDirty = false;
         const result = await run();
@@ -62,6 +63,9 @@ export async function driveMonitor({ dataDir, signal, read, run, source = create
         // failure leaves the published cycle stale. Baseline the actual record
         // so our own write cannot repeatedly bypass RPC error backoff.
         cycleKey = fingerprint(current.cycle);
+        // A new request arriving during a traversal must get its own run.
+        // Changes to the consumed/finished state are our own output.
+        ledgerKey = fingerprint(input.ledgerRequest);
         if (signal.aborted || current.stopped || !current.config) break;
         const finished = Date.now();
         errors = result.error ? errors + 1 : 0;

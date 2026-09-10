@@ -55,8 +55,11 @@ export async function acknowledgeEvent(id: string): Promise<void> {
 }
 
 /** Stable condition key prevents a fresh Ledger alert on every monitor tick. */
-export async function ledgerCondition(wallet: string, targets: Record<string, number>, needed: boolean): Promise<void> {
+export async function ledgerCondition(wallet: string, targets: Record<string, number>, needed: boolean, announce = true): Promise<void> {
   const key = needed ? createHash('sha256').update(wallet.toLowerCase() + JSON.stringify(Object.entries(targets).sort())).digest('hex') : null;
+  // An explicit signing request already addresses this drift incident. Record
+  // it quietly so rejecting the device cannot create a fresh request alert.
+  if (key && !announce) { await atomicWriteJson(CONDITIONS_PATH, { key }); return; }
   const previous = await readJson<{ key: string | null; event?: RebalanceEvent }>(CONDITIONS_PATH);
   if (key === previous?.key) {
     // Reconcile a crash between persisting the condition and its queue entry.
@@ -65,7 +68,7 @@ export async function ledgerCondition(wallet: string, targets: Record<string, nu
   }
   if (key) {
     const event: RebalanceEvent = { id: randomUUID(), type: 'ledger-rebalance-needed', createdAt: new Date().toISOString(),
-      message: 'Your Ledger portfolio has drifted beyond its target threshold. Reopen the local agent session to review a fresh rebalance. Device signing integration is pending hardware setup.' };
+      message: 'Your Ledger portfolio has drifted beyond its target threshold. Connect and unlock Ledger, open Ethereum, and request a rebalance through your agent. Every transaction needs physical confirmation; this alert does not start signing.' };
     await atomicWriteJson(CONDITIONS_PATH, { key, event });
     await publishEvent(event);
   } else await atomicWriteJson(CONDITIONS_PATH, { key: null });

@@ -130,13 +130,21 @@ async function requireDispatchReady(tx: ChainTransaction): Promise<void> {
 }
 
 /** The caller holds run.lock. The selected signer owns its credential handling. */
-export async function dispatch(config: Config, chain: Chain, tx: ChainTransaction, signer: typeof loadSigner = loadSigner): Promise<Operation> {
-  if (!['private-key', 'privy'].includes(config.mode)) throw new Error(`${config.mode} execution is not connected yet; no fallback signer was used`);
+export async function dispatch(config: Config, chain: Chain, tx: ChainTransaction, signer: typeof loadSigner = loadSigner,
+  ledger?: { signal?: AbortSignal; assertReady(): Promise<void> }): Promise<Operation> {
+  if (!['private-key', 'privy', 'ledger'].includes(config.mode)) throw new Error(`${config.mode} execution is not connected yet; no fallback signer was used`);
+  if (config.mode === 'ledger' && !ledger) throw new Error('Ledger needs an explicit rebalance request; no fallback signer was used');
+  const ready = async () => {
+    if (config.mode === 'ledger') await ledger!.assertReady();
+    await requireDispatchReady(tx);
+    if (config.mode === 'ledger') ledger!.signal?.throwIfAborted();
+  };
   const release = await acquireLock(DATA, 'config.lock');
   try {
     if (JSON.stringify(await loadConfig()) !== JSON.stringify(config)) throw new Error('Configuration changed; rebuild the transaction on the next cycle');
     if (await readJson(PENDING_PATH)) throw new Error('Reconcile the existing pending transaction first');
-    const account = await signer(config);
+    await ready();
+    const account = await signer(config, config.mode === 'ledger' ? { signal: ledger?.signal } : {});
     if (account.address.toLowerCase() !== config.wallet.toLowerCase()) throw new Error('Selected key does not match the configured public wallet');
     const rpc = chain.publicClient;
     if (await rpc.getChainId() !== 4663) throw new Error('RPC is not Robinhood mainnet');
@@ -156,17 +164,17 @@ export async function dispatch(config: Config, chain: Chain, tx: ChainTransactio
     if (gasPrice >= 2n ** 256n) throw new Error('Buffered gas price exceeds uint256; no transaction was signed');
     const balance = await rpc.getBalance({ address: config.wallet, blockTag: 'pending' });
     if (gasPrice <= 0n || balance < tx.value + gas * gasPrice) throw new Error('Insufficient native ETH for this transaction and estimated gas');
-    await requireDispatchReady(tx);
+    await ready();
     const serialized = await account.signTransaction({ chainId: 4663, type: 'legacy', nonce, gas, gasPrice,
       to: tx.to, data: tx.data, value: tx.value });
-    await requireDispatchReady(tx);
+    await ready();
     const hash = keccak256(serialized);
     const pending: PendingTransaction = { chainId: 4663, wallet: config.wallet, hash, nonce,
       kind: tx.kind, createdAt: new Date().toISOString(), status: 'prepared', gas: gas.toString(), gasPrice: gasPrice.toString() };
     // A crash anywhere after this durable write leaves the known hash to reconcile.
     await atomicWriteJson(PENDING_PATH, pending);
     try {
-      await requireDispatchReady(tx);
+      await ready();
     } catch (error) {
       // No send was attempted; this known-unbroadcast record need not block forever.
       await rm(PENDING_PATH);

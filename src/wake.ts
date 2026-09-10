@@ -2,7 +2,7 @@ import { watch } from 'node:fs';
 
 // Sequencer messages are untrusted activity hints, never balances or receipts.
 export const SEQUENCER_FEED = 'wss://feed.mainnet.chain.robinhood.com';
-export type WakeReason = 'chain' | 'config' | 'cycle' | 'stop' | 'reconnect';
+export type WakeReason = 'chain' | 'config' | 'cycle' | 'stop' | 'reconnect' | 'ledger';
 export type WakeState = {
   feed: 'connecting' | 'connected' | 'fallback' | 'closed';
   files: 'watching' | 'unavailable' | 'closed';
@@ -123,6 +123,7 @@ export function createWakeSource(
         if (filename === 'config.json') options.onWake('config');
         if (filename === 'cycle.json') options.onWake('cycle');
         if (filename === 'stop.json') options.onWake('stop');
+        if (filename === 'ledger-request.json') options.onWake('ledger');
       }, failed);
       status.files = 'watching';
     } catch { failed(); }

@@ -221,16 +221,43 @@ test('record-write failure cannot dispatch and an after-dispatch save failure re
   assert.equal(g.calls.length, 1);
 });
 
-test('Ledger start is deferred without signer fallback, while its existing monitor can stop', async t => {
+test('Ledger controls launch public monitoring and stop it without creating signing requests', async t => {
   const f = await fixture(t, 'ledger');
-  assert.equal((await f.controls.read()).state, 'deferred');
-  const started = await f.controls.command(f.request('start'));
-  assert.equal(started.state, 'deferred'); assert.equal(started.outcome, 'deferred'); assert.equal(f.calls.length, 0);
+  assert.equal((await f.controls.read()).state, 'stopped');
   f.alive.add(424242); await atomicWriteJson(join(f.root, 'run.lock'), { pid: 424242 });
-  await atomicWriteJson(join(f.root, 'status.json'), { wallet: walletA, armed: true });
-  assert.equal((await f.controls.read()).state, 'running');
+  const starting = await f.controls.read();
+  assert.equal(starting.state, 'starting'); assert.doesNotMatch(starting.message ?? '', /monitoring is active/);
+  await rm(join(f.root, 'run.lock')); f.alive.clear();
+  const start = f.request('start');
+  const started = await f.controls.command(start);
+  assert.equal(started.state, 'running'); assert.equal(started.outcome, 'armed');
+  assert.equal(f.calls.length, 1); assert.equal(f.calls[0]!.args[0], 'launch');
+  assert.match((await f.controls.read()).message!, /separate request and physical confirmation/);
+  assert.equal((await f.controls.command(start)).outcome, 'already-handled');
+  assert.equal(f.calls.length, 1);
   assert.equal((await f.controls.command(f.request('stop'))).state, 'stopping');
-  assert.deepEqual(f.calls.map(call => call.args), [['stop']]);
+  f.alive.clear(); assert.equal((await f.controls.read()).state, 'stopped');
+  assert.deepEqual(f.calls.map(call => call.args[0]), ['launch', 'stop']);
+  assert.equal(await readJson(join(f.other, 'run.lock')), null);
+});
+
+test('a legacy deferred Ledger request stays handled while a new Start can begin monitoring', async t => {
+  const f = await fixture(t, 'ledger');
+  const request = f.request('start');
+  await f.controls.command(request);
+  const entries = await readJson<{ outcome: string }[]>(join(f.root, 'runner-requests.json'));
+  entries![0]!.outcome = 'deferred';
+  await atomicWriteJson(join(f.root, 'runner-requests.json'), entries);
+  await rm(join(f.root, 'run.lock')); await rm(join(f.root, 'status.json')); f.alive.clear(); f.calls.length = 0;
+  const restarted = new PortfolioControls(f.root, f.root, f.deps);
+  const replay = await restarted.command(request);
+  assert.equal(replay.outcome, 'already-handled'); assert.equal(replay.state, 'stopped');
+  assert.match(replay.message!, /earlier Ledger Start request was deferred/);
+  assert.equal(f.calls.length, 0);
+  assert.equal((await restarted.command(f.request('start'))).state, 'running');
+  assert.equal(f.calls.length, 1); assert.equal(f.calls[0]!.args[0], 'launch');
+  const saved = await readJson<{ outcome: string }[]>(join(f.root, 'runner-requests.json'));
+  assert.deepEqual(saved!.map(entry => entry.outcome), ['deferred', 'armed']);
 });
 
 test('a stop can replace a damaged stop marker without reading keys or submitting a transaction', async t => {

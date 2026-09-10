@@ -7,7 +7,7 @@
   const validWallet = (value) => typeof value === "string" && /^0x[0-9a-f]{40}$/i.test(value);
   const same = (a, b) => validWallet(a) && validWallet(b) && a.toLowerCase() === b.toLowerCase();
   const short = (wallet) => `${wallet.slice(0, 6)}…${wallet.slice(-4)}`;
-  let wallet = null, runner = null, attached = null, viewReady = false;
+  let wallet = null, mode = null, runner = null, attached = null, viewReady = false;
   let statusFresh = false, runnerFresh = false, busy = false, copying = false, suspended = false;
   let copyTimer = null, copyGeneration = 0, readGeneration = 0, runnerRevision = 0, messageRevision = 0;
 
@@ -21,8 +21,8 @@
     run.disabled = suspended || busy || !statusFresh || !linked || !["running", "stopped"].includes(state);
     run.title = !linked ? "Open this portfolio through your agent to enable controls."
       : !statusFresh ? "Waiting for current portfolio status."
-      : state === "running" ? "Stop this portfolio. Submitted transactions still settle."
-      : state === "stopped" ? "Start automatic rebalancing for this wallet with its saved targets."
+      : state === "running" ? (mode === "ledger" ? "Stop monitoring this Ledger portfolio. Submitted transactions still settle." : "Stop this portfolio. Submitted transactions still settle.")
+      : state === "stopped" ? (mode === "ledger" ? "Start monitoring this Ledger wallet. Each rebalance requires a separate request and physical confirmation." : "Start automatic rebalancing for this wallet with its saved targets.")
       : runner?.message || "Waiting for the local runner.";
     run.setAttribute("aria-label", `${run.textContent} portfolio${wallet ? ` ${short(wallet)}` : ""}`);
     copy.disabled = suspended || !wallet || copying;
@@ -47,6 +47,7 @@
       clearTimeout(copyTimer); copyTimer = null; copying = false;
       fallback.hidden = true; address.value = "";
     }
+    mode = next ? snapshot.mode : null;
     statusFresh = !disconnected && Boolean(wallet);
     render();
   }

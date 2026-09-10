@@ -220,28 +220,48 @@ test('full raw-key and Privy launch arm automatic recovery without rewriting tra
   }
 });
 
-test('setup-only and deferred signers never arm through a recovery barrier', async t => {
+test('setup-only never arms through a recovery barrier for any signer', async t => {
   for (const operation of ['unresolved', 'reverted'] as const) {
     for (const mode of ['private-key', 'ledger', 'privy'] as const) {
-      for (const setupOnly of [true, false]) {
-        if (!setupOnly && mode !== 'ledger') continue;
-        const f = await fixture(t); f.current.mode = mode;
-        f.current.operation = { status: operation, hash: `0x${'1'.repeat(64)}` };
-        const launched = await launch({ setupOnly }, f.deps);
-        assert.equal(launched.outcome, 'blocked');
-        assert.equal(launched.status?.armed, false);
-        assert.equal(launched.status?.mode, mode);
-        assert.equal(count(f.calls, 'start'), 0);
-        assert.equal(count(f.calls, 'recover'), 0);
-        assert.equal(count(f.calls, 'configure'), 0);
-      }
+      const f = await fixture(t); f.current.mode = mode;
+      f.current.operation = { status: operation, hash: `0x${'1'.repeat(64)}` };
+      const launched = await launch({ setupOnly: true }, f.deps);
+      assert.equal(launched.outcome, 'blocked');
+      assert.equal(launched.status?.armed, false);
+      assert.equal(launched.status?.mode, mode);
+      assert.equal(count(f.calls, 'start'), 0);
+      assert.equal(count(f.calls, 'recover'), 0);
+      assert.equal(count(f.calls, 'configure'), 0);
     }
   }
 });
 
-test('recovery eligibility never overrides failed, malformed or errored preflight', async t => {
-  for (const failure of ['failed', 'malformed', 'error'] as const) {
-    const f = await fixture(t); const command = f.deps.command;
+test('Ledger launch enables receipt monitoring through an unresolved barrier without a signing or cancellation request', async t => {
+  for (const operation of ['unresolved', 'reverted'] as const) {
+    const f = await fixture(t); f.current.mode = 'ledger'; const hash = `0x${'1'.repeat(64)}`;
+    f.current.operation = { status: operation, hash };
+    const records = { 'pending.json': { hash, nonce: 16 },
+      'recovery.json': { originalHash: hash, status: 'unknown' },
+      'cycle.json': { startedAt: 'fixture', nextEligibleAt: 'preserved', swapConfirmed: true } };
+    for (const [file, value] of Object.entries(records)) await atomicWriteJson(join(f.dataDir, file), value);
+    const before = await Promise.all(Object.keys(records).map(file => readFile(join(f.dataDir, file), 'utf8')));
+    const launched = await launch({}, f.deps);
+    assert.equal(launched.outcome, 'armed');
+    assert.equal(launched.status?.mode, 'ledger');
+    assert.equal(launched.status?.operation?.status, operation);
+    assert.equal(launched.status?.operation?.hash, hash);
+    assert.match(launched.messages.join(' '), /monitoring will reconcile/);
+    assert.match(launched.messages.join(' '), /No cancellation or signing request is created/);
+    assert.doesNotMatch(launched.messages.join(' '), /automatic recovery is included/);
+    assert.equal(count(f.calls, 'start'), 1);
+    assert.ok(f.calls.every(args => ['status', 'check', 'start'].includes(args[0]!)));
+    assert.deepEqual(await Promise.all(Object.keys(records).map(file => readFile(join(f.dataDir, file), 'utf8'))), before);
+  }
+});
+
+test('recovery or Ledger monitoring eligibility never overrides failed, malformed or errored preflight', async t => {
+  for (const mode of ['private-key', 'privy', 'ledger'] as const) for (const failure of ['failed', 'malformed', 'error'] as const) {
+    const f = await fixture(t); f.current.mode = mode; const command = f.deps.command;
     f.current.operation = { status: 'unresolved', hash: `0x${'1'.repeat(64)}` };
     f.deps.command = async args => {
       if (args[0] !== 'check') return command(args);
@@ -375,12 +395,14 @@ test('a spawned chart without a verified endpoint blocks trading and is not dupl
   assert.equal(count(f.calls, 'start'), 0);
 });
 
-test('deferred Ledger mode stays selected and arming is not reported as working Ledger execution', async t => {
+test('Ledger launch stays selected and reports monitoring with separate physical signing authority', async t => {
   const f = await fixture(t); f.current.mode = 'ledger';
   const launched = await launch({}, f.deps);
   assert.equal(launched.outcome, 'armed');
   assert.equal(launched.status?.mode, 'ledger');
-  assert.match(launched.messages.join(' '), /ledger execution is deferred/);
+  assert.match(launched.messages.join(' '), /Ledger Start enables public monitoring/);
+  assert.match(launched.messages.join(' '), /separate request and physical confirmation of every transaction/);
+  assert.ok(f.calls.every(args => ['status', 'check', 'start'].includes(args[0]!)));
   assert.equal(count(f.calls, 'wallet'), 0);
   assert.equal(count(f.calls, 'configure'), 0);
 });

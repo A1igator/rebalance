@@ -48,6 +48,8 @@ const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
   allocation set <policy.json>          Save per-wallet policy and calculated targets together
   allocation status                    Read policy, assumptions and last calculation
   allocation manual                    Keep current targets; remove the allocation policy
+  ledger status                        Read the latest Ledger rebalance request
+  ledger rebalance [--request-id UUID]   Request one device-confirmed rebalance on a running Ledger monitor
   check                                Fresh read/plan/quote; never sign
   launch [--setup-only]                 Prepare/reuse chart and arm/reuse the runner
     [--targets <ASSET=percent,...>]      Initial allocation only; preserve saved targets
@@ -68,7 +70,7 @@ const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
   notifications stop                   Pause notification delivery; leave trading unchanged
 Native ETH is gas-only; select USDG + four stocks from the verified manifest.
 Supported stocks: ${Object.keys(ASSETS).filter(id => id !== 'USDG').join(', ')}.
-Privy uses its logged-in agent CLI; Ledger execution is deferred. Never pass a private key as a CLI argument.
+Privy uses its logged-in agent CLI; Ledger requires physical confirmation for every transaction. Never pass a private key as a CLI argument.
 `;
 
 const { values, positionals: args } = parseArgs({ allowPositionals: true, options: {
@@ -241,7 +243,7 @@ async function main() {
   if (!command || command === 'help' || values.help) { process.stdout.write(HELP); return; }
   if (values['resume-start'] && (command !== 'start' || values.background)) throw new Error('Invalid background-start continuation');
   if (values['setup-only'] && command !== 'launch') throw new Error('--setup-only applies only to launch');
-  if (values['request-id'] !== undefined && !['launch', 'recover'].includes(command)) throw new Error('--request-id applies only to launch or recover');
+  if (values['request-id'] !== undefined && !['launch', 'recover', 'ledger'].includes(command)) throw new Error('--request-id applies only to launch, recover or ledger rebalance');
   if (values.cancel && command !== 'recover') throw new Error('--cancel applies only to recover');
   if (values['expected-stop'] !== undefined && (!['start', 'launch', 'recover'].includes(command) || values['resume-start'] ||
       !/^(none|[a-f0-9]{64})$/.test(values['expected-stop']))) throw new Error('Invalid conditional-start token');
@@ -272,6 +274,15 @@ async function main() {
       const wallet = args[1] === 'login' ? await loginPrivy() : await privyWallet();
       if (args[1] === 'login') await atomicWriteJson(resolve(DATA, 'privy-wallet.json'), { ...wallet, observedAt: new Date().toISOString() });
       print(wallet); return;
+    }
+    case 'ledger': {
+      if (args.length !== 2 || !['status', 'rebalance'].includes(args[1]!)) throw new Error('Use ledger status or ledger rebalance [--request-id UUID]');
+      for (const [name, value] of Object.entries(values)) {
+        if (name !== 'request-id' && value !== undefined && value !== false) throw new Error(`--${name} does not apply to Ledger commands`);
+      }
+      if (args[1] === 'status' && values['request-id']) throw new Error('--request-id applies only to ledger rebalance');
+      const { requestLedgerRebalance, readLedgerRequest } = await import('./ledger-request.js');
+      print(args[1] === 'rebalance' ? await requestLedgerRebalance(values['request-id']) : await readLedgerRequest()); return;
     }
     case 'status': print(await status()); return;
     case 'launch': {

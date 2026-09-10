@@ -5,14 +5,17 @@ import { createRequire } from 'node:module';
 import { isAbsolute, join, parse, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { Observable, Subscription } from 'rxjs';
+import type { ContextModule } from '@ledgerhq/context-module';
 import { getAddress, isAddress, type Address } from 'viem';
 import { acquireLock, atomicWriteJson } from './storage.js';
 import type { SetupWallet, WalletSetupContext } from './wallet-setup-types.js';
 
-type ActionState = { status: string; output?: unknown };
+export type LedgerActionState = { status: string; output?: unknown; error?: unknown; intermediateValue?: unknown };
+type ActionState = LedgerActionState;
 export type LedgerAddressAction = { observable: Observable<ActionState>; cancel(): void };
 export type LedgerDevice = {
   getAddress(path: string, options: { checkOnDevice: boolean; returnChainCode: false }): LedgerAddressAction;
+  signTransaction?(path: string, transaction: Uint8Array): LedgerAddressAction;
   close(): Promise<void>;
 };
 type LedgerManager = {
@@ -23,7 +26,7 @@ type LedgerManager = {
 };
 export type LedgerSdk = {
   manager: LedgerManager;
-  signer(sessionId: string): Pick<LedgerDevice, 'getAddress'>;
+  signer(sessionId: string): Pick<LedgerDevice, 'getAddress' | 'signTransaction'>;
 };
 export type LedgerOnboardingDependencies = {
   connect?: (signal: AbortSignal) => Promise<LedgerDevice>;
@@ -149,7 +152,7 @@ async function closeDevice(device: Pick<LedgerDevice, 'close'>): Promise<void> {
   finally { clearTimeout(timer); }
 }
 
-function completedAddress(action: LedgerAddressAction, signal: AbortSignal): Promise<Address> {
+export function completedAddress(action: LedgerAddressAction, signal: AbortSignal): Promise<Address> {
   return new Promise((resolve, reject) => {
     let subscription: Subscription | undefined;
     let settled = false;
@@ -167,6 +170,7 @@ function completedAddress(action: LedgerAddressAction, signal: AbortSignal): Pro
     subscription = action.observable.subscribe({
       next: state => {
         if (settled) return;
+        if (!object(state) || typeof state.status !== 'string') { finish(new Error('Ledger returned an unexpected device state.')); return; }
         if (state.status === 'completed') {
           try {
             if (!object(state.output) || typeof state.output.publicKey !== 'string' || !/^(?:0x)?04[a-f0-9]{128}$/i.test(state.output.publicKey) || state.output.chainCode !== undefined) {
@@ -214,12 +218,24 @@ function singleDevice(manager: LedgerManager, signal: AbortSignal): Promise<unkn
   });
 }
 
+/** Metadata lookups remain available; optional SDK signing telemetry is disabled. */
+export function ledgerContextWithoutReports(context: ContextModule): ContextModule {
+  return {
+    getContexts: context.getContexts.bind(context),
+    getFieldContext: context.getFieldContext.bind(context),
+    getTypedDataFilters: context.getTypedDataFilters.bind(context),
+    report: async () => {},
+    signReport: async () => {},
+  };
+}
+
 function loadNativeSdk(): LedgerSdk {
   // These pinned packages publish Node-compatible CJS exports; their ESM files
   // contain extensionless imports. Native modules stay unloaded on other paths.
   const { DeviceManagementKitBuilder } = require('@ledgerhq/device-management-kit') as typeof import('@ledgerhq/device-management-kit');
   const { nodeHidTransportFactory } = require('@ledgerhq/device-transport-kit-node-hid') as typeof import('@ledgerhq/device-transport-kit-node-hid');
   const { SignerEthBuilder } = require('@ledgerhq/device-signer-kit-ethereum') as typeof import('@ledgerhq/device-signer-kit-ethereum');
+  const { ContextModuleBuilder, ContextModuleChainID } = require('@ledgerhq/context-module') as typeof import('@ledgerhq/context-module');
   let transport: import('@ledgerhq/device-transport-kit-node-hid').NodeHidTransport | undefined;
   let exitListeners: ((code: number) => void)[] = [];
   const dmk = new DeviceManagementKitBuilder().addTransport(args => {
@@ -245,7 +261,13 @@ function loadNativeSdk(): LedgerSdk {
         await closing;
       },
     },
-    signer: sessionId => new SignerEthBuilder({ dmk, sessionId }).build(),
+    signer: sessionId => {
+      const context = new ContextModuleBuilder({
+        loggerFactory: tag => dmk.getLoggerFactory()(['ContextModule', tag]),
+      }).setChain(ContextModuleChainID.Ethereum).build();
+      return new SignerEthBuilder({ dmk, sessionId })
+        .withContextModule(ledgerContextWithoutReports(context)).build();
+    },
   };
 }
 
@@ -265,6 +287,7 @@ async function connectDevice(signal: AbortSignal, load: () => LedgerSdk): Promis
     let closed: Promise<void> | undefined;
     return {
       getAddress: (path, options) => signer.getAddress(path, options),
+      ...(signer.signTransaction ? { signTransaction: (path: string, transaction: Uint8Array) => signer.signTransaction!(path, transaction) } : {}),
       close: () => closed ??= (async () => {
         // Destroy the owned native transport even if session disconnection stalls.
         const disconnecting = sdk.manager.disconnect({ sessionId: sessionId! });
@@ -278,6 +301,95 @@ async function connectDevice(signal: AbortSignal, load: () => LedgerSdk): Promis
     try { await closeDevice({ close: async () => { await Promise.allSettled([disconnecting, Promise.resolve(sdk.manager.close())]); } }); }
     catch { /* Preserve the original setup failure after initiating native cleanup. */ }
     throw error;
+  }
+}
+
+export type VerifiedLedgerAccount = Required<Reservation>;
+
+function ledgerDirectory(rootDir: string): string {
+  if (typeof rootDir !== 'string' || !isAbsolute(rootDir) || rootDir.length > 4096 || /[\0\r\n]/.test(rootDir)) {
+    throw new Error('Invalid Ledger storage location.');
+  }
+  return resolve(rootDir, 'ledger-onboarding');
+}
+
+/** The journal is the only source of a signing path; no address-index guessing. */
+export async function findLedgerAccount(rootDir: string, wallet: Address): Promise<VerifiedLedgerAccount> {
+  const directory = ledgerDirectory(rootDir);
+  await safeDirectory(directory);
+  const accounts = await loadAccounts(join(directory, 'accounts.json'));
+  const selected = address(wallet);
+  const matches = Object.values(accounts.requests).filter(item => item.address?.toLowerCase() === selected.toLowerCase());
+  if (matches.length !== 1 || !matches[0]?.verifiedAt) {
+    throw new Error('No unique physically verified Ledger account matches the selected wallet. Complete Ledger account setup first.');
+  }
+  return { ...matches[0], address: selected } as VerifiedLedgerAccount;
+}
+
+/** Onboarding and signing serialize access to the same physical transport. */
+async function acquireLedgerDeviceLock(rootDir: string, signal: AbortSignal): Promise<() => Promise<void>> {
+  const directory = ledgerDirectory(rootDir);
+  for (let attempt = 0; ; attempt++) {
+    throwIfAborted(signal);
+    await safeDirectory(directory);
+    await privateFile(join(directory, 'device.lock'), 4096);
+    await privateFile(join(directory, 'device.lock.reclaim'), 4096);
+    try { return await acquireLock(directory, 'device.lock'); }
+    catch (error) {
+      const initializing = error instanceof SyntaxError && attempt < 4;
+      if (!initializing && (!(error instanceof Error) || !/^Lock device\.lock (is held by process \d+|was acquired by another process)$/.test(error.message))) throw error;
+      await abortable(delay(25), signal);
+    }
+  }
+}
+
+/** USB presence is only a refresh hint: this never opens a session or checks an account. */
+export function watchLedgerPresence(onChange: (present: boolean) => void,
+  overrides: Pick<LedgerOnboardingDependencies, 'loadSdk'> = {}): () => Promise<void> {
+  let sdk: LedgerSdk | undefined;
+  let subscription: Subscription | undefined;
+  let stopped = false;
+  let last: boolean | undefined;
+  let closing: Promise<void> | undefined;
+  const publish = (present: boolean) => {
+    if (stopped || present === last) return;
+    last = present;
+    try { onChange(present); } catch { /* A refresh-hint consumer cannot authorize or own the transport. */ }
+  };
+  const close = () => {
+    stopped = true;
+    subscription?.unsubscribe();
+    return closing ??= sdk ? closeDevice({ close: async () => { await sdk!.manager.close(); } }) : Promise.resolve();
+  };
+  try {
+    sdk = (overrides.loadSdk ?? loadNativeSdk)();
+    subscription = sdk.manager.listenToAvailableDevices({ transport: 'NODE-HID' }).subscribe({
+      next: devices => publish(devices.length === 1),
+      error: () => { publish(false); void close().catch(() => {}); },
+      complete: () => { publish(false); void close().catch(() => {}); },
+    });
+    if (stopped) subscription.unsubscribe();
+  } catch {
+    publish(false);
+    void close().catch(() => {});
+  }
+  return close;
+}
+
+/** The caller supplies its operation deadline; connection and cleanup stay bounded. */
+export async function withLedgerDevice<T>(rootDir: string, signal: AbortSignal,
+  use: (device: LedgerDevice) => Promise<T>, overrides: LedgerOnboardingDependencies = {}): Promise<T> {
+  const release = await acquireLedgerDeviceLock(rootDir, signal);
+  let device: LedgerDevice | undefined;
+  try {
+    throwIfAborted(signal);
+    const connect = overrides.connect ?? ((signal: AbortSignal) => connectDevice(signal, overrides.loadSdk ?? loadNativeSdk));
+    device = await abortable(connect(signal), signal, closeDevice);
+    throwIfAborted(signal);
+    return await abortable(use(device), signal);
+  } finally {
+    try { if (device) await closeDevice(device); }
+    finally { await release(); }
   }
 }
 
@@ -300,19 +412,7 @@ export async function setupLedgerWallet(context: WalletSetupContext, overrides: 
   };
   try {
     throwIfAborted(signal);
-    // One scoped device operation also serializes durable per-seed reservations.
-    for (let attempt = 0; ; attempt++) {
-      throwIfAborted(signal);
-      await safeDirectory(directory);
-      await privateFile(join(directory, 'device.lock'), 4096);
-      await privateFile(join(directory, 'device.lock.reclaim'), 4096);
-      try { release = await acquireLock(directory, 'device.lock'); break; }
-      catch (error) {
-        const initializing = error instanceof SyntaxError && attempt < 4;
-        if (!initializing && (!(error instanceof Error) || !/^Lock device\.lock (is held by process \d+|was acquired by another process)$/.test(error.message))) throw error;
-        await abortable(delay(25), signal);
-      }
-    }
+    release = await acquireLedgerDeviceLock(context.rootDir, signal);
     const accounts = await loadAccounts(file);
     const previous = accounts.requests[context.requestKey];
     if (previous?.address) return { address: previous.address, reused: true, accountIndex: previous.accountIndex, derivationPath: previous.derivationPath };

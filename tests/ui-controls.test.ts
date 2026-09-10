@@ -19,7 +19,7 @@ function deferred<T = void>() {
   return { promise, resolve, reject };
 }
 class Node {
-  textContent = ''; hidden = false; disabled = false; value = ''; readOnly = false; selected = 0; focused = 0;
+  textContent = ''; title = ''; hidden = false; disabled = false; value = ''; readOnly = false; selected = 0; focused = 0;
   attrs: Record<string, string> = {}; dataset: Record<string, string> = {};
   handlers = new Map<string, (() => void)[]>();
   setAttribute(name: string, value: string) { this.attrs[name] = value; }
@@ -135,6 +135,22 @@ test('an explicit start sends one pinned request and duplicate activation is ign
   assert.ok(page.calls.every(call => !call.url.includes(token)));
   gate.resolve(ok(result())); await flush();
   assert.match(page.byId('portfolio-run').textContent, /Stop/i);
+  assert.equal(page.posts().length, 1);
+});
+
+test('Ledger Start describes monitoring and uses only the ordinary runner control', async () => {
+  const page = await browser({ reply: async call => call.method === 'POST' ? ok(result()) : ok(runner('running')) });
+  await page.ready(); await page.status({ ...chart(), mode: 'ledger' });
+  assert.equal(page.byId('portfolio-run').disabled, false);
+  assert.match(page.byId('portfolio-run').title, /Start monitoring this Ledger wallet/);
+  assert.match(page.byId('portfolio-run').title, /separate request and physical confirmation/);
+  await page.click('portfolio-run');
+  assert.deepEqual(page.posts().map(call => ({ url: call.url, body: call.body })), [
+    { url: '/api/runner', body: { token, wallet, action: 'start', requestId } },
+  ]);
+  assert.match(page.byId('portfolio-run').title, /Stop monitoring this Ledger portfolio/);
+  await page.status({ ...chart(), mode: 'privy' }); await page.runner(runner('stopped'));
+  assert.match(page.byId('portfolio-run').title, /Start automatic rebalancing/);
   assert.equal(page.posts().length, 1);
 });
 

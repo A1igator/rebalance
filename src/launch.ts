@@ -244,14 +244,16 @@ export async function launch(options: LaunchOptions = {}, overrides: Partial<Lau
         result.messages.push('The read-only check failed; no trading runner was started.');
       }
       if (['unresolved', 'reverted'].includes(result.status!.operation?.status ?? '')) {
-        // Pending state is a barrier to another trade, not to the full automatic
-        // runner that owns automatic recovery. Preflight errors still block;
-        // the runner validates/reconciles both identities before any dispatch.
-        if (!options.setupOnly && ['private-key', 'privy'].includes(result.status!.mode ?? '') && !preparationBlocked) {
+        // Pending state blocks another trade, while runners can still reconcile
+        // receipts or use automatic-signer recovery. Preflight errors still block;
+        // Ledger launch only enables monitoring and creates no signing intent.
+        if (!options.setupOnly && !preparationBlocked && result.status!.mode === 'ledger') {
+          result.messages.push('Ledger monitoring will reconcile the earlier transaction from its saved hash. No cancellation or signing request is created; its records and cycle timing are preserved.');
+        } else if (!options.setupOnly && ['private-key', 'privy'].includes(result.status!.mode ?? '') && !preparationBlocked) {
           result.messages.push('The earlier transaction remains unresolved; automatic recovery is included in this launch. Its records and cycle timing are preserved.');
         } else {
           preparationBlocked = true;
-          result.messages.push('The earlier transaction needs recovery; this preparation or deferred signer does not perform it. Its records were preserved.');
+          result.messages.push('The earlier transaction needs recovery; this preparation does not perform it. Its records were preserved.');
         }
       }
     }
@@ -271,7 +273,7 @@ export async function launch(options: LaunchOptions = {}, overrides: Partial<Lau
     }
     if (result.chart.state !== 'ready' || result.status!.error) preparationBlocked = true;
     if (result.status!.mode === 'ledger') {
-      result.messages.push(`${result.status!.mode} execution is deferred; no signer fallback is used.`);
+      result.messages.push('Ledger Start enables public monitoring. Each rebalance requires a separate request and physical confirmation of every transaction.');
     }
     if (result.status!.armed) { result.outcome = 'armed'; return result; }
     if (preparationBlocked) return result;

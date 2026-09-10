@@ -1,8 +1,8 @@
 # Ledger tooling and documentation feedback
 
-**Status: pending physical-device integration.** No hardware result, SDK integration, screenshot or external feedback submission is claimed.
+**Status: physical address onboarding verified; transaction wiring implemented, with live transaction/display evidence pending.** No external feedback submission is claimed.
 
-Physical integration is deferred as of **2026-09-04** until the owner's device arrives. Complete device-specific feedback after actual testing; simulated authorization or the separate raw-private-key backend cannot satisfy it.
+The initial September 4 deferral ended when the Nano Gen5 arrived. Keep address verification, isolated signing fixtures and actual mainnet signing evidence separate; the raw-key backend does not establish Ledger execution.
 
 Target: [ETHOnline 2026 — AI Agents x Ledger, From Scratch](https://ethglobal.com/events/ethonline2026/prizes/ledger). The [event portal](https://developers.ledger.com/ethonline) requires tooling feedback with every submission.
 
@@ -29,3 +29,14 @@ The [source assessment](LEDGER_AGENT_STACK.md) pins the inspected code and suppo
 - Ring handles encryption; our constrained credential broker would be separate project work. Record service dependencies and isolation guarantees accurately.
 
 These observations are not hardware feedback, successful integration evidence or an external submission.
+
+## Observed integration experience — September 10
+
+- On macOS arm64 with Node 24.18.0, the official wallet-cli 2.1.0 completed a genuine check and discovered the primary Ethereum account. The application's DMK/Signer Kit subsequently completed physical verification of its separately reserved indexed account. No transaction was signed or broadcast for that onboarding. Earlier locked-device and USB-access failures were real; Finder's mounted Ledger Wallet installer volumes did not establish hardware USB visibility.
+- The installed CommonJS exports loaded under native Node; the packages' ESM extensionless imports did not. A tested native-Node example using the published constructors and cleanup APIs would shorten setup.
+- CLI account discovery did not offer the application's exact reserved index/prepared-transaction flow. The existing SDK path preserves both. A documented API for exact prepared transactions, account path and minimum-output/expiry would make CLI reuse easier.
+- Context Module signing reports are separate from DMK logger subscribers. Documenting a supported telemetry opt-out and the remaining metadata requests would improve privacy claims. This app suppresses report methods while retaining context resolution.
+- The Signer Kit's observable reports fallback but its completed signature does not establish how the transaction was displayed. Exposing a verified display/context result would help applications report Clear Signing accurately. This application cancels the explicit fallback transition; real Robinhood device display remains to be observed.
+- Node HID owns a process exit listener in addition to transport subscriptions. Explicit lifecycle documentation and cleanup tests would make long-running agents with repeated device operations easier to integrate.
+
+Still to record: exact firmware/Ethereum app versions, real approval/swap signing and rejection, on-device network/token wording, confirmed mainnet receipt, and the final human-narrated demonstration. The unit suite uses injected observable/RPC fixtures and cannot establish these outcomes.

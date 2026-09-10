@@ -166,3 +166,18 @@ test('a stop arriving during a traversal prevents all subsequent traversals', as
   release(); await flush(); await h.advance(30_000);
   assert.equal(h.calls, 2); assert.equal(h.closed, true);
 });
+
+test('a Ledger request or USB revision wakes a cooled monitor immediately without polling the model', async t => {
+  const h = await harness(t);
+  const cycle = { startedAt: new Date(epoch - 3_500_000).toISOString(), activeUntil: new Date(epoch - 2_900_000).toISOString(), nextEligibleAt: new Date(epoch + 60_000).toISOString() };
+  h.change({ config: { ...configuration(), mode: 'ledger' }, cycle, ledgerRequest: 'none:0' });
+  h.result({ cycle, operation: { status: 'cooling-down' } });
+  h.wake('config'); await h.advance(0); assert.equal(h.calls, 2);
+  h.change({ ledgerRequest: 'request-one:0' }); h.wake('ledger');
+  await h.advance(0); assert.equal(h.calls, 3, 'request gets an immediate traversal with cadence still enforced by the graph');
+  h.wake('ledger'); await h.advance(0); assert.equal(h.calls, 3, 'own journal writes do not schedule another traversal');
+  h.change({ ledgerRequest: 'request-one:1' }); h.wake('ledger');
+  await h.advance(0); assert.equal(h.calls, 4, 'USB presence prompts a fresh observation, never authorization');
+  h.change({ ledgerRequest: 'request-two:1' });
+  await h.advance(5000); assert.equal(h.calls, 5, 'missed request file event is covered by local control watchdog');
+});

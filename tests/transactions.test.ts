@@ -404,3 +404,33 @@ test('Privy signer failure, wrong wallet and stop arriving during signing cannot
   assert.equal(h.sent.length, 0);
   assert.equal(await readJson(PENDING_PATH), null);
 });
+
+test('Ledger late stop, expiry or abort inside the final intent check cannot broadcast', async t => {
+  for (const cause of ['stop', 'expiry', 'abort']) {
+    const config = { ...configuration(), mode: 'ledger' as const };
+    await atomicWriteJson(CONFIG_PATH, config);
+    await rm(stopPath, { force: true });
+    const h = mockedChain();
+    const abort = new AbortController();
+    const now = Date.now();
+    let clock = now;
+    const mockedDate = t.mock.method(Date, 'now', () => clock);
+    let checks = 0;
+    try {
+      await assert.rejects(dispatch(config, h.chain, { ...transaction, expiresAt: BigInt(Math.floor(now / 1000) + 60) },
+        async () => ({ address: wallet, signTransaction: tx => privateKeyToAccount(key).signTransaction(tx) }), {
+          signal: abort.signal,
+          assertReady: async () => {
+            checks++;
+            if (!await readJson(PENDING_PATH)) return;
+            if (cause === 'stop') await atomicWriteJson(stopPath, { requestedAt: 'fixture' });
+            if (cause === 'expiry') clock += 61000;
+            if (cause === 'abort') abort.abort(new Error('Fixture cancellation'));
+          },
+        }));
+      assert.ok(checks >= 4);
+      assert.equal(h.sent.length, 0);
+      assert.equal(await readJson(PENDING_PATH), null);
+    } finally { mockedDate.mock.restore(); }
+  }
+});
