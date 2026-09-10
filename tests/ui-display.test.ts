@@ -585,3 +585,21 @@ test('a gas rate below the displayed place shows as a bound, never as zero', asy
   assert.match(page.element('gas-price').attrs['aria-label']!, /Robinhood RPC eth_gasPrice/);
   page.hide();
 });
+
+test('a label near a canvas edge slides its stack instead of collapsing the side', async () => {
+  const page = await browser();
+  // USDG's slice sits at twelve o'clock, so its label lands just above the top
+  // margin. Compressing the side to minimum gaps because of that would drag
+  // AAPL and NVDA up beside it, far from the slices they name.
+  const weights = { USDG: 459, AAPL: 3000, NVDA: 2180, MSFT: 2180, AMD: 2181 };
+  page.source.send({ ...current, config: { targets: weights, driftThresholdBps: 500 },
+    portfolio: { ...current.portfolio, positions: current.portfolio.positions.map(p =>
+      ({ ...p, weightBps: weights[p.id as keyof typeof weights] })) } });
+  const at = (id: string) => Number(page.element('labels').children
+    .find(group => group.children[0]!.textContent === id)!.children[0]!.attrs.y);
+  assert.ok(at('USDG') < 60, `USDG names the top slice, so it stays at the top (was ${at('USDG')})`);
+  assert.ok(at('NVDA') > 300, `NVDA names the lower-right slice, so it stays low (was ${at('NVDA')})`);
+  const rightSide = ['USDG', 'AAPL', 'NVDA'].map(at).sort((a, b) => a - b);
+  assert.ok(rightSide[2]! - rightSide[0]! > 200, 'the side keeps its natural spread, not a 42px stack');
+  page.hide();
+});

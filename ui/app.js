@@ -279,10 +279,18 @@
       if (!side.length) continue;
       side.sort((a, b) => a.y - b.y);
       for (let i = 1; i < side.length; i++) side[i].y = Math.max(side[i].y, side[i - 1].y + ROW_GAP);
-      // If the spread stack leaves the canvas, lay it out rigidly around its own
-      // centroid. Clamping one end instead would reopen a gap the pass just
-      // closed, and shifting both ends in turn just oscillates.
-      if (side[0].y < TOP_Y || side[side.length - 1].y > BOTTOM_Y) {
+      // A stack that overhangs an edge is slid back whole, which keeps every
+      // label beside the slice it names. Compressing to minimum gaps here would
+      // collapse well separated labels because one of them sits a few pixels
+      // past the margin. Clamping a single end instead would reopen a gap the
+      // pass just closed, and shifting each end in turn oscillates.
+      const spread = side[side.length - 1].y - side[0].y;
+      if (spread <= BOTTOM_Y - TOP_Y) {
+        const shift = side[0].y < TOP_Y ? TOP_Y - side[0].y
+          : side[side.length - 1].y > BOTTOM_Y ? BOTTOM_Y - side[side.length - 1].y : 0;
+        if (shift !== 0) for (const label of side) label.y += shift;
+      } else {
+        // Genuinely taller than the canvas: minimum gaps, centred on the group.
         const span = (side.length - 1) * ROW_GAP;
         const middle = side.reduce((sum, label) => sum + label.y, 0) / side.length;
         const start = Math.min(Math.max(middle - span / 2, TOP_Y), Math.max(TOP_Y, BOTTOM_Y - span));
