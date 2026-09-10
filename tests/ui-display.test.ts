@@ -738,7 +738,8 @@ test('Settings opens and closes accessibly without redrawing or changing the cha
     assert.equal(page.renders, draws); assert.equal(page.element('arcs').children, ring);
   }
   assert.match(css, /\.settings \{[^}]*position: absolute/);
-  assert.match(css, /\.settings-panel \{[^}]*position: absolute[^}]*transition: grid-template-rows/);
+  assert.match(css, /\.settings-panel \{[^}]*transition: grid-template-rows/);
+  assert.doesNotMatch(css.match(/\.settings-panel \{[^}]*\}/)?.[0] ?? "", /position: absolute|bottom:/);
   assert.match(css, /prefers-reduced-motion: reduce[\s\S]*?\.settings-panel[^}]*transition: none/);
   assert.deepEqual(page.calls, []);
   page.hide();
