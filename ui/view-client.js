@@ -3,7 +3,8 @@
   const token = /^#view=([a-f0-9]{64})$/i.exec(window.location.hash)?.[1] || null;
   const fragment = token ? `#view=${token}` : "";
   const subscribers = new Set();
-  let latest = null, controller = null, retryTimer = null, suspended = false, generation = 0;
+  let latest = null, controller = null, retryTimer = null, suspended = document.visibilityState === "hidden", generation = 0;
+  let pageHidden = false;
   function chartUrl(value) {
     try {
       const url = new URL(value, window.location.origin);
@@ -57,7 +58,7 @@
     } catch (error) {
       if (!suspended && currentGeneration === generation && !request.signal.aborted) emit({ error: error instanceof Error ? error.message : "Connection updates unavailable.", unauthorized: !retry });
     } finally {
-      reader?.releaseLock();
+      void reader?.cancel().catch(() => {}); reader?.releaseLock(); request.abort();
       if (controller === request) controller = null;
       if (!suspended && currentGeneration === generation && retry) retryTimer = setTimeout(() => { retryTimer = null; void connect(); }, 3000);
     }
@@ -70,18 +71,23 @@
       return () => subscribers.delete(subscriber);
     },
   };
-  window.addEventListener("pagehide", () => {
+  function suspend() {
+    if (suspended) return;
     suspended = true; generation++;
     clearTimeout(retryTimer); retryTimer = null;
     controller?.abort(); controller = null;
-  });
-  window.addEventListener("pageshow", () => {
-    if (suspended) {
-      // Browser Back may restore a grid frozen before its last selection event.
-      // Start that grid from today's selection without immediately leaving it.
-      if (window.location.pathname === "/") latest = null;
-      suspended = false; void connect();
-    }
+  }
+  function resume() {
+    if (!suspended || pageHidden || document.visibilityState === "hidden") return;
+    // Back and a restored background grid accept the current selection as a
+    // baseline; a later agent selection can still open its portfolio.
+    if (window.location.pathname === "/") latest = null;
+    suspended = false; void connect();
+  }
+  window.addEventListener("pagehide", () => { pageHidden = true; suspend(); });
+  window.addEventListener("pageshow", () => { pageHidden = false; resume(); });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") suspend(); else resume();
   });
   void connect();
 })();

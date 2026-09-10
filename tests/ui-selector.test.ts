@@ -30,7 +30,7 @@ class Node {
   close() { this.open = false; for (const fn of this.handlers.get('close') || []) fn(); }
 }
 function content(node: Node): string { return [node.textContent, ...node.children.map(content)].filter(Boolean).join(' '); }
-async function browser(options: { hash?: string; pathname?: string; client?: boolean; selector?: boolean; registry?: typeof portfolios; reply?: (call: Call) => Promise<Reply | undefined> } = {}) {
+async function browser(options: { hidden?: boolean; hash?: string; pathname?: string; client?: boolean; selector?: boolean; registry?: typeof portfolios; reply?: (call: Call) => Promise<Reply | undefined> } = {}) {
   const elements = new Map<string, Node>(), lifecycle = new Map<string, (() => void)[]>(), timers = new Map<number, () => void>();
   const calls: Call[] = [], navigations: string[] = [], streams: ReadableStreamDefaultController<Uint8Array>[] = [], setupStreams: ReadableStreamDefaultController<Uint8Array>[] = [];
   let timerId = 0, uuidCalls = 0;
@@ -40,10 +40,13 @@ async function browser(options: { hash?: string; pathname?: string; client?: boo
   };
   const location = { hash: options.hash ?? fragment, pathname: options.pathname ?? (options.selector === false ? '/chart' : '/'), origin: 'http://127.0.0.1:4663', hostname: '127.0.0.1', protocol: 'http:', assign: (url: string) => navigations.push(url) };
   const window = { location, addEventListener: (name: string, fn: () => void) => lifecycle.set(name, [...lifecycle.get(name) || [], fn]) };
+  const visibility = new Map<string, (() => void)[]>();
+  const document = { visibilityState: options.hidden ? "hidden" : "visible", addEventListener: (name: string, fn: () => void) => visibility.set(name, [...visibility.get(name) || [], fn]),
+    getElementById: byId, createElement: (tag: string) => new Node(tag), createElementNS: (_namespace: string, tag: string) => new Node(tag) };
   const context = {
     window, URL, AbortController, TextDecoder,
     crypto: { randomUUID: () => { uuidCalls++; return `00000000-0000-4000-8000-${String(uuidCalls).padStart(12, '0')}`; } },
-    document: { getElementById: byId, createElement: (tag: string) => new Node(tag), createElementNS: (_namespace: string, tag: string) => new Node(tag) },
+    document,
     setTimeout: (fn: () => void) => { timers.set(++timerId, fn); return timerId; }, clearTimeout: (id: number) => timers.delete(id),
     fetch: async (url: string, init: { body?: string; signal?: AbortSignal; method?: string } = {}) => {
       const call = { url, body: init.body ? JSON.parse(init.body) : undefined, signal: init.signal, method: init.method };
@@ -86,6 +89,7 @@ async function browser(options: { hash?: string; pathname?: string; client?: boo
       else setupStreams.at(-1)!.enqueue(bytes);
       await flush();
     },
+    async visible(value: boolean) { document.visibilityState = value ? "visible" : "hidden"; for (const fn of visibility.get("visibilitychange") || []) fn(); await flush(); },
     async hide() { for (const fn of lifecycle.get('pagehide') || []) fn(); await flush(); },
     async show() { for (const fn of lifecycle.get('pageshow') || []) fn(); await flush(); },
     async retry() { const current = [...timers]; timers.clear(); for (const [, fn] of current) fn(); await flush(); },
@@ -575,4 +579,63 @@ test('the disabled Privy option explains the existing-wallet limit on hover and 
   assert.match(html!, /id="privy-limit"[^>]*role="tooltip">Privy Agent Sandbox supports one Ethereum wallet per account\. Your Privy wallet is already added\.<\/span>/);
   assert.match(css!, /\.privy-limit\s*\{[^}]*display:\s*none/);
   assert.match(css!, /\.privy-choice\[data-limited="true"\]:hover \.privy-limit\s*,\s*\.privy-choice\[data-limited="true"\]:focus-visible \.privy-limit\s*\{\s*display:\s*block/);
+});
+
+
+test('background companion tabs release all view streams and only the visible tab reconnects', async () => {
+  const pages = await Promise.all(Array.from({ length: 10 }, () => browser({ selector: false })));
+  for (const page of pages) await page.send(snapshot(walletA));
+  for (const page of pages) await page.visible(false);
+  assert.equal(pages.flatMap(page => page.calls).filter(call => call.url === '/api/view/events' && !call.signal!.aborted).length, 0);
+  for (const page of pages) await page.retry();
+  assert.ok(pages.every(page => page.calls.length === 1 && page.navigations.length === 0));
+  const active = pages[0]!;
+  await active.visible(true); await active.show(); await active.visible(true);
+  assert.equal(active.calls.length, 2, 'visibility and pageshow cannot create duplicate streams');
+  await active.send(snapshot(walletB));
+  assert.deepEqual(active.navigations, [`http://127.0.0.1:4664/chart${fragment}`]);
+  assert.equal(pages.flatMap(page => page.calls).filter(call => !call.signal!.aborted).length, 1);
+  for (const page of pages) await page.hide();
+});
+
+test('a grid opened in the background waits for visibility and stays on the grid with the current attachment', async () => {
+  const page = await browser({ hidden: true });
+  assert.equal(page.calls.filter(call => call.url === '/api/view/events').length, 0);
+  await page.visible(true); await page.send(snapshot(walletA));
+  await page.visible(false); await page.visible(true); await page.send(snapshot(walletB));
+  assert.equal(page.navigations.length, 0);
+  assert.match(content(page.cards()[1]!), /This chat/);
+  await page.send(snapshot(walletA));
+  assert.deepEqual(page.navigations, [`http://127.0.0.1:4663/chart${fragment}`]);
+  await page.hide(); await page.visible(true);
+  assert.equal(page.calls.filter(call => call.url === '/api/view/events' && !call.signal!.aborted).length, 0, 'visibility cannot restart a page awaiting pageshow');
+});
+
+test('switching to Privy approval suspends progress sockets and resumes the same setup intent', async () => {
+  const page = await browser({ registry: noPrivyPortfolios });
+  await page.send(snapshot(walletA, noPrivyPortfolios));
+  await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-privy'));
+  await page.sendSetup(setupResult('privy', 'awaiting-approval', { approval }));
+  await page.visible(false);
+  assert.ok(page.calls.filter(call => call.url.endsWith('/events')).every(call => call.signal!.aborted));
+  await page.visible(true);
+  await page.send(snapshot(walletA, noPrivyPortfolios));
+  await page.sendSetup(setupResult('privy', 'ready', { wallet: walletB, chartUrl: portfolios[1]!.chartUrl }));
+  assert.equal(page.calls.filter(call => call.url === '/api/setup').length, 1);
+  assert.equal(page.calls.filter(call => call.url === '/api/setup/events').length, 2);
+  assert.equal(page.calls.filter(call => call.url === '/api/connect').length, 1);
+  assert.equal(page.uuidCalls, 1);
+  assert.deepEqual(page.navigations, [`http://127.0.0.1:4664/chart${fragment}`]);
+  await page.hide();
+});
+
+test('malformed view frames close their old transport before reconnecting', async () => {
+  const page = await browser({ selector: false });
+  await page.send({ ...snapshot(walletA), portfolios: null });
+  assert.equal(page.calls[0]!.signal!.aborted, true);
+  await page.retry();
+  assert.equal(page.calls.length, 2);
+  assert.equal(page.calls.filter(call => !call.signal!.aborted).length, 1);
+  await page.send(snapshot(walletA));
+  await page.hide();
 });

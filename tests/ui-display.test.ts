@@ -24,12 +24,13 @@ type DisplayNode = { tag: string; textContent: string; attrs: Record<string, str
 type Response = { ok: boolean; json: () => Promise<unknown> };
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
-async function browser(options: { status?: () => Promise<Response>; stockLinks?: boolean } = {}) {
+async function browser(options: { hidden?: boolean; status?: () => Promise<Response>; stockLinks?: boolean } = {}) {
   const [ringScript, script, html] = await Promise.all(['allocation-ring.js', 'app.js', 'index.html']
     .map(file => readFile(new URL(`../ui/${file}`, import.meta.url), 'utf8')));
   const htmlIds = new Set([...html!.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]));
   const elements = new Map<string, DisplayNode>();
-  const lifecycle = new Map<string, () => void>();
+  const lifecycle = new Map<string, () => void>(), visibility = new Map<string, () => void>();
+  const pageDocument = { visibilityState: options.hidden ? "hidden" : "visible" };
   const timers = new Map<number, { fn: () => void; at: number }>();
   const calls: { url: string; at: number; signal: AbortSignal }[] = [];
   let now = initialTime, nextTimer = 0, pieRenders = 0;
@@ -86,6 +87,8 @@ async function browser(options: { status?: () => Promise<Response>; stockLinks?:
     },
     window: { addEventListener: (name: string, handler: () => void) => lifecycle.set(name, handler) },
     document: {
+      get visibilityState() { return pageDocument.visibilityState; },
+      addEventListener: (name: string, handler: () => void) => visibility.set(name, handler),
       getElementById: (id: string) => { if (!htmlIds.has(id)) return null; if (id === 'arcs') pieRenders++; if (!elements.has(id)) elements.set(id, node('text', id)); return elements.get(id); },
       createElementNS: (_namespace: string, tag: string) => node(tag),
     },
@@ -94,12 +97,13 @@ async function browser(options: { status?: () => Promise<Response>; stockLinks?:
   if (options.stockLinks) runInContext(await readFile(new URL('../ui/stock-links.js', import.meta.url), 'utf8'), context);
   runInContext(script, context);
   const source = Source.instances[0]!;
-  source.send(current);
+  source?.send(current);
   await flush();
   return {
     element: (id: string) => elements.get(id)!,
     get renders() { return pieRenders; }, get now() { return now; },
-    calls, timers, source,
+    calls, timers, source, sources: Source.instances,
+    visible(value: boolean) { pageDocument.visibilityState = value ? "visible" : "hidden"; visibility.get("visibilitychange")!(); },
     hide() { lifecycle.get('pagehide')!(); },
     show() { lifecycle.get('pageshow')!(); },
     async advance(ms: number) {
@@ -825,5 +829,65 @@ test('empty-wallet label anchors follow displayed targets and linked highlights 
     offset += weight;
   }
   assert.deepEqual(page.calls, []);
+  page.hide();
+});
+
+
+test('hidden chart tabs release status sockets and timers until visible again', async () => {
+  const page = await browser();
+  page.visible(false);
+  assert.equal(page.source.closed, true);
+  assert.equal(page.timers.size, 0);
+  const renders = page.renders;
+  page.source.send({ ...current, error: 'old stream' });
+  await page.advance(10000);
+  assert.equal(page.renders, renders);
+  assert.equal(page.calls.length, 0);
+  page.visible(true); page.show(); page.visible(true);
+  assert.equal(page.sources.length, 2);
+  page.sources[1]!.send(current);
+  assert.equal(page.timers.size, 0);
+  assert.equal(page.sources[1]!.closed, false);
+  page.hide(); page.visible(true);
+  assert.equal(page.sources.length, 2, 'pagehide remains suspended until pageshow');
+});
+
+test('a chart initially opened in the background does not claim a status socket or poll', async () => {
+  const page = await browser({ hidden: true });
+  assert.equal(page.sources.length, 0);
+  await page.advance(10000); assert.equal(page.calls.length, 0);
+  page.show(); assert.equal(page.sources.length, 0);
+  page.visible(true); assert.equal(page.sources.length, 1);
+  page.sources[0]!.send(current); assert.equal(page.timers.size, 0);
+  page.hide();
+});
+
+test('late fallback status after hidden-tab suspension cannot replace a fresh resumed chart', async () => {
+  let finish!: (value: Response) => void;
+  const page = await browser({ status: () => new Promise(resolve => { finish = resolve; }) });
+  page.source.onerror!();
+  assert.equal(page.calls.length, 1);
+  page.visible(false); assert.equal(page.calls[0]!.signal.aborted, true);
+  page.visible(true);
+  page.sources[1]!.send({ ...current, portfolio: { ...current.portfolio, totalUsdE8: '700000000' } });
+  const renders = page.renders;
+  finish({ ok: true, json: async () => ({ ...current, error: 'obsolete fallback' }) });
+  await flush();
+  assert.equal(page.renders, renders);
+  assert.match(page.element('c-val').textContent, /^\$7 · as of /);
+  assert.equal(page.timers.size, 0);
+  page.hide();
+});
+
+
+test('returning to a hidden chart rechecks the age of an otherwise unchanged fee estimate', async () => {
+  const page = await browser();
+  page.source.send(feeSnapshot);
+  page.visible(false);
+  await page.advance(90000);
+  assert.equal(page.calls.length, 0);
+  page.visible(true); page.sources[1]!.send(feeSnapshot);
+  assert.equal(page.element('c-state').textContent, 'Fee estimate unavailable');
+  assert.equal(page.element('c-val').textContent, '');
   page.hide();
 });

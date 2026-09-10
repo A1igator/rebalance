@@ -430,7 +430,7 @@
   let feeExpiryTimer = null;
   let controller = null;
   let refreshing = false;
-  let suspended = false;
+  let suspended = document.visibilityState === "hidden", pageHidden = false;
   let lastRendered = null;
   let streamGeneration = 0;
 
@@ -474,12 +474,11 @@
         if (window.rebalanceControls) await window.rebalanceControls.refreshRunner(snapshot.wallet);
       }
     } catch {
-      if (!streamReady && !suspended) show(lastSnapshot, true);
+      if (!streamReady && !suspended && generation === streamGeneration) show(lastSnapshot, true);
     } finally {
       clearTimeout(timeout);
-      controller = null;
-      refreshing = false;
-      if (!streamReady && !suspended) refreshTimer = setTimeout(refresh, 5000);
+      if (controller === request) { controller = null; refreshing = false; }
+      if (!streamReady && !suspended && generation === streamGeneration && !refreshing) refreshTimer = setTimeout(refresh, 5000);
     }
   }
 
@@ -488,7 +487,7 @@
   }
 
   function connect() {
-    if (suspended) return;
+    if (suspended || stream) return;
     if (typeof EventSource !== "function") { fallback(); return; }
     try {
       const source = new EventSource("/api/status/events");
@@ -526,15 +525,25 @@
     } catch { fallback(); }
   }
 
-  window.addEventListener("pagehide", () => {
-    suspended = true; streamReady = false;
+  function suspend() {
+    if (suspended) return;
+    suspended = true; streamReady = false; streamGeneration++;
     stream?.close(); stream = null;
-    clearTimeout(initialTimer); clearTimeout(refreshTimer); refreshTimer = null;
+    clearTimeout(initialTimer); initialTimer = null;
+    clearTimeout(refreshTimer); refreshTimer = null;
     clearTimeout(feeExpiryTimer); feeExpiryTimer = null;
-    controller?.abort();
-  });
-  window.addEventListener("pageshow", () => {
-    if (suspended) { suspended = false; connect(); }
+    controller?.abort(); controller = null; refreshing = false;
+    window.rebalanceControls?.updateStatus(lastSnapshot, true);
+    window.rebalanceControls?.updateRunner(null, true);
+  }
+  function resume() {
+    if (!suspended || pageHidden || document.visibilityState === "hidden") return;
+    suspended = false; lastRendered = null; connect();
+  }
+  window.addEventListener("pagehide", () => { pageHidden = true; suspend(); });
+  window.addEventListener("pageshow", () => { pageHidden = false; resume(); });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") suspend(); else resume();
   });
   const settingsToggle = byId("settings-toggle"), settingsPanel = byId("settings-panel");
   settingsToggle.addEventListener("click", () => {

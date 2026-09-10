@@ -10,7 +10,8 @@
   let portfolios = [], authorized = false, canSetup = false, connectedWallet = null;
   let viewReady = !token, connecting = false, setupBusy = false, setupRequest = null, streamed = false, connectionRevision = 0;
   let setupExisting = null;
-  let setupState = null, setupController = null, setupGeneration = 0, setupSuspended = false, setupAttachmentAllowed = false;
+  let setupState = null, setupController = null, setupGeneration = 0, setupSuspended = document.visibilityState === "hidden", setupAttachmentAllowed = false;
+  let pageHidden = false;
 
   function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -304,11 +305,20 @@
   byId("close-setup").addEventListener("click", () => { setupAttachmentAllowed = false; byId("setup-dialog").close(); });
   byId("setup-dialog").addEventListener("close", () => { setupAttachmentAllowed = false; });
   byId("setup-dialog").addEventListener("cancel", () => { setupAttachmentAllowed = false; });
-  window.addEventListener("pagehide", () => { setupSuspended = true; setupAttachmentAllowed = false; stopSetupStream(); });
-  window.addEventListener("pageshow", () => {
-    if (!setupSuspended) return;
+  function resumeSetup() {
+    if (!setupSuspended || pageHidden || document.visibilityState === "hidden") return;
     setupSuspended = false;
     if (setupRequest && !["ready", "failed"].includes(setupState)) void watchSetup(setupRequest);
+  }
+  window.addEventListener("pagehide", () => {
+    pageHidden = true; setupSuspended = true; setupAttachmentAllowed = false; stopSetupStream();
+  });
+  window.addEventListener("pageshow", () => { pageHidden = false; resumeSetup(); });
+  document.addEventListener("visibilitychange", () => {
+    // Switching to Privy's approval tab keeps the user's setup intent. Only
+    // progress delivery pauses; wallet preparation continues independently.
+    if (document.visibilityState === "hidden") { setupSuspended = true; stopSetupStream(); }
+    else resumeSetup();
   });
   byId("reload-portfolios").addEventListener("click", () => { void loadPortfolios(); });
   window.rebalanceView?.subscribe((update) => {
