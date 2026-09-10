@@ -13,51 +13,70 @@
   </head>
   <body>
     <main class="chart-shell">
-    <nav class="chart-nav" aria-label="Portfolio navigation">
-      <a id="portfolios-back" href="/">← Portfolios</a>
-      <div class="portfolio-actions">
-        <button id="copy-address" class="address-button" type="button" disabled>
-          <svg class="control-icon" viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M13 5V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h1"/></svg>
-          <span id="copy-address-label">Address</span>
-        </button>
-        <button id="portfolio-run" class="run-button" type="button" disabled>Unavailable</button>
+      <nav class="chart-nav" aria-label="Portfolio navigation">
+        <a id="portfolios-back" href="/">← Portfolios</a>
+        <div class="portfolio-actions">
+          <button id="copy-address" class="address-button" type="button" disabled>
+            <svg class="control-icon" viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M13 5V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h1"/></svg>
+            <span id="copy-address-label">Address</span>
+          </button>
+          <button id="portfolio-run" class="run-button" type="button" disabled>Unavailable</button>
+        </div>
+      </nav>
+      <div id="funding-fallback" class="funding-fallback" hidden><input id="funding-address" readonly aria-label="Funding address on Robinhood chain 4663" spellcheck="false"></div>
+
+      <div class="main">
+        <svg class="ring" id="ring" viewBox="-60 -20 560 480" role="img" aria-labelledby="chart-title chart-description">
+          <defs>
+            <title id="chart-title">Allocation unavailable</title>
+            <desc id="chart-description">Connecting to the local app.</desc>
+          </defs>
+          <g transform="rotate(-90 210 210)">
+            <circle class="track" cx="210" cy="210" r="150" fill="none" stroke-width="44"/>
+            <g id="arcs"></g>
+            <g id="targets"></g>
+            <circle class="ghost" id="ghost" cx="210" cy="210" r="150" fill="none" stroke-width="44" pathLength="100"/>
+          </g>
+          <g id="labels"></g>
+          <text class="ctr-state" id="c-state" x="210" y="202">Connecting</text>
+          <text class="ctr-sub" id="c-sub" x="210" y="226">Local allocation</text>
+          <text class="ctr-val" id="c-val" x="210" y="249"></text>
+          <text class="ctr-val" id="c-legend" x="210" y="444"></text>
+        </svg>
       </div>
-    </nav>
-    <div id="funding-fallback" class="funding-fallback" hidden><input id="funding-address" readonly aria-label="Funding address on Robinhood chain 4663" spellcheck="false"></div>
-    <p id="control-message" class="control-message" role="status" hidden></p>
-    <svg id="allocation" viewBox="-15 0 570 620" role="img" aria-labelledby="chart-title chart-description">
-      <title id="chart-title">Allocation unavailable</title>
-      <desc id="chart-description">Connecting to the local app.</desc>
-      <defs>
-        <mask id="actual-mask" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="0" y="0" width="540" height="540">
-          <rect x="0" y="0" width="540" height="540" fill="white"/>
-          <g id="actual-dividers"></g>
-        </mask>
-        <mask id="target-mask" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="0" y="0" width="540" height="540">
-          <rect x="0" y="0" width="540" height="540" fill="white"/>
-          <g id="target-dividers"></g>
-        </mask>
-      </defs>
-      <g id="actual-ring" transform="rotate(-90 270 270)" mask="url(#actual-mask)">
-        <circle class="track" cx="270" cy="270" r="164" fill="none" stroke-width="78"/>
-        <g id="segments"></g>
-      </g>
-      <g id="target-ring" transform="rotate(-90 270 270)" mask="url(#target-mask)">
-        <g id="target-segments"></g>
-      </g>
-      <g id="labels"></g>
-      <text id="state" x="270" y="257" class="state">Connecting</text>
-      <text id="note" x="270" y="280" class="note">Local allocation</text>
-      <text id="comparison" x="270" y="305" class="comparison"></text>
-      <g aria-labelledby="risk-model-title">
-        <title id="risk-model-title">Connecting to the saved target risk model.</title>
-        <text id="risk-model" x="30" y="525" class="gas risk-model">Target risk · connecting</text>
-      </g>
-      <text id="gas" x="30" y="546" class="gas">ETH gas · unavailable</text>
-      <text id="gas-price" x="30" y="565" class="gas gas-price">Gas price · unavailable</text>
-      <text id="gas-estimate" x="30" y="584" class="gas gas-price">Swap estimate · unavailable</text>
-      <text id="gas-rebalance" x="30" y="603" class="gas gas-price">Rebalance estimate · unavailable</text>
-    </svg>
+
+      <div class="discl">
+        <div class="measure"><button class="summary" id="sum" aria-expanded="false" aria-controls="panel">
+          <span class="stext">Details</span>
+          <svg class="chev" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button></div>
+        <div class="panel" id="panel"><div class="panelin"><div class="panelpad measure">
+          <section>
+            <p class="cap">Latest trade</p>
+            <p class="sval" id="why-trade">—</p>
+            <p class="sval mono" id="why-receipt">—</p>
+          </section>
+          <div class="pair">
+            <section>
+              <p class="cap">Fees</p>
+              <dl class="rows">
+                <div><dt>Balance</dt><dd id="gas">unavailable</dd></div>
+                <div><dt>Gas price</dt><dd id="gas-price">unavailable</dd></div>
+                <div><dt>One swap</dt><dd id="gas-estimate">unavailable</dd></div>
+                <div><dt>Full rebalance</dt><dd id="gas-rebalance">unavailable</dd></div>
+              </dl>
+            </section>
+            <section>
+              <p class="cap">When it trades</p>
+              <dl class="rows">
+                <div><dt>Rebalance when off by</dt><dd id="set-band">unavailable</dd></div>
+                <div><dt>Cycle interval</dt><dd id="set-every">unavailable</dd></div>
+              </dl>
+            </section>
+          </div>
+        </div></div></div>
+      </div>
     </main>
+    <p id="control-message" class="control-message" role="status" hidden></p>
   </body>
 </html>

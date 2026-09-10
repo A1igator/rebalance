@@ -1,36 +1,97 @@
-:root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0c100f; color: #eef3ef; }
+:root {
+  color-scheme: dark;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  --ground: #0b0f0e; --lift: #111716; --rule: #1e2624; --track: #191f1d;
+  --ink: #f2f6f3; --dim: #c3cfc7; --mute: #96a49b; --faint: #6d7a72;
+  --alert: #ef7f6d;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  background: var(--ground); color: var(--ink);
+}
 * { box-sizing: border-box; }
-body { margin: 0; min-height: 100vh; min-height: 100dvh; padding: 16px; display: grid; place-items: center; }
-.chart-shell { width: min(100%, 38rem); }
-.chart-nav { margin: 0 0 12px; font-size: 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
-.chart-nav a { color: #a3afa6; text-decoration: none; padding: 6px 0; display: inline-block; }
-.chart-nav a:hover { color: #eef3ef; }
+body { margin: 0; height: 100vh; height: 100dvh; display: flex; overflow: hidden; }
+/* The window is the app: full bleed, with only the content column measured.
+   The summary line stays reachable at the bottom edge, so opening the panel
+   never pushes it past the fold; the allocation area yields the space. */
+.chart-shell { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.measure { width: 100%; max-width: 54rem; margin: 0 auto; }
+.main { flex: 1 1 auto; min-height: 0; display: grid; place-items: center; padding: clamp(8px, 2vh, 24px) clamp(12px, 3vw, 32px); }
+/* The panel scrolls on a short window without showing chrome over the art. */
+.panelin { scrollbar-width: none; }
+.panelin::-webkit-scrollbar { width: 0; height: 0; }
+
+svg.ring { fill: var(--ink); width: 100%; max-width: 40rem; max-height: 100%; height: auto; aspect-ratio: 560 / 480; display: block; }
+.track { stroke: var(--track); }
+.arc { fill: none; stroke-linecap: butt; transition: opacity .18s ease, stroke-dasharray .95s cubic-bezier(.32,.72,.24,1), stroke-dashoffset .95s cubic-bezier(.32,.72,.24,1); }
+.arc.active { animation: seg 1.7s ease-in-out infinite; }
+@keyframes seg { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+.tgt { fill: none; stroke-linecap: butt; opacity: .5; }
+.ghost { stroke-linecap: butt; opacity: 0; transition: opacity .45s ease; }
+.ghost.show { opacity: .22; }
+text { text-anchor: middle; }
+.ctr-state { font-size: 23px; font-weight: 500; letter-spacing: -.5px; fill: var(--ink); }
+.ctr-sub { font-size: 12px; fill: var(--mute); }
+.ctr-val { font-size: 10.5px; fill: var(--faint); }
+
+/* A label can sit far from its slice, so it carries the slice colour as a
+   presentation attribute. No fill here, so that attribute applies; the
+   out-of-band rule below is CSS and still overrides it. */
+.ticker { font-size: 14px; font-weight: 600; letter-spacing: .4px; }
+.weight { font-size: 12.5px; fill: var(--mute); font-variant-numeric: tabular-nums; }
+.label-out .ticker { fill: var(--alert); }
+.label-out .weight { fill: var(--alert); }
+
+.discl { border-top: 1px solid var(--rule); flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0; max-height: 62dvh; }
+.summary { display: flex; align-items: center; gap: 12px; width: 100%; padding: 15px clamp(20px, 5vw, 40px); background: none; border: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
+.summary:hover { background: var(--lift); }
+.summary:hover .stext, .summary[aria-expanded="true"] .stext { color: var(--mute); }
+.summary:focus-visible { outline: 2px solid #8dbafa; outline-offset: -2px; }
+.stext { font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--faint); }
+.chev { margin-left: auto; color: var(--faint); flex: none; transition: transform .22s cubic-bezier(.2,.8,.3,1); }
+.summary[aria-expanded="true"] .chev { transform: rotate(180deg); }
+
+.panel { display: grid; min-height: 0; grid-template-rows: 0fr; transition: grid-template-rows .28s cubic-bezier(.2,.8,.3,1); background: var(--lift); }
+.panel.open { grid-template-rows: 1fr; }
+.panelin { overflow: hidden auto; min-height: 0; }
+.panelpad { padding: 18px clamp(20px, 5vw, 40px) 22px; display: flex; flex-direction: column; gap: 18px; border-top: 1px solid var(--rule); }
+.panelpad section { display: flex; flex-direction: column; gap: 10px; }
+.cap { font-size: 9.5px; letter-spacing: .13em; text-transform: uppercase; color: var(--faint); margin: 0; }
+.chain { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+@media (max-width: 720px) { .chain { grid-template-columns: repeat(2, 1fr); } }
+.step { display: flex; flex-direction: column; gap: 7px; }
+.sval { font-size: 12.5px; color: var(--dim); line-height: 1.45; }
+.sval.mono { font-family: var(--mono); font-size: 11.5px; }
+.foot { font-size: 10.5px; color: var(--faint); line-height: 1.55; margin: 0; }
+/* Label left, value right, so four fees read as a column of numbers rather
+   than four sentences. */
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 22px 44px; }
+@media (max-width: 720px) { .pair { grid-template-columns: 1fr; } }
+.rows { display: grid; gap: 7px; margin: 0; }
+.rows > div { display: grid; grid-template-columns: minmax(0, auto) 1fr; gap: 18px; align-items: baseline; }
+.rows dt { font-size: 11.5px; color: var(--faint); white-space: nowrap; }
+.rows dd { margin: 0; font-size: 11.5px; color: var(--dim); font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
+
+@media (prefers-reduced-motion: reduce) {
+  .arc, .ghost, .chev, .panel { transition: none; }
+  .arc.active { animation: none; }
+}
+
+/* Portfolio navigation and controls, unchanged from main. */
+.chart-nav { font-size: 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px clamp(12px, 3vw, 32px); }
+.chart-nav a { color: var(--mute); text-decoration: none; padding: 6px 0; display: inline-block; }
+.chart-nav a:hover { color: var(--ink); }
 .chart-nav a:focus-visible { outline: 2px solid #b4cbb8; outline-offset: 4px; }
-svg { display: block; width: 100%; max-height: calc(100dvh - 76px); overflow: visible; }
-.track { stroke: #1a221e; }
-text { text-anchor: middle; fill: #eef3ef; }
-.state { font-size: 19px; font-weight: 500; letter-spacing: -.5px; }
-.note { font-size: 12px; fill: #8f9e94; }
-.comparison { font-size: 10px; fill: #8f9e94; }
-.ticker { font-size: 15px; font-weight: 600; letter-spacing: .5px; }
-.weight { font-size: 13px; fill: #a3afa6; }
-.target-weight { font-size: 10px; fill: #8f9e94; }
-.gas { text-anchor: start; font-size: 11px; font-variant-numeric: tabular-nums; fill: #a3afa6; }
-.gas-price { font-size: 10px; fill: #8f9e94; }
-
-.risk-model { font-size: 11px; fill: #c0ccc3; }
-
 .portfolio-actions { display: flex; align-items: center; gap: 8px; }
 .portfolio-actions button { font: inherit; border: 1px solid #28382f; border-radius: 9px; padding: 8px 10px; background: #121b16; color: #cbd8cf; cursor: pointer; white-space: nowrap; }
-.portfolio-actions button:hover:enabled { background: #1b2920; border-color: #486351; color: #eef3ef; }
+.portfolio-actions button:hover:enabled { background: #1b2920; border-color: #486351; color: var(--ink); }
 .portfolio-actions button:focus-visible { outline: 2px solid #b4cbb8; outline-offset: 3px; }
 .portfolio-actions button:disabled { cursor: default; opacity: .5; }
-.portfolio-actions .address-button { display: flex; align-items: center; gap: 6px; color: #a3afa6; border-color: transparent; background: transparent; font-variant-numeric: tabular-nums; }
+.portfolio-actions .address-button { display: flex; align-items: center; gap: 6px; color: var(--mute); border-color: transparent; background: transparent; font-variant-numeric: tabular-nums; }
 .portfolio-actions .run-button { min-width: 68px; }
 .portfolio-actions .run-button[data-state="running"] { color: #d0decf; background: #1a2920; border-color: #365340; }
 .control-icon { width: 15px; height: 15px; max-height: none; fill: none; stroke: currentColor; stroke-width: 1.3; flex-shrink: 0; }
-.control-message { position: fixed; z-index: 20; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%); width: max-content; max-width: min(440px, calc(100vw - 32px)); max-height: 40dvh; overflow: auto; margin: 0; padding: 12px 16px; border: 1px solid #304035; border-radius: 12px; background: #17211b; box-shadow: 0 8px 32px #0008; color: #b7c3ba; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
-.funding-fallback { margin-bottom: 12px; }
-.funding-fallback input { width: 100%; font: 12px ui-monospace, monospace; color: #dce8de; background: #121b16; border: 1px solid #365340; border-radius: 8px; padding: 10px; }
+/* Raised clear of the details bar, which main's layout did not have. */
+.control-message { position: fixed; z-index: 20; left: 50%; bottom: calc(60px + max(16px, env(safe-area-inset-bottom))); transform: translateX(-50%); width: max-content; max-width: min(440px, calc(100vw - 32px)); max-height: 40dvh; overflow: auto; margin: 0; padding: 12px 16px; border: 1px solid #304035; border-radius: 12px; background: #17211b; box-shadow: 0 8px 32px #0008; color: #b7c3ba; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.funding-fallback { padding: 0 clamp(12px, 3vw, 32px) 10px; }
+.funding-fallback input { width: 100%; font: 12px var(--mono); color: #dce8de; background: #121b16; border: 1px solid #365340; border-radius: 8px; padding: 10px; }
 [hidden] { display: none !important; }
 @media (max-width: 360px) { .chart-nav { gap: 4px; } .portfolio-actions { gap: 2px; } .portfolio-actions button { padding: 8px; } .portfolio-actions .address-button { gap: 4px; } }

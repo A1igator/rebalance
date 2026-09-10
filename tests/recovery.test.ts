@@ -47,7 +47,7 @@ async function fixture(t: TestContext, active = false) {
   let expectedFee = 20n;
   let successfulNotes = 0;
   const publicStatus = (isArmed: boolean): Status => ({ app: 'Rebalance', chain: { id: 4663, name: 'Robinhood' },
-    mode: 'private-key', wallet: account.address, config: { targets: config.targets, rebalanceIntervalSeconds: 3600 },
+    mode: 'private-key', wallet: account.address, config: { targets: config.targets, rebalanceIntervalSeconds: 3600, driftThresholdBps: 500 },
     cycle: null, portfolio: null, operation: null, updatedAt: null, error: null,
     graph: { node: 'wait', trace: ['config', 'reconcile', 'wait'] }, armed: isArmed });
   const originalTx = (): FixtureTx => ({ hash: originalHash, from: account.address, to: '0x0000000000000000000000000000000000000001',

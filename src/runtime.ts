@@ -23,7 +23,7 @@ export const STOP_PATH = resolve(DATA, 'stop.json');
 export type Status = {
   app: 'Rebalance'; chain: { id: 4663; name: 'Robinhood' };
   mode: Config['mode'] | null; wallet: string | null;
-  config: { targets: Record<string, number>; rebalanceIntervalSeconds: number; allocation?: ReturnType<typeof allocationSummary> } | null;
+  config: { targets: Record<string, number>; rebalanceIntervalSeconds: number; driftThresholdBps: number; allocation?: ReturnType<typeof allocationSummary> } | null;
   cycle: RebalanceCycle | null;
   portfolio: Portfolio | null;
   operation: Operation | null;
@@ -65,6 +65,7 @@ export async function status(): Promise<Status> {
     state.wallet = config.wallet;
     state.mode = config.mode;
     state.config = { targets: config.targets, rebalanceIntervalSeconds: config.rebalanceIntervalSeconds,
+      driftThresholdBps: config.driftThresholdBps,
       ...(config.allocation ? { allocation: allocationSummary(config) } : {}) };
     state.portfolio = withCurrentTargets(state.portfolio, config);
     if (!state.portfolio) {
@@ -132,6 +133,7 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
     const retained = withCurrentTargets(previous.portfolio, configured);
     Object.assign(state, {
       wallet: configured.wallet, mode: configured.mode, config: { targets: configured.targets, rebalanceIntervalSeconds: configured.rebalanceIntervalSeconds,
+        driftThresholdBps: configured.driftThresholdBps,
         ...(configured.allocation ? { allocation: allocationSummary(configured) } : {}) },
       cycle: previous.cycle ?? null,
       portfolio: retained, updatedAt: retained ? previous.updatedAt : null,
@@ -159,6 +161,7 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
       state.mode = config.mode;
       state.wallet = config.wallet;
       state.config = { targets: config.targets, rebalanceIntervalSeconds: config.rebalanceIntervalSeconds,
+        driftThresholdBps: config.driftThresholdBps,
         ...(config.allocation ? { allocation: allocationSummary(config) } : {}) };
       state.armed = execute;
       chain = chainFor(config);

@@ -585,3 +585,10 @@ Final TypeScript, skill validation and Git whitespace checks passed. Root reload
 ## PR 20 merge plan — 2026-09-10
 
 The human authorized merging the previously preview-only chart PR and asked for Ledger test readiness. [Prompt 054](prompts/054-merge-monitor-chart.md) records the scope and integration plan before merging. Preserve PR contributor/Claude commit history and the current Ledger implementation; verify the combined chart/runtime/control paths and refresh only read-only services. No live signing or runner activation is part of merge validation. Actual results follow after integration.
+
+
+## PR 20 integrated — 2026-09-10
+
+Merged contributor head `6dc92a4` with main's Ledger wiring after plan commit `f7587b8`, preserving the original PR/Claude-attributed commits. Git merged without conflicts. Root refreshed current UI documentation and the static cycle-interval label; a parallel agent corrected Ledger queued/consumed/rejected/expired/reverted status presentation and compared drift using exact portfolio values instead of apportioned display weights. Approval receipts no longer animate a swap. New fixtures cover those integration cases and avoid claiming exact drift when valuation fields are missing.
+
+TypeScript and the initial affected chart/server/control/launch/recovery/Ledger suite passed **166/166**. After the integration corrections, **67/67** display/control/server tests passed, with JavaScript syntax and whitespace checks passing. No SDK or dependency changed. Root reloaded only three verified chart processes; public run/cycle/pending/recovery/stop record hashes stayed unchanged, and HTTP runner states remained raw-key running, Privy stopped and Ledger stopped. All refreshed status endpoints expose the saved drift threshold. A scoped read-only Ledger check completed with zero native ETH and zero configured ERC20 balances. No live signature, transaction, target change or funded-runner restart was performed. The live merged chart was visually inspected; current wallet selection was then explicitly connected to Ledger for test preparation.
