@@ -434,137 +434,79 @@ const managedSnapshot = (summary: unknown = subjectiveAllocation) => ({
   ...current, config: { targets: allocation, allocation: summary },
 });
 
-test('risk caption distinguishes unset manual inputs from unavailable configuration without inventing scores', async () => {
+test('the saved risk model still describes itself, and rejects what it cannot verify', async () => {
   const page = await browser();
-  assert.equal(page.element('risk-model').textContent, 'Target risk · not set');
-  assert.doesNotMatch(page.element('risk-model').textContent, /0\/100|Sharpe|Return\/risk/);
-  page.source.send({ ...current, config: null });
-  assert.equal(page.element('risk-model').textContent, 'Target risk · unavailable');
-  page.source.send(current);
-  assert.equal(page.element('risk-model').textContent, 'Target risk · not set');
+  // The model has no caption of its own on screen any more. Its full statement
+  // still reaches assistive tech through the chart description, so what the
+  // page will and will not claim about a saved policy is still covered.
+  const describe = () => page.element('chart-description').textContent;
+
+  page.source.send({ ...current, config: { targets: allocation } });
+  assert.match(describe(), /User risk inputs are not set/);
+  assert.doesNotMatch(describe(), /Sharpe|Return\/risk/);
+
+  page.source.send({ ...current, config: { targets: {} } });
+  assert.match(describe(), /saved target risk model is unavailable/);
+  assert.match(describe(), /No risk score is inferred from holdings or price movements/);
+
+  const userRisk = { objective: 'user-risk', returnBasis: 'user-horizon', policyHash: 'a'.repeat(64),
+    computedAt: observed, horizonMonths: 60, stepBps: 500, score: 32.4, expectedReturnBps: 1200,
+    subjectiveRiskScore: 38.1, benchmarkReturnBps: 400 };
+  page.source.send({ ...current, config: { targets: allocation, allocation: userRisk } });
+  assert.match(describe(), /User-selected target risk 38\.1 points on a 0 to 100 scale over 60 months/);
+  assert.match(describe(), /not a probability of loss/);
+  assert.match(describe(), /not standard Sharpe/, 'the custom ratio never claims to be Sharpe');
+
+  const sharpe = { objective: 'sharpe', returnBasis: 'history-period', policyHash: 'b'.repeat(64),
+    computedAt: observed, horizonMonths: 12, stepBps: 100, score: 1.24, expectedReturnBps: 30,
+    history: { interval: 'daily', basis: 'underlying-proxy', asOf: observed, quoteCurrency: 'USD' } };
+  page.source.send({ ...current, config: { targets: allocation, allocation: sharpe } });
+  assert.match(describe(), /Historical Sharpe 1\.24, using daily differential returns; not annualized/);
+  assert.match(describe(), /underlying-asset proxy basis in USD/);
+  assert.doesNotMatch(describe(), /38\.1|Return\/risk/, 'an earlier subjective model does not survive');
   page.hide();
 });
 
-test('subjective target risk has an explicit custom ratio, horizon and accessible units', async () => {
+test('a malformed or disconnected model never yields a fabricated number', async () => {
   const page = await browser();
-  page.source.send(managedSnapshot());
-  const caption = page.element('risk-model');
-  assert.equal(caption.textContent, 'Target risk 38.1/100 · Return/risk 32.4 · 5 yr');
-  assert.doesNotMatch(caption.textContent, /Sharpe/);
-  const details = caption.attrs['aria-label']!;
-  assert.match(details, /target/i);
-  assert.match(details, /14\.34/);
-  assert.match(details, /benchmark.*2%/i);
-  assert.match(details, /basis points|bps/i);
-  assert.match(details, /risk point/i);
-  assert.match(details, /not (?:a |standard )?Sharpe/i);
-  assert.equal(page.element('risk-model-title').textContent, details);
-  assert.ok(page.element('chart-description').textContent.includes(details));
-  for (const score of [0, -4]) {
-    page.source.send(managedSnapshot({ ...subjectiveAllocation, score,
-      expectedReturnBps: 200 + score * subjectiveAllocation.subjectiveRiskScore }));
-    assert.equal(page.element('risk-model').textContent, `Target risk 38.1/100 · Return/risk ${score} · 5 yr`);
-  }
-  page.hide();
-});
-
-test('small positive subjective risk and signed nonzero ratios never render as zero', async () => {
-  const page = await browser();
-  page.source.send(managedSnapshot({ ...subjectiveAllocation, subjectiveRiskScore: 0.01,
-    expectedReturnBps: 200.324 }));
-  assert.equal(page.element('risk-model').textContent, 'Target risk <0.1/100 · Return/risk 32.4 · 5 yr');
-  assert.match(page.element('risk-model').attrs['aria-label']!, /0\.01/);
-  for (const score of [0.001, -0.001]) {
-    page.source.send(managedSnapshot({ ...subjectiveAllocation, score,
-      expectedReturnBps: 200 + score * subjectiveAllocation.subjectiveRiskScore }));
-    assert.equal(page.element('risk-model').textContent,
-      `Target risk 38.1/100 · Return/risk ${score.toPrecision(2)} · 5 yr`);
-  }
-  page.hide();
-});
-
-test('Sharpe caption uses its historical observation period and clears earlier subjective values', async () => {
-  const page = await browser(); page.source.send(managedSnapshot());
-  const historical = { ...subjectiveAllocation, objective: 'sharpe', score: 1.24,
-    subjectiveRiskScore: null, expectedReturnBps: 25, returnBasis: 'history-period',
-    history: { interval: 'daily', basis: 'underlying-proxy', asOf: observed, quoteCurrency: 'USDG' } };
-  page.source.send(managedSnapshot(historical));
-  assert.equal(page.element('risk-model').textContent, 'Target Sharpe 1.24 · daily observations');
-  assert.doesNotMatch(page.element('risk-model').textContent, /38\.1|Return\/risk|5 yr/);
-  const details = page.element('risk-model').attrs['aria-label']!;
-  assert.match(details, /histor/i); assert.match(details, /daily/i); assert.match(details, /proxy/i);
-  assert.match(details, /USDG/);
-  page.source.send(managedSnapshot({ ...historical, score: -1.24,
-    history: { ...historical.history, interval: 'monthly' } }));
-  assert.equal(page.element('risk-model').textContent, 'Target Sharpe -1.24 · monthly observations');
-  page.source.send(current);
-  assert.equal(page.element('risk-model').textContent, 'Target risk · not set');
-  assert.doesNotMatch(page.element('chart-description').textContent, /1\.24|38\.1\/100|Return\/risk 32\.4/);
-  page.hide();
-});
-
-test('malformed allocation summaries clear saved numbers instead of displaying stale or fabricated scores', async () => {
-  const page = await browser();
-  for (const [index, summary] of [
-    { ...subjectiveAllocation, objective: 'unknown' },
-    { ...subjectiveAllocation, score: null },
-    { ...subjectiveAllocation, score: Number.NaN },
-    { ...subjectiveAllocation, subjectiveRiskScore: undefined },
-    { ...subjectiveAllocation, subjectiveRiskScore: -1 },
-    { ...subjectiveAllocation, subjectiveRiskScore: 101 },
-    { ...subjectiveAllocation, expectedReturnBps: undefined },
-    { ...subjectiveAllocation, benchmarkReturnBps: null },
-    { ...subjectiveAllocation, horizonMonths: 0 },
-    { ...subjectiveAllocation, computedAt: 'invalid' },
-    { ...subjectiveAllocation, policyHash: 'invalid' },
-    { ...subjectiveAllocation, stepBps: 0 },
-    { ...subjectiveAllocation, returnBasis: 'history-period' },
-    { ...subjectiveAllocation, objective: 'sharpe', returnBasis: 'history-period' },
+  const describe = () => page.element('chart-description').textContent;
+  const base = { objective: 'user-risk', returnBasis: 'user-horizon', policyHash: 'a'.repeat(64),
+    computedAt: observed, horizonMonths: 60, stepBps: 500, score: 32.4, expectedReturnBps: 1200,
+    subjectiveRiskScore: 38.1, benchmarkReturnBps: 400 };
+  for (const [index, broken] of [
+    { ...base, policyHash: 'nope' },
+    { ...base, score: Number.NaN },
+    { ...base, score: Number.POSITIVE_INFINITY },
+    { ...base, computedAt: 'not a date' },
+    { ...base, subjectiveRiskScore: 0 },
+    { ...base, stepBps: 7 },
   ].entries()) {
-    page.source.send(managedSnapshot());
-    page.source.send(managedSnapshot(summary));
-    assert.equal(page.element('risk-model').textContent, 'Target risk · unavailable', `invalid summary ${index}`);
-    assert.doesNotMatch(page.element('risk-model').attrs['aria-label']!, /38\.1|32\.4|NaN|Infinity/);
+    page.source.send({ ...current, config: { targets: allocation, allocation: broken } });
+    assert.match(describe(), /saved target risk model is unavailable/, `invalid summary ${index}`);
+    assert.doesNotMatch(describe(), /38\.1|32\.4|NaN|Infinity/, `invalid summary ${index} leaked a number`);
   }
-  page.source.send(managedSnapshot());
-  page.source.send({ ...current, wallet: '0x2222222222222222222222222222222222222222' });
-  assert.equal(page.element('risk-model').textContent, 'Target risk · not set', 'a new manual wallet cannot retain the prior wallet score');
+  page.source.send({ ...current, config: { targets: allocation, allocation: base } });
+  assert.match(describe(), /User-selected target risk 38\.1/);
+  page.source.send({ ...current, config: { targets: allocation } });
+  assert.match(describe(), /User risk inputs are not set/, 'a manual wallet cannot retain the prior score');
   page.hide();
 });
 
-test('disconnected risk caption identifies the last saved policy and clears the prefix on reconnection', async () => {
-  const page = await browser({ status: async () => { throw new Error('Isolated status read unavailable'); } });
-  page.source.send(managedSnapshot());
-  page.source.onerror!(); await flush();
-  assert.equal(page.element('risk-model').textContent, 'Last saved · Target risk 38.1/100 · Return/risk 32.4 · 5 yr');
-  assert.match(page.element('risk-model').attrs['aria-label']!, /last saved/i);
-  page.source.send(managedSnapshot());
-  assert.equal(page.element('risk-model').textContent, 'Target risk 38.1/100 · Return/risk 32.4 · 5 yr');
+test('a disconnected page marks the model as last saved and clears that on reconnection', async () => {
+  const page = await browser({ status: async () => { throw new Error('offline'); } });
+  const model = { objective: 'sharpe', returnBasis: 'history-period', policyHash: 'b'.repeat(64),
+    computedAt: observed, horizonMonths: 12, stepBps: 100, score: 1.24, expectedReturnBps: 30,
+    history: { interval: 'daily', basis: 'tradable-token', asOf: observed, quoteCurrency: 'USD' } };
+  page.source.send({ ...current, config: { targets: allocation, allocation: model } });
+  assert.doesNotMatch(page.element('chart-description').textContent, /Last saved model only/);
+  page.source.onerror!();
+  await page.advance(5000);
+  assert.match(page.element('chart-description').textContent, /Connection unavailable\. Last saved model only/);
+  page.source.send({ ...current, config: { targets: allocation, allocation: model } });
+  assert.doesNotMatch(page.element('chart-description').textContent, /Last saved model only/, 'reconnection clears the prefix');
   page.hide();
 });
 
-test('risk display adds no requests or timers and gas refresh preserves its caption and accessible description', async () => {
-  const page = await browser();
-  const deadlines = [...page.timers.values()].map(timer => timer.at).sort((a, b) => a - b);
-  const requests = page.calls.length;
-  page.source.send(managedSnapshot());
-  assert.equal(page.calls.length, requests);
-  assert.deepEqual([...page.timers.values()].map(timer => timer.at).sort((a, b) => a - b), deadlines);
-  const caption = page.element('risk-model').textContent;
-  const details = page.element('risk-model').attrs['aria-label']!;
-  const renders = page.renders;
-  await page.advance(30_000);
-  assert.equal(page.calls.length, requests + 1);
-  assert.ok(page.calls.every(call => call.url === '/api/gas'));
-  assert.equal(page.renders, renders, 'gas quotes do not redraw the portfolio or risk model');
-  assert.equal(page.element('risk-model').textContent, caption);
-  assert.equal(page.element('risk-model').attrs['aria-label'], details);
-  assert.ok(page.element('chart-description').textContent.includes(details));
-  await page.advance(60_000);
-  assert.equal(page.element('risk-model').textContent, caption, 'saved user assumptions do not expire with ninety-second gas quotes');
-  assert.ok(page.element('chart-description').textContent.includes(details));
-  page.hide();
-});
 
 test('a target the wallet does not hold still counts as drift', async () => {
   const page = await browser();

@@ -206,15 +206,12 @@
   }
 
   const modelNumber = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
-  const riskNumber = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
-  const compactNumber = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 2 });
-  const displayModelNumber = (value) => Math.abs(value) >= 10000 ? compactNumber.format(value)
-    : value !== 0 && Math.abs(value) < 0.01 ? value.toPrecision(2) : modelNumber.format(value);
 
+  /** The saved risk model no longer has a caption of its own on screen; this
+      keeps describing it in the chart's accessible description. */
   function renderRisk(snapshot, disconnected) {
     const summary = snapshot?.config?.allocation;
     const hasTargets = snapshot?.config?.targets && Object.keys(snapshot.config.targets).length > 0;
-    let label = hasTargets && summary === undefined ? "Target risk · not set" : "Target risk · unavailable";
     let detail = hasTargets && summary === undefined
       ? "Manual target allocation. User risk inputs are not set. Configure risk through your agent."
       : "The saved target risk model is unavailable. No risk score is inferred from holdings or price movements.";
@@ -230,7 +227,6 @@
         finite(summary.benchmarkReturnBps)) {
       const months = summary.horizonMonths;
       const horizon = months % 12 === 0 ? `${months / 12} yr` : `${months} mo`;
-      label = `Target risk ${summary.subjectiveRiskScore < 0.1 ? "<0.1" : riskNumber.format(summary.subjectiveRiskScore)}/100 · Return/risk ${displayModelNumber(summary.score)} · ${horizon}`;
       detail = `Saved target allocation model, calculated ${summary.computedAt}. User-selected target risk ${summary.subjectiveRiskScore} points on a 0 to 100 scale over ${months} months, not a probability of loss. ` +
         `Expected total return assumption ${modelNumber.format(summary.expectedReturnBps / 100)}%, benchmark ${modelNumber.format(summary.benchmarkReturnBps / 100)}% over that same horizon. ` +
         `Return/risk ${summary.score}: expected horizon excess return in basis points per user risk point. This custom ratio is not standard Sharpe. These describe target weights, not the current holdings or a realized return.`;
@@ -238,19 +234,14 @@
         ["daily", "weekly", "monthly"].includes(summary.history?.interval) &&
         ["tradable-token", "underlying-proxy"].includes(summary.history?.basis) && date(summary.history?.asOf) &&
         typeof summary.history?.quoteCurrency === "string" && /^[A-Z][A-Z0-9_-]{0,15}$/.test(summary.history.quoteCurrency)) {
-      label = `Target Sharpe ${displayModelNumber(summary.score)} · ${summary.history.interval} observations`;
       detail = `Saved target allocation model, calculated ${summary.computedAt}. Historical Sharpe ${summary.score}, using ${summary.history.interval} differential returns; not annualized. ` +
         `Historical data as of ${summary.history.asOf}, ${summary.history.basis === "underlying-proxy" ? "underlying-asset proxy" : "tradable-token"} basis in ${summary.history.quoteCurrency}. ` +
         `Historical mean return ${modelNumber.format(summary.expectedReturnBps / 100)}% per observation. Standard Sharpe divides historical mean excess return by its sample standard deviation. ` +
         "These describe target weights with constant weights per observation and no execution costs, not current holdings or a future return guarantee.";
     }
     if (disconnected) {
-      label = `Last saved · ${label}`;
       detail = `Connection unavailable. Last saved model only. ${detail}`;
     }
-    byId("risk-model").textContent = label;
-    byId("risk-model").setAttribute("aria-label", detail);
-    byId("risk-model-title").textContent = detail;
     return detail;
   }
 
@@ -397,10 +388,6 @@
     ghost.classList.toggle("show", Boolean(ghostTarget));
 
     const hash = shortHash(snapshot?.operation?.hash);
-    const allocation = snapshot?.config?.allocation;
-    byId("why-ask").textContent = allocation
-      ? allocation.objective === "sharpe" ? "Best historical Sharpe" : "Best return for your risk level"
-      : targets.length ? "Targets set by hand" : "\u2014";
     const trade = snapshot?.proposal?.reason;
     byId("why-trade").textContent = trade || (funded ? "No trade needed" : "\u2014");
     // An unconfirmed send never renders as a bare hash; uncertainty stays visible.
@@ -416,8 +403,6 @@
     byId("set-band").textContent = band === null ? "unavailable" : `\u00b1${percent.format(band / 100)}%`;
     const every = duration(snapshot?.config?.rebalanceIntervalSeconds);
     byId("set-every").textContent = every || "unavailable";
-    const modes = { "private-key": "Local key", privy: "Privy", ledger: "Ledger" };
-    byId("set-sign").textContent = modes[snapshot?.mode] || "unavailable";
 
     allocationDescription = `${state}. ${sub}. ${funded ? "Outer ring, actual holdings" : "Targets only"}: ${entries.map((r) => `${r.id} ${percent.format(r.weight / 100)}%`).join(", ")}.${funded && targets.length ? ` Inner ring, targets: ${targets.map((r) => `${r.id} ${percent.format(r.weight / 100)}%`).join(", ")}.` : ""}`;
     allocationDescription += ` ${renderRisk(snapshot, disconnected)}`;
