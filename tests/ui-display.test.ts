@@ -248,7 +248,7 @@ test('zero values stay zero and subprecision positive values are never rounded i
   const page = await browser({ gas: async () => ({ ok: true, json: async () => ({ ...quote, gasPriceWei: '1' }) }) });
   page.source.send({ ...current, nativeBalance: '1' });
   assert.match(page.element('gas').textContent, /0\.000000000000000001 ETH · <\$0\.01/);
-  assert.match(page.element('gas-price').textContent, /0\.000000001 gwei/);
+  assert.match(page.element('gas-price').textContent, /<0\.01 gwei/);
   assert.match(page.element('gas-price').attrs['aria-label']!, /<\$0\.000000000001 \/ gas/);
   page.source.send({ ...current, nativeBalance: '0' });
   assert.equal(page.element('gas').textContent, '0 ETH · $0.00');
@@ -344,7 +344,7 @@ test('a hanging gas request has a five-second abort deadline and no concurrent r
 
 test('transaction estimates multiply the observed rate by historical swap and approval gas', async () => {
   const page = await browser({ gas: async () => ({ ok: true, json: async () => ({ ...quote, gasPriceWei: '417860000', ethUsdE8: '250205000000' }) }) });
-  assert.equal(page.element('gas-price').textContent, '0.41786 gwei');
+  assert.equal(page.element('gas-price').textContent, '0.42 gwei');
   assert.equal(page.element('gas-estimate').textContent, '≈$0.18 · +$0.06 approval');
   assert.equal(page.element('gas-rebalance').textContent, '≈$0.35–$0.47 · 2 swaps');
   assert.match(page.element('gas-estimate').attrs['aria-label']!, /historical single-pool receipts/);
@@ -611,5 +611,13 @@ test('an unarmed runner is the headline, without hiding the drift reading', asyn
   page.source.send({ ...current, armed: false, config: { targets: allocation, driftThresholdBps: 500 } });
   assert.equal(page.element('c-state').textContent, 'Not armed');
   assert.equal(page.element('c-sub').textContent, '0% off target', 'a stopped runner still reports where the portfolio stands');
+  page.hide();
+});
+
+test('a gas rate below the displayed place shows as a bound, never as zero', async () => {
+  const page = await browser({ gas: async () => ({ ok: true, json: async () => ({ ...quote, gasPriceWei: '1' }) }) });
+  await page.advance(0);
+  assert.equal(page.element('gas-price').textContent, '<0.01 gwei', 'one wei is positive, so it must not read as 0.00');
+  assert.match(page.element('gas-price').attrs['aria-label']!, /Robinhood RPC eth_gasPrice/);
   page.hide();
 });

@@ -45,6 +45,14 @@
     if (decimals === 2) return `$${rounded / 100n}.${(rounded % 100n).toString().padStart(2, "0")}`;
     return `$${units(rounded, decimals)}`;
   }
+  /** Two decimals of gwei. A positive rate below the last place shows as a
+      bound rather than rounding down to zero, matching dollars() above. */
+  function gwei(wei) {
+    const place = 10n ** 7n;
+    if (wei > 0n && wei * 2n < place) return "<0.01";
+    const hundredths = (wei + place / 2n) / place;
+    return `${hundredths / 100n}.${(hundredths % 100n).toString().padStart(2, "0")}`;
+  }
   function observedAt(value) {
     const timestamp = typeof value === "string" ? Date.parse(value) : NaN;
     return Number.isFinite(timestamp) && timestamp <= Date.now() ? timestamp : null;
@@ -102,7 +110,7 @@
     const balanceStale = statusDisconnected || Boolean(lastSnapshot?.error) || balanceAt === null || Date.now() - balanceAt >= quoteMaxAgeMs;
     const balanceLabel = balance === null ? "ETH gas · unavailable" : `Gas · ${units(balance, 18)} ETH`;
     const balanceUsd = balance !== null && usd ? `${dollars(balance, usd.amount, 2)}${stale(usd) || balanceStale ? " last known" : ""}` : "USD unavailable";
-    const gasLabel = gas ? `${units(gas.amount, 9)} gwei${stale(gas) ? " last known" : ""}` : "unavailable";
+    const gasLabel = gas ? `${gwei(gas.amount)} gwei${stale(gas) ? " last known" : ""}` : "unavailable";
     const gasUsd = gas && usd ? `${dollars(gas.amount, usd.amount, 12)} / gas${stale(gas) || stale(usd) ? " last known" : ""}` : "USD unavailable";
     // Values only; the labels are static markup, so the numbers line up in a
     // column instead of hiding inside four sentences. Staleness is said once
@@ -113,7 +121,7 @@
     byId("gas").textContent = balance === null ? "unavailable"
       : known(`${units(balance, 18)} ETH · ${usd ? dollars(balance, usd.amount, 2) : "USD unavailable"}`,
           balanceStale || (usd ? stale(usd) : false));
-    byId("gas-price").textContent = gas ? known(`${units(gas.amount, 9)} gwei`, stale(gas)) : "unavailable";
+    byId("gas-price").textContent = gas ? known(`${gwei(gas.amount)} gwei`, stale(gas)) : "unavailable";
     const reference = lastSnapshot?.chain?.id === 4663 ? gasReference : null;
     const costReady = reference && gas && usd;
     const costsStale = stale(gas) || stale(usd);
