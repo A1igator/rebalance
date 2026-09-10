@@ -462,3 +462,29 @@ test("known but unconfigured stocks cannot be quoted or used to build transactio
   }
   assert.deepEqual(state.requests, [], 'unconfigured trades must fail before any RPC request');
 });
+
+test('paymaster batch builds exact router approval plus freshly quoted swap without native ETH', async t => {
+  const { state, chain } = fixture(t);
+  state.native = 0n;
+  const buy = { ...trade, sellAssetId: 'USDG', buyAssetId: 'TSLA', amountIn: 1_000_000n };
+  const prior = await chain.quote(buy);
+  state.reverse[500] = 6n * 10n ** 15n;
+  const tx = await chain.transaction(buy, prior, { batch: true });
+  assert.equal(tx.kind, 'swap'); assert.equal(tx.usdgSpent, buy.amountIn);
+  assert.equal(tx.calls?.length, 2); assert.equal(tx.calls![0].to, USDG);
+  const approval = decodeFunctionData({ abi: TRANSACTION_ABI, data: tx.calls![0].data });
+  assert.equal(approval.functionName, 'approve'); assert.deepEqual(approval.args, [ROUTER, buy.amountIn]);
+  assert.deepEqual(tx.calls![1], { to: ROUTER, value: 0n, data: tx.data });
+  const outer = decodeFunctionData({ abi: TRANSACTION_ABI, data: tx.data });
+  assert.equal(outer.functionName, 'multicall'); if (outer.functionName !== 'multicall') assert.fail();
+  const swap = decodeFunctionData({ abi: TRANSACTION_ABI, data: outer.args[1][0] });
+  assert.equal(swap.functionName, 'exactInputSingle'); if (swap.functionName !== 'exactInputSingle') assert.fail();
+  assert.equal(swap.args[0].recipient, WALLET); assert.equal(swap.args[0].amountIn, buy.amountIn);
+  assert.equal(swap.args[0].fee, 500); assert.equal(swap.args[0].amountOutMinimum, 597_000_000_000_000n);
+  state.allowance = buy.amountIn;
+  assert.equal((await chain.transaction(buy, prior, { batch: true })).calls?.length, 1);
+  state.allowance = 0n;
+  assert.equal((await chain.transaction(buy, prior)).kind, 'approval');
+  const sell = await chain.transaction(trade, await chain.quote(trade), { batch: true });
+  assert.equal(sell.usdgSpent, 0n);
+});

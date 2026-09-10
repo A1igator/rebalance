@@ -1,5 +1,7 @@
 # USDG paymaster verification — 2026-09-10
 
+Historical research snapshot before implementation. The optional adapter was subsequently implemented under [prompt 066](prompts/066-usdg-paymaster-implementation.md); see [setup](PAYMASTER_SETUP.md) and [the new execution/evidence record](PAYMASTER_EXECUTION.md). The observations below are preserved as originally measured.
+
 **Robinhood infrastructure supports this direction, but canonical USDG payment acceptance and a sponsored Rebalance transaction are unverified.** Rebalance currently sends legacy EOA transactions and requires native ETH. The user's $0.05 estimated rebalance-fee target does not make those transactions ETH-free.
 
 Research scope was authorized in [prompt 057](prompts/057-center-settings-and-paymaster-verification.md). Only public documentation, installed SDK source/types and read-only public requests were inspected. No credentials were discovered, policies created, accounts delegated, messages signed or transactions submitted.

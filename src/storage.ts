@@ -5,6 +5,11 @@ import { basename, dirname, join } from "node:path";
 export type DispatchFailure = "underpriced" | "gas" | "nonce" | "balance" | "reverted" | "unknown";
 
 export type PendingTransaction = {
+  transport?: 'alchemy-usdg';
+  userOperation?: {
+    paymaster: string; userOperationNonce: string; submittedAtBlock: string;
+    maxTokenAmount: string; callId: string; scanFromBlock?: string;
+  };
   chainId: 4663;
   wallet: string;
   hash: string;

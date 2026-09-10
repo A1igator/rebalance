@@ -774,3 +774,25 @@ for (const execution of ['automatic', 'manual'] as const) test(`${execution} can
   assert.deepEqual(await readJson(f.path('pending.json')), f.pending);
   assert.deepEqual(await readJson(f.path('cycle.json')), f.cycle);
 });
+
+for (const action of ['inspect', 'cancel', 'automatic'] as const) test(`paymaster pending never enters native ${action} recovery`, async t => {
+  const f = await fixture(t, true);
+  f.pending.transport = 'alchemy-usdg';
+  f.pending.userOperation = { paymaster: '0x0000000000000000000000000000000000000009',
+    userOperationNonce: (1n << 64n).toString(), submittedAtBlock: '100', maxTokenAmount: '50000',
+    callId: `0x${'00'.repeat(64)}` };
+  await atomicWriteJson(f.path('pending.json'), f.pending);
+  t.mock.method(f.rpc, 'getTransactionReceipt', async () => { throw new Error('Native receipt must not interpret a UserOperation hash'); });
+  t.mock.method(f.rpc, 'getTransactionCount', async () => { throw new Error('Native nonce must not be used for cancellation'); });
+  if (action === 'automatic') assert.equal(await auto(f), null);
+  else {
+    const result = await recover(action === 'cancel' ? { cancel: true } : {}, f.deps);
+    assert.equal(result.outcome, 'blocked');
+    assert.match(result.messages.join(' '), /EntryPoint/);
+  }
+  assert.equal(f.keyReads, 0); assert.equal(f.resumeCalls, 0); assert.equal(f.sent.length, 0);
+  assert.equal(await readJson(f.path('stop.json')), null);
+  assert.equal(await readJson(f.path('recovery.json')), null);
+  assert.deepEqual(await readJson(f.path('pending.json')), f.pending);
+  assert.deepEqual(await readJson(f.path('cycle.json')), f.cycle);
+});

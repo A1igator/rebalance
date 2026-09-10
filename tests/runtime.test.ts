@@ -627,3 +627,60 @@ test('deferred Ledger never enters automatic recovery for aged unresolved transa
     assert.deepEqual(await readJson(PENDING_PATH), pending);
   }
 });
+
+test('transient UserOperation receipt failures stay local and preserve an earlier actionable incident', async () => {
+  const pending: PendingTransaction = { chainId: 4663, wallet, hash, nonce: 1,
+    kind: 'swap', createdAt: observedAt, status: 'unknown', transport: 'alchemy-usdg',
+    userOperation: { paymaster: '0x0000000000000000000000000000000000000009',
+      userOperationNonce: (1n << 64n).toString(), submittedAtBlock: '100', maxTokenAmount: '50000', callId: `0x${'00'.repeat(64)}` } };
+  await atomicWriteJson(PENDING_PATH, pending);
+  let wrongChain = false;
+  const factory = (() => ({ publicClient: {
+    getChainId: async () => wrongChain ? 1 : 4663,
+    getBlockNumber: async () => { throw new Error('fixture transient RPC outage'); },
+  } })) as unknown as Parameters<typeof tick>[1];
+  for (let i = 0; i < 2; i++) {
+    const result = await tick(false, factory);
+    assert.match(result.error!, /could not be verified/);
+    assert.deepEqual(await events(), []);
+  }
+  wrongChain = true;
+  await tick(false, factory);
+  const incident = await events(); assert.equal(incident.length, 1);
+  wrongChain = false;
+  await tick(false, factory);
+  assert.deepEqual(await events(), incident, 'a temporary read must neither clear nor duplicate actionable evidence');
+  await acknowledgeEvent(incident[0].id);
+  await tick(false, factory);
+  assert.deepEqual(await events(), []);
+  assert.deepEqual(await readJson(PENDING_PATH), pending);
+});
+
+test('unsigned paymaster quote outages retry locally while configuration failures need one alert', async () => {
+  const { PaymasterRpcError } = await import('../src/paymaster-rpc.js');
+  const { acquireLock } = await import('../src/storage.js');
+  const selected = validateConfig({ ...config, mode: 'private-key', gasPayment: { provider: 'alchemy', token: 'USDG',
+    policyId: '11111111-1111-4111-8111-111111111111', paymaster: '0x0000000000000000000000000000000000000009' } });
+  await atomicWriteJson(CONFIG_PATH, selected);
+  const drifted = evaluatePortfolio(portfolio.positions.map(position => ({ ...position,
+    balance: position.id === 'USDG' ? 100_000_000n : 0n })));
+  let retryable = true;
+  const factory = (() => ({
+    snapshot: async () => ({ portfolio: drifted, nativeBalance: 0n, blockNumber: 100n, valuationNote: 'Isolated fixture' }),
+    quote: async () => ({ fee: 500, minimumOut: 1n, amountOut: 2n, blockNumber: 100n }),
+    transaction: async () => { throw new PaymasterRpcError(retryable); },
+  })) as unknown as Parameters<typeof tick>[1];
+  const release = await acquireLock(DATA, 'run.lock');
+  try {
+    await tick(true, factory); await tick(true, factory);
+    assert.deepEqual(await events(), []);
+    retryable = false;
+    await tick(true, factory);
+    const incident = await events(); assert.equal(incident.length, 1);
+    retryable = true;
+    await tick(true, factory);
+    assert.deepEqual(await events(), incident);
+    assert.equal(await readJson(PENDING_PATH), null);
+    assert.equal(await readJson(CYCLE_PATH), null);
+  } finally { await release(); }
+});

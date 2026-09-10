@@ -60,6 +60,9 @@ export type ChainTransaction = {
   kind: "approval" | "swap" | "wrap";
   /** Swap or active-cycle deadline; dispatch rechecks it before signing/sending. */
   expiresAt?: bigint;
+  /** Atomic calls used only by the explicitly selected USDG paymaster path. */
+  calls?: { to: Address; data: Hex; value: bigint }[];
+  usdgSpent?: bigint;
 };
 
 // Official ABI sources:
@@ -332,7 +335,7 @@ export function createChain(config: ChainConfig) {
     return quoteAt(trade, block);
   }
 
-  async function transaction(trade: TradePlan, _previousQuote: RouteQuote): Promise<ChainTransaction> {
+  async function transaction(trade: TradePlan, _previousQuote: RouteQuote, options: { batch?: boolean } = {}): Promise<ChainTransaction> {
     trade = { ...trade };
     const { sell, buy } = assetsFor(trade, assetList);
     const block = await header();
@@ -341,7 +344,7 @@ export function createChain(config: ChainConfig) {
     const allowance = amount(await publicClient.readContract({
       address: sell.address, abi: erc20Abi, functionName: "allowance", args: [wallet, ROUTER], blockNumber: block.number,
     }), "Router allowance", true);
-    if (allowance < trade.amountIn) {
+    if (allowance < trade.amountIn && !options.batch) {
       fresh(block);
       // The caller waits for this receipt, then reconstructs the plan and quote.
       return {
@@ -360,9 +363,14 @@ export function createChain(config: ChainConfig) {
         amountIn: trade.amountIn, amountOutMinimum: current.minimumOut, sqrtPriceLimitX96: 0n,
       }],
     });
+    const data = encodeFunctionData({ abi: ROUTER_ABI, functionName: "multicall", args: [deadline, [swap]] });
     return {
-      to: ROUTER, value: 0n, kind: "swap", expiresAt: deadline,
-      data: encodeFunctionData({ abi: ROUTER_ABI, functionName: "multicall", args: [deadline, [swap]] }),
+      to: ROUTER, value: 0n, kind: "swap", expiresAt: deadline, data,
+      ...(options.batch ? { usdgSpent: sell.id === "USDG" ? trade.amountIn : 0n, calls: [
+        ...(allowance < trade.amountIn ? [{ to: sell.address, value: 0n,
+          data: encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: [ROUTER, trade.amountIn] }) }] : []),
+        { to: ROUTER, value: 0n, data },
+      ] } : {}),
     };
   }
 

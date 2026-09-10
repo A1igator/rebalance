@@ -109,7 +109,7 @@ export async function launch(options: LaunchOptions = {}, overrides: Partial<Lau
   };
   const identity = (s: Status) => JSON.stringify({ chainId: s.chain.id, wallet: s.wallet?.toLowerCase(),
     mode: s.mode, targets: Object.entries(s.config?.targets ?? {}).sort(([a], [b]) => a.localeCompare(b)),
-    rebalanceIntervalSeconds: s.config?.rebalanceIntervalSeconds });
+    rebalanceIntervalSeconds: s.config?.rebalanceIntervalSeconds, gasPayment: s.config?.gasPayment });
   let verifiedChartIdentity: string | null = null;
   const readStatus = async () => {
     const response = await deps.command(['status']);

@@ -685,3 +685,15 @@ test('an aborted Ledger signer after a config edit is classified without a stale
   } }), { assertReady: async () => {} }), ConfigChangedError);
   assert.equal(h.sent.length, 0); assert.equal(await readJson(PENDING_PATH), null);
 });
+
+test('unknown or incomplete paymaster transports fail closed before native receipt reads', async () => {
+  const base: PendingTransaction = { chainId: 4663, wallet, hash: fixtureHash, nonce: 7,
+    kind: 'swap', createdAt: new Date().toISOString(), status: 'unknown' };
+  const { chain, rpc } = mockedChain();
+  rpc.getTransactionReceipt = async () => { assert.fail('Must not read native receipt for a malformed transport'); };
+  for (const extra of [{ transport: 'future-provider' }, { transport: 'alchemy-usdg' }, { userOperation: {} }]) {
+    await atomicWriteJson(PENDING_PATH, { ...base, ...extra });
+    await assert.rejects(reconcile(configuration(), chain), /Invalid pending USDG/);
+    assert.deepEqual(await readJson(PENDING_PATH), { ...base, ...extra });
+  }
+});

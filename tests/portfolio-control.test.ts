@@ -266,3 +266,16 @@ test('a stop can replace a damaged stop marker without reading keys or submittin
   assert.equal((await f.controls.command(f.request('stop'))).outcome, 'stop-requested');
   assert.deepEqual(f.calls.map(call => call.args), [['stop']]);
 });
+
+
+test('USDG gas-payment controls preserve provider configuration and delegate startup to the pinned runtime', async t => {
+  const f = await fixture(t);
+  const config = { ...configuration(walletA), gasPayment: { provider: 'alchemy', token: 'USDG',
+    policyId: '11111111-2222-3333-4444-555555555555', paymaster: '0x0000000000000000000000000000000000000011' } };
+  await atomicWriteJson(join(f.root, 'config.json'), config);
+  const before = await readFile(join(f.root, 'config.json'), 'utf8');
+  assert.equal((await f.controls.command(f.request('start'))).state, 'running');
+  assert.equal(f.calls.length, 1); assert.equal(f.calls[0]!.args[0], 'launch');
+  assert.equal(await readFile(join(f.root, 'config.json'), 'utf8'), before);
+  assert.deepEqual(await readJson(join(f.other, 'config.json')), configuration(walletB));
+});

@@ -16,6 +16,8 @@ export type LedgerAddressAction = { observable: Observable<ActionState>; cancel(
 export type LedgerDevice = {
   getAddress(path: string, options: { checkOnDevice: boolean; returnChainCode: false }): LedgerAddressAction;
   signTransaction?(path: string, transaction: Uint8Array): LedgerAddressAction;
+  signMessage?(path: string, message: Uint8Array): LedgerAddressAction;
+  signDelegationAuthorization?(path: string, chainId: number, contractAddress: string, nonce: number): LedgerAddressAction;
   close(): Promise<void>;
 };
 type LedgerManager = {
@@ -26,7 +28,7 @@ type LedgerManager = {
 };
 export type LedgerSdk = {
   manager: LedgerManager;
-  signer(sessionId: string): Pick<LedgerDevice, 'getAddress' | 'signTransaction'>;
+  signer(sessionId: string): Pick<LedgerDevice, 'getAddress' | 'signTransaction' | 'signMessage' | 'signDelegationAuthorization'>;
 };
 export type LedgerOnboardingDependencies = {
   connect?: (signal: AbortSignal) => Promise<LedgerDevice>;
@@ -288,6 +290,8 @@ async function connectDevice(signal: AbortSignal, load: () => LedgerSdk): Promis
     return {
       getAddress: (path, options) => signer.getAddress(path, options),
       ...(signer.signTransaction ? { signTransaction: (path: string, transaction: Uint8Array) => signer.signTransaction!(path, transaction) } : {}),
+      ...(signer.signMessage ? { signMessage: (path: string, message: Uint8Array) => signer.signMessage!(path, message) } : {}),
+      ...(signer.signDelegationAuthorization ? { signDelegationAuthorization: (path: string, chainId: number, contractAddress: string, nonce: number) => signer.signDelegationAuthorization!(path, chainId, contractAddress, nonce) } : {}),
       close: () => closed ??= (async () => {
         // Destroy the owned native transport even if session disconnection stalls.
         const disconnecting = sdk.manager.disconnect({ sessionId: sessionId! });

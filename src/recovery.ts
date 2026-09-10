@@ -46,13 +46,14 @@ type Assessment = { outcome: 'original-confirmed' | 'original-reverted' | 'cance
 const stopToken = (value: unknown) => value === null ? 'none' : createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const transactionIdentity = (p: PendingTransaction) => JSON.stringify([p.chainId, p.wallet.toLowerCase(), p.hash.toLowerCase(), p.nonce, p.kind]);
 const selectedSigner = (deps: Pick<RecoveryDependencies, 'account' | 'signer'>, config: Config): Promise<TransactionSigner> =>
-  deps.signer ? deps.signer(config) : config.mode === 'private-key' ? deps.account() : loadSigner(config);
+  deps.signer ? deps.signer(config) : config.mode === 'private-key' ? deps.account().then(account => ({ address: account.address, signTransaction: tx => account.signTransaction(tx) })) : loadSigner(config);
 
 function validateRecord(record: RecoveryRecord, config: Config): void {
   if (!record || record.version !== 1 || typeof record.originallyArmed !== 'boolean' ||
       (!(record.automatic === true && record.stop === undefined && record.priorStop === undefined) && (!/^(none|[a-f0-9]{64})$/.test(record.priorStop ?? '') || typeof record.stop?.requestId !== 'string' ||
       typeof record.stop?.requestedAt !== 'string'))) throw new RecoveryError('Invalid recovery record; preserve it for inspection.');
   validatePending(record.original, config);
+  if (record.original.transport) throw new RecoveryError('User operations cannot use native recovery records.');
   if (record.cancellation && (!/^0x[a-fA-F0-9]{64}$/.test(record.cancellation.hash) ||
       !['prepared', 'broadcast', 'unknown', 'not-sent'].includes(record.cancellation.status) ||
       !/^[1-9][0-9]*$/.test(record.cancellation.gas) || !/^[1-9][0-9]*$/.test(record.cancellation.gasPrice))) {
@@ -228,6 +229,11 @@ export async function recover(options: RecoveryOptions = {}, overrides: Partial<
     if (record?.cancellation) result.cancellationHash = record.cancellation.hash;
     const rpc = deps.rpc(config);
     if (await rpc.getChainId() !== 4663) throw new RecoveryError('Recovery RPC is not Robinhood mainnet.');
+    if (original.transport === 'alchemy-usdg') {
+      result.outcome = 'blocked';
+      result.messages.push('Paymaster user operations are reconciled by their exact EntryPoint receipt; native nonce cancellation is unavailable. No cancellation, stop or restart was performed.');
+      return result;
+    }
     const core = recoveryCore(config, rpc, original, () => record);
     const assessment = core.assess;
     let assessed = await assessment();
@@ -381,6 +387,9 @@ export async function automaticRecovery(config: Config, chain: Pick<ReturnType<t
     record = await readJson<RecoveryRecord>(path('recovery.json'));
     if (!pending && (!record || record.resolution)) return null;
     if (pending) validatePending(pending, config);
+    // The normal receipt phase already observes user operations. Never pass one
+    // to native nonce inspection or same-nonce cancellation.
+    if (pending?.transport === 'alchemy-usdg') return null;
     if (record) validateRecord(record, config);
     if (record && pending && record.original.hash.toLowerCase() !== pending.hash.toLowerCase()) {
       if (!record.resolution) throw new RecoveryError('A different transaction is pending while recovery remains unresolved.');

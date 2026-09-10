@@ -75,6 +75,10 @@ Call the subjective objective a user-risk score; standard Sharpe is a separate e
 | Initialize without starting an inactive trader | `npm run cli -- launch --setup-only` |
 | Set the minimum interval between rebalance cycle starts | `npm run cli -- configure --rebalance-interval-seconds 3600` |
 | Set this wallet’s estimated rebalance network-fee target in USD | `npm run cli -- fees target 0.05` |
+| Read the saved gas transport (no credential contents) | `npm run cli -- paymaster status` |
+| Select USDG gas after a successful read-only probe | `npm run cli -- paymaster configure <public-policy-UUID>` |
+| Check configured USDG infrastructure and a probe fee | `npm run cli -- paymaster check` |
+| Return subsequent operations to native gas | `npm run cli -- paymaster disable` |
 | Read or remove this wallet’s fee target | `npm run cli -- fees status` / `npm run cli -- fees clear` |
 | Start automatic raw-key/Privy execution or Ledger monitoring | `npm run cli -- start --background` |
 | Read the latest public Ledger request | `npm run cli -- ledger status` |
@@ -103,9 +107,17 @@ Ledger Start/bare launch enables monitoring only. For a user-authorized Ledger r
 
 Do not automatically convert native ETH into portfolio holdings. It remains the wallet's gas asset. Report a transaction as confirmed only after a receipt is observed.
 
-For a requested fee target, use the selected or explicitly scoped wallet and the user’s USD amount; the five-cent example is not a default for other wallets. Read [fee estimation](../../docs/FEE_TARGET.md) when explaining a fee wait. The graph retries excessive/unavailable estimates locally without a chat alert; automatic signing resumes only when a fresh estimate permits it. This is an estimate of remaining rebalance network fees, not a guaranteed total or actual-spend budget. Settings edits do not reload an older running binary. The current flow still requires native ETH; [paymaster verification](../../docs/PAYMASTER_CHECK.md) does not establish an enabled provider policy or sponsored transaction.
+For a requested fee target, use the selected or explicitly scoped wallet and the user’s USD amount; the five-cent example is not a default for other wallets. Read [fee estimation](../../docs/FEE_TARGET.md) when explaining a fee wait. The graph retries excessive/unavailable estimates locally without a chat alert; automatic signing resumes only when a fresh estimate permits it. This is an estimate of remaining rebalance network fees, not a guaranteed total or actual-spend budget. Settings edits do not reload an older running binary. Native ETH remains the default. The optional [USDG paymaster flow](../../docs/PAYMASTER_SETUP.md) must be selected per wallet after a real read-only estimation succeeds; saved configuration or fixture tests do not establish a sponsored transaction.
 
 The default drift trigger is five percentage points. A cycle with a successful swap retains the saved one-hour interval before a new cycle. New cycles with no successful swap may retry after their original ten-minute window; legacy records stay conservative. A cycle has up to ten minutes for its required sequential approvals/swaps; a fresh within-threshold observation closes it sooner. Check the reported cycle/next-eligible time when explaining a wait. Receipt reconciliation continues during cooldown. Do not reset `cycle.json`, restart the runner or edit targets to bypass its interval. Timing settings affect subsequent cycles; an existing recorded wait remains in force.
+
+## Optional USDG gas transport
+
+Read [paymaster setup](../../docs/PAYMASTER_SETUP.md) for an explicit USDG-gas request. Keep Privy signing on the official Agent Sandbox; Alchemy supplies only the optional gas transport. An owner must provision the Alchemy app, active post-operation USDG policy and billing. Ask only for the public policy UUID; the command discovers the matching paymaster contract through the authenticated provider. Never accept, inspect or print an API key, admin access token or provider URL containing a credential. The user enters the API key themselves with `npm run cli -- paymaster setup` in a local terminal: its hidden TTY prompt rejects piped input and arguments. Do not invoke that interactive secret prompt through model tools.
+
+Use the user's selected wallet scope for `paymaster configure <policy-UUID>`. This command discovers the paymaster using a read-only stub request, then performs a read-only `onlyEstimation` probe before saving the optional gas transport; it preserves targets, runner state, pending receipts and cycle records. Configuration does not start trading. `paymaster check` repeats that probe without saving or signing. Its amount is for a zero-allowance USDG approval simulation, not a full rebalance cost, a charge, or proof of successful execution. Real execution still validates each exact operation and the user's fee target. Failed checks preserve the existing configuration.
+
+Explain before applying the requested transport that it uses EIP-7702 on the same wallet address and an on-chain delegation persists after `paymaster disable`. Disable selects native gas for future work; it does not revoke delegation or bypass a pending UserOperation receipt. The first live use may need a delegation signature as well as the operation signature. Ledger requires each physical confirmation within its explicit rebalance request; provider/local automatic execution retains its existing authorization rules. No setup, status, check or incoming notification authorizes signing. Do not claim USDG acceptance or ETH-free execution until the corresponding actual probe/receipt is verified.
 
 ## Report observations accurately
 
