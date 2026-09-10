@@ -461,6 +461,7 @@ test('production tick bounds an approval by the active cycle and rejects expiry 
 test('recovery preserves the remaining attempt window and does not impose an hourly cooldown without a successful swap', async () => {
   const script = `
     import assert from 'node:assert/strict';
+    import { readFileSync } from 'node:fs';
     import { mock } from 'node:test';
     import { keccak256, parseTransaction, TransactionNotFoundError, TransactionReceiptNotFoundError } from 'viem';
     import { privateKeyToAccount } from 'viem/accounts';
@@ -507,8 +508,10 @@ test('recovery preserves the remaining attempt window and does not impose an hou
       },
       sendRawTransaction: async ({ serializedTransaction }) => {
         assert.equal(scenario, 'cancelled', 'a mined original revert must never need a cancellation');
-        assert.ok(await storage.readJson(configModule.DATA + '/run.lock'));
-        assert.ok(await storage.readJson(configModule.DATA + '/config.lock'));
+        // The configuration lock covers invocation only; an awaited filesystem
+        // read would race its intended release while the RPC response is pending.
+        assert.equal(JSON.parse(readFileSync(configModule.DATA + '/run.lock', 'utf8')).pid, process.pid);
+        assert.equal(JSON.parse(readFileSync(configModule.DATA + '/config.lock', 'utf8')).pid, process.pid);
         const parsed = parseTransaction(serializedTransaction);
         assert.equal(parsed.nonce, 3); assert.equal(parsed.chainId, 4663);
         assert.equal(parsed.to.toLowerCase(), wallet.toLowerCase());

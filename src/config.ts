@@ -1,12 +1,14 @@
 import { assertTestStorageEnvironment } from './test-isolation.js';
 import { constants } from 'node:fs';
-import { chmod, open } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { createHash } from 'node:crypto';
+import { chmod, lstat, open } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { getAddress, isAddress, type Address, type Hex } from 'viem';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { acquireLock, atomicWriteJson, readJson } from './storage.js';
 import { ASSETS } from './assets.js';
 import { validateManagedAllocation, type ManagedAllocation } from './allocation-management.js';
+import type { SeedStore } from './macos-keychain.js';
 
 assertTestStorageEnvironment();
 
@@ -124,11 +126,111 @@ async function fileAccount() {
   } finally { await file.close(); }
 }
 
-export async function createWallet(): Promise<{ address: Address; created: boolean }> {
+/** Dependency injection is for isolated fixtures; normal callers use the host platform/store. */
+export type LocalWalletOptions = { platform?: NodeJS.Platform; seedStore?: SeedStore };
+const BOOTSTRAP_WALLET_REQUEST = createHash('sha256').update('rebalance:wallet:create:bootstrap:v1').digest('hex');
+
+function hasLegacyWalletMetadata(metadata: unknown): boolean {
+  if (!metadata || typeof metadata !== 'object' || !('address' in metadata) || !('chainId' in metadata)) return false;
+  return !Object.hasOwn(metadata, 'keychain') && typeof metadata.address === 'string' &&
+    isAddress(metadata.address, { strict: false }) && metadata.chainId === 4663;
+}
+
+function hasKeychainMetadata(metadata: unknown): boolean {
+  return metadata !== null && typeof metadata === 'object' && Object.hasOwn(metadata, 'keychain');
+}
+
+const invalidWalletMetadata = () => new Error('Wallet public metadata is invalid or unavailable; no key was selected.');
+
+/** Public identity files never follow aliases or expose parser/input text in errors. */
+async function readWalletPublicJson(path: string, limit = 16_384): Promise<Record<string, unknown> | null> {
+  let file;
+  try { file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw invalidWalletMetadata();
+  }
+  try {
+    const info = await file.stat();
+    if (!info.isFile() || info.nlink !== 1 || info.size > limit) throw invalidWalletMetadata();
+    const buffer = Buffer.alloc(limit + 1);
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+    if (bytesRead > limit) throw invalidWalletMetadata();
+    const value: unknown = JSON.parse(buffer.subarray(0, bytesRead).toString('utf8'));
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw invalidWalletMetadata();
+    return value as Record<string, unknown>;
+  } catch { throw invalidWalletMetadata(); }
+  finally { await file.close(); }
+}
+
+async function keychainMarkerExists(path: string): Promise<boolean> {
+  try { await lstat(path); return true; }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+/** Surviving root reservations still own a wallet after its child references disappear. */
+async function knownKeychainIdentity(metadata: unknown): Promise<boolean> {
+  const roots = new Set([DATA]);
+  const selectorChild = basename(dirname(DATA)) === 'wallets' && isAddress(basename(DATA), { strict: false });
+  if (selectorChild) roots.add(dirname(dirname(DATA)));
+  const configuredRoot = process.env.REBALANCE_ROOT_DIR;
+  if (configuredRoot && isAbsolute(configuredRoot)) {
+    const root = resolve(configuredRoot), child = relative(root, DATA);
+    if (child === '' || (!isAbsolute(child) && child !== '..' && !child.startsWith(`..${sep}`))) roots.add(root);
+  }
+  const addresses = new Set<string>();
+  if (selectorChild) addresses.add(basename(DATA).toLowerCase());
+  if (hasLegacyWalletMetadata(metadata)) addresses.add((metadata as { address: string }).address.toLowerCase());
+  if (process.env.REBALANCE_PROFILE_WALLET && isAddress(process.env.REBALANCE_PROFILE_WALLET, { strict: false })) {
+    addresses.add(process.env.REBALANCE_PROFILE_WALLET.toLowerCase());
+  }
+  for (const root of roots) {
+    const vault = await keychainMarkerExists(resolve(root, 'hd', 'keychain.json'));
+    // The original file-based HD backend owns this journal when no Keychain
+    // vault exists. Missing seed plus surviving reservations remains fail-closed.
+    if (!vault && await keychainMarkerExists(resolve(root, 'hd', 'seed.json'))) continue;
+    const journal = await readWalletPublicJson(resolve(root, 'hd', 'accounts.json'), 4 * 1024 * 1024);
+    if (journal === null) {
+      if (vault && root !== DATA && (selectorChild || !hasLegacyWalletMetadata(metadata))) throw invalidWalletMetadata();
+      continue;
+    }
+    if (!('version' in journal) || journal.version !== 1 || !('accounts' in journal) || !Array.isArray(journal.accounts)) {
+      throw invalidWalletMetadata();
+    }
+    for (const reservation of journal.accounts) {
+      if (!reservation || typeof reservation !== 'object' || typeof reservation.address !== 'string' ||
+          !isAddress(reservation.address, { strict: false }) || typeof reservation.requestKey !== 'string') throw invalidWalletMetadata();
+      if (addresses.has(reservation.address.toLowerCase()) || (root === DATA && reservation.requestKey === BOOTSTRAP_WALLET_REQUEST)) return true;
+    }
+    if (vault && root !== DATA && (selectorChild || !hasLegacyWalletMetadata(metadata))) throw invalidWalletMetadata();
+  }
+  return false;
+}
+
+export async function createWallet(options: LocalWalletOptions = {}): Promise<{ address: Address; created: boolean }> {
   const release = await acquireLock(DATA, 'wallet.lock');
   try {
     const walletPath = resolve(DATA, 'wallet.json');
-    const metadata = await readJson<{ address: string; chainId: number; createdAt: string }>(walletPath);
+    const metadata = await readWalletPublicJson(walletPath);
+    // A Keychain identity is authoritative: never fall through to an env/file key
+    // when its reference is malformed, its item is missing, or access is denied.
+    if (hasKeychainMetadata(metadata) || await keychainMarkerExists(resolve(DATA, 'keychain-wallet.json'))) {
+      const { keychainAccount } = await import('./keychain-wallet.js');
+      const account = await keychainAccount(DATA, metadata, options.seedStore);
+      return { address: account.address, created: false };
+    }
+    if (await knownKeychainIdentity(metadata)) {
+      throw new Error('Keychain wallet metadata is missing or inconsistent; refusing to select another key');
+    }
+    if (await keychainMarkerExists(resolve(DATA, 'hd', 'keychain.json')) && !hasLegacyWalletMetadata(metadata)) {
+      if (metadata) throw new Error('Keychain wallet metadata is missing or inconsistent; refusing to select another key');
+      const { createKeychainWallet } = await import('./keychain-wallet.js');
+      const wallet = await createKeychainWallet(DATA, BOOTSTRAP_WALLET_REQUEST, { bootstrap: true, store: options.seedStore });
+      return { address: wallet.address, created: wallet.created };
+    }
     let account;
     let created = false;
     try {
@@ -137,6 +239,11 @@ export async function createWallet(): Promise<{ address: Address; created: boole
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       if (metadata) throw new Error('Wallet metadata exists but its private key is missing; refusing to replace the wallet');
+      if ((options.platform ?? process.platform) === 'darwin') {
+        const { createKeychainWallet } = await import('./keychain-wallet.js');
+        const wallet = await createKeychainWallet(DATA, BOOTSTRAP_WALLET_REQUEST, { bootstrap: true, store: options.seedStore });
+        return { address: wallet.address, created: wallet.created };
+      }
       const key = generatePrivateKey();
       const file = await open(KEY_PATH, 'wx', 0o600);
       try { await file.chmod(0o600); await file.writeFile(key + '\n'); await file.sync(); }
@@ -145,8 +252,8 @@ export async function createWallet(): Promise<{ address: Address; created: boole
       created = true;
     }
     if (metadata) {
-      if (typeof metadata.address !== 'string' || !isAddress(metadata.address, { strict: false }) ||
-          getAddress(metadata.address) !== account.address || metadata.chainId !== 4663) {
+      if (!('address' in metadata) || typeof metadata.address !== 'string' || !isAddress(metadata.address, { strict: false }) ||
+          getAddress(metadata.address) !== account.address || !('chainId' in metadata) || metadata.chainId !== 4663) {
         throw new Error('Wallet metadata does not match the local private key');
       }
     } else {
@@ -157,7 +264,15 @@ export async function createWallet(): Promise<{ address: Address; created: boole
   } finally { await release(); }
 }
 
-export async function localAccount() {
+export async function localAccount(options: LocalWalletOptions = {}) {
+  const metadata = await readWalletPublicJson(resolve(DATA, 'wallet.json'));
+  if (hasKeychainMetadata(metadata) || await keychainMarkerExists(resolve(DATA, 'keychain-wallet.json'))) {
+    const { keychainAccount } = await import('./keychain-wallet.js');
+    return keychainAccount(DATA, metadata, options.seedStore);
+  }
+  if (await knownKeychainIdentity(metadata) || (await keychainMarkerExists(resolve(DATA, 'hd', 'keychain.json')) && !hasLegacyWalletMetadata(metadata))) {
+    throw new Error('Keychain wallet metadata is missing or inconsistent; refusing to select another key');
+  }
   if (process.env.REBALANCE_PRIVATE_KEY !== undefined) return accountFromKey(process.env.REBALANCE_PRIVATE_KEY);
   try {
     await chmod(DATA, 0o700);

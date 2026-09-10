@@ -8,7 +8,8 @@ import test, { type TestContext } from 'node:test';
 import { promisify } from 'node:util';
 import { toHex } from 'viem';
 import { mnemonicToAccount } from 'viem/accounts';
-import { createHdWallet } from '../src/hd-wallet.js';
+import { createHdWallet as create } from '../src/hd-wallet.js';
+const createHdWallet = (root: string, request: string) => create(root, request, { platform: 'linux' });
 
 // Public BIP-39 zero-entropy test vector. Never use this seed for a funded wallet.
 const mnemonic = `${'abandon '.repeat(23)}art`;
@@ -93,7 +94,7 @@ test('concurrent same and distinct requests share reservations without duplicate
 
 test('separate processes serialize reservations and replay after process restart', async t => {
   const root = await fixture(t);
-  const script = `const {createHdWallet}=await import(process.argv[1]);process.stdout.write(JSON.stringify(await createHdWallet(process.argv[2],process.argv[3])));`;
+  const script = `const {createHdWallet}=await import(process.argv[1]);process.stdout.write(JSON.stringify(await createHdWallet(process.argv[2],process.argv[3],{platform:'linux'})));`;
   const run = (key: string) => exec(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script, '--', new URL('../src/hd-wallet.ts', import.meta.url).href, root, key]);
   const results = await Promise.all([run(request(0)), run(request(0)), run(request(1))]);
   assert.deepEqual(JSON.parse(results[0].stdout), JSON.parse(results[1].stdout));

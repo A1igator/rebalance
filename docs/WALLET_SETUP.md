@@ -6,11 +6,11 @@ New portfolios begin with the saved demo defaults: USDG 5%, AAPL/NVDA/MSFT/AMD 2
 
 ## Local key
 
-New accounts from this selector share one app-local 24-word BIP-39 seed. They use conventional browser-wallet paths `m/44'/60'/0'/0/0`, `m/44'/60'/0'/0/1`, and so on. This does not import a browser wallet's seed.
+New accounts on macOS share one 24-word BIP-39 seed stored in macOS Keychain. They use conventional browser-wallet paths `m/44'/60'/0'/0/0`, `m/44'/60'/0'/0/1`, and so on. This does not import a browser wallet's seed. The first CLI `wallet create` also uses this seed; additional selector accounts continue its indexes.
 
-The seed is stored locally in ignored `.local/hd/seed.json` with owner-only permissions. `.local/hd/accounts.json` records public account indexes and request reservations. The derived signing key is provisioned into that wallet's own ignored directory for the existing deterministic signer. Neither seed nor key is returned to the browser, model or logs. Back up the seed using a trusted local method; this UI does not export it.
+The project keeps only public seed references/fingerprints in `.local/hd/keychain.json`, reservations in `.local/hd/accounts.json`, and matching public identity records in each wallet's `wallet.json` and `keychain-wallet.json`. The signer derives its account in process memory. New macOS wallets write neither `hd/seed.json` nor a `private-key` file. Missing, denied or inconsistent Keychain data blocks setup/signing instead of generating a replacement or trying an environment/file key. macOS may ask permission to access the Keychain; allow it only for the expected Rebalance helper. Setup remains unarmed.
 
-The original funded standalone wallet stays intact. Its old randomly generated private key cannot be reconstructed from the new seed. The legacy `wallet create` command remains a create-or-reuse bootstrap for that standalone wallet; additional accounts through New portfolio use the shared seed. Missing or inconsistent seed/reservation files block creation instead of silently creating a replacement seed.
+Existing legacy standalone file wallets remain readable and reusable. An existing file-based HD seed requires a separate migration before creating another macOS local account; migration is not performed automatically. Linux retains the previous file-backed local setup. The original standalone demo wallet was explicitly retired after the documented incident; Keychain does not recover its lost key. Keychain storage is not a verified backup or recovery flow. See [macOS storage and validation](MACOS_KEYCHAIN.md).
 
 ## Privy
 

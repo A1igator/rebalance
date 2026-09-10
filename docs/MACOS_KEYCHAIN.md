@@ -1,0 +1,23 @@
+# Local wallets in macOS Keychain
+
+New Local key accounts on macOS use the ordinary user-default file-based Keychain (normally login). A small compiled Swift helper calls Security.framework; no credential npm package was added. The existing `private-key` signer mode and automatic deterministic trading behavior remain the same. No Keychain operation starts trading.
+
+## Stored identity
+
+One opaque UUID identifies each local data root's immutable seed item under service `io.rebalance.local-seed.v1`. Its 24-word BIP-39 seed stays in Keychain. The project contains public seed references, a seed-address fingerprint, consecutive account reservations and duplicate public wallet/anchor records. CLI bootstrap and selector wallets share `m/44'/60'/0'/0/N` derivation. Moving the project together with its public state retains the UUID; references are independent of its absolute path.
+
+A pending public UUID checkpoint precedes insertion. Retries reconcile the same insertion instead of replacing it; a ready seed reference with missing/inaccessible data fails closed. The seed fingerprint, reserved address, account index and wallet anchor must match before reuse or signing. A selected Keychain wallet takes precedence over environment/file keys and never falls back to them. New accounts do not produce plaintext mnemonic or private-key files. Existing legacy standalone file identities remain supported; existing file-based HD seeds are not automatically migrated or extended on macOS. Linux retains the legacy file-backed local mode.
+
+## Native helper
+
+`native/keychain.swift` accepts one bounded JSON request on stdin and responds on captured stdout. The TypeScript adapter supplies only fixed executable arguments and a minimal environment; secret values never become shell arguments, environment variables, logs or public CLI results. Supported operations are exact read and insert-only create; there is no list, overwrite, update or delete command. Missing, denied, duplicate, malformed and unavailable results remain distinct internally and are sanitized for app callers.
+
+The helper is compiled with the installed Xcode Command Line Tools into an owner-only, source-versioned location under `~/Library/Application Support/Rebalance/native`. It uses default macOS access controls without granting every application access. A locked Keychain, changed helper identity or first access can require an OS permission prompt. Declining or timing out leaves the wallet unchanged and unavailable; the app does not weaken Keychain settings. The compiler has a two-minute bound and an individual Keychain operation a thirty-second bound. A source/helper update may require permission again.
+
+The selected API uses the normal login Keychain rather than the data-protection Keychain, which requires additional signed-app/entitlement packaging for command-line tools. This is encrypted OS storage for software signing; it does not claim Secure Enclave transaction signing, Touch ID gating, hardware isolation, iCloud synchronization or verified backup/recovery. The mnemonic and derived account exist temporarily in application memory during authorized local setup/signing. Keychain protects against overwriting project files; it does not make arbitrary code running as the user trustworthy or recover the retired wallet's missing key.
+
+## Validation and provenance
+
+Ordinary tests use isolated temporary roots and injected stores. The production adapter rejects Node test context and temporary application roots before building or invoking the real helper. Fake protocol tests cover exact requests, output bounds and sanitized failure; account tests cover shared derivation, concurrent/replayed setup, missing/mismatched data, interrupted publication and no plaintext material in project files. Native compilation and any explicitly scoped non-wallet Keychain verification are recorded separately in [AI usage](AI_USAGE.md). Fake tests do not establish a real wallet or transaction.
+
+Primary references, consulted September 10, 2026: [Apple Keychain services](https://developer.apple.com/documentation/security/keychain-services), [SecItemAdd](https://developer.apple.com/documentation/security/secitemadd(_:_:)), [SecItemCopyMatching](https://developer.apple.com/documentation/security/secitemcopymatching(_:_:)), [TN3137: On Mac keychains](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains), and [Keychain data protection](https://support.apple.com/guide/security/keychain-data-protection-secb0694df1a/web). The Swift helper and TypeScript integration are original project code under the repository MIT license; Security.framework is an OS dependency.

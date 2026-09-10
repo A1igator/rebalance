@@ -1,3 +1,5 @@
+import { createKeychainWallet } from './keychain-wallet.js';
+import type { SeedStore } from './macos-keychain.js';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, readdir } from 'node:fs/promises';
@@ -168,7 +170,8 @@ async function provision(root: string, requestKey: string): Promise<Wallet> {
 }
 
 /** Creates only an isolated signer account; registration, chat selection and trading remain separate. */
-export async function createHdWallet(rootDir: string, requestKey: string): Promise<Wallet> {
+export async function createHdWallet(rootDir: string, requestKey: string, options: { platform?: NodeJS.Platform; store?: SeedStore } = {}): Promise<Wallet> {
+  if ((options.platform ?? process.platform) === 'darwin') return createKeychainWallet(rootDir, typeof requestKey === 'string' ? requestKey.toLowerCase() : requestKey, { store: options.store });
   let root: string;
   try {
     if (typeof rootDir !== 'string' || !isAbsolute(rootDir) || rootDir.length > 4096 || /[\0\r\n]/.test(rootDir) ||

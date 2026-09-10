@@ -13,7 +13,8 @@ import { connectionPath, readProfiles } from '../scripts/profile-routing.mjs';
 import { createHdWallet } from '../src/hd-wallet.js';
 import { addPortfolio } from '../src/profiles.js';
 import { acquireLock, atomicWriteJson, readJson } from '../src/storage.js';
-import { issueView, type SetupMode } from '../src/view-session.js';
+import { connectView, issueView, viewState, type SetupMode } from '../src/view-session.js';
+import type { SeedStore } from '../src/macos-keychain.js';
 import { WalletSetups, type WalletSetupDependencies, type WalletSetupResult } from '../src/wallet-setup.js';
 import type { SetupWallet, WalletSetupContext } from '../src/wallet-setup-types.js';
 
@@ -100,7 +101,7 @@ test('real HD provisioning and registration create distinct private portfolios w
   const before = await Promise.all(standalone.map(file => readFile(join(f.root, file), 'utf8')));
   let providerCalls = 0;
   const service = f.service('private-key', async context => {
-    providerCalls++; return createHdWallet(context.rootDir, context.requestKey);
+    providerCalls++; return createHdWallet(context.rootDir, context.requestKey, { platform: 'linux' });
   });
   const ready: WalletSetupResult[] = [];
   for (const [index, id] of ids.entries()) {
@@ -129,6 +130,66 @@ test('real HD provisioning and registration create distinct private portfolios w
   assert.equal((await stat(join(f.root, 'hd/seed.json'))).mode & 0o777, 0o600);
   assert.deepEqual(await Promise.all(standalone.map(file => readFile(join(f.root, file), 'utf8'))), before);
   await absent(connectionPath(f.root, chatA));
+});
+
+test('Keychain setup registers two selectable portfolios from one seed without plaintext keys or trading', async t => {
+  const f = await fixture(t), ids = [randomUUID(), randomUUID()];
+  const values = new Map<string, string>();
+  let seedCreates = 0, providerCalls = 0;
+  const store: SeedStore = {
+    async create(id, value) { assert.equal(values.has(id), false); seedCreates++; values.set(id, value); },
+    async read(id) { return values.get(id) ?? null; },
+  };
+  const external: string[] = [];
+  t.mock.method(globalThis, 'fetch', async () => { external.push('fetch'); throw new Error('Unexpected fixture network'); });
+  for (const name of ['execFile', 'execFileSync', 'spawn'] as const) t.mock.method(childProcess, name, () => {
+    external.push(name); throw new Error('Unexpected fixture subprocess');
+  });
+  syncBuiltinESMExports();
+  try {
+    const service = f.service('private-key', async context => {
+      providerCalls++;
+      return createHdWallet(context.rootDir, context.requestKey, { platform: 'darwin', store });
+    });
+    const ready: WalletSetupResult[] = [], seedIds: string[] = [], seedAddresses: string[] = [];
+    for (const [index, id] of ids.entries()) {
+      const previouslySelected = (await viewState(f.root, f.a)).connectedWallet;
+      const starting = await service.begin(f.a, 'private-key', id);
+      assert.equal(starting.tradingChanged, false);
+      const result = await state(service, f.a, id, 'ready'); ready.push(result);
+      assert.equal(result.tradingChanged, false);
+      assert.equal(result.reused, false);
+      assert.equal((await viewState(f.root, f.a)).connectedWallet, previouslySelected);
+      const dataDir = join(f.root, 'wallets', result.wallet!.toLowerCase());
+      const metadata = await readJson<{ address: string; hd: unknown; keychain: { version: number; seedId: string; seedAddress: string } }>(join(dataDir, 'wallet.json'));
+      assert.equal(metadata!.address, result.wallet);
+      assert.deepEqual(metadata!.hd, { version: 1, requestKey: keyFor(f.a, id), accountIndex: index, derivationPath: `m/44'/60'/0'/0/${index}` });
+      assert.equal(metadata!.keychain.version, 1);
+      seedIds.push(metadata!.keychain.seedId); seedAddresses.push(metadata!.keychain.seedAddress);
+      assert.deepEqual(await readJson(join(dataDir, 'keychain-wallet.json')), metadata);
+      const configPath = join(dataDir, 'config.json');
+      const saved = await readJson<{ wallet: string; mode: string; targets: Record<string, number> }>(configPath);
+      assert.equal(saved!.wallet, result.wallet); assert.equal(saved!.mode, 'private-key'); assert.deepEqual(saved!.targets, targets);
+      const beforeSelection = await readFile(configPath, 'utf8');
+      const selected = await connectView(f.root, f.a, result.wallet!);
+      assert.equal(selected.wallet, result.wallet); assert.equal(selected.tradingChanged, false);
+      assert.equal((await viewState(f.root, f.a)).connectedWallet, result.wallet!.toLowerCase());
+      assert.equal((await viewState(f.root, f.b)).connectedWallet, null);
+      assert.equal(await readFile(configPath, 'utf8'), beforeSelection);
+      assert.deepEqual((await readdir(dataDir)).sort(), ['config.json', 'keychain-wallet.json', 'wallet.json']);
+      for (const name of ['private-key', 'run.lock', 'stop.json', 'pending.json', 'cycle.json', 'recovery.json', 'events.json']) await absent(join(dataDir, name));
+    }
+    assert.notEqual(ready[0].wallet, ready[1].wallet);
+    assert.equal(new Set(seedIds).size, 1); assert.equal(new Set(seedAddresses).size, 1);
+    assert.equal(seedAddresses[0], ready[0].wallet); assert.equal(seedCreates, 1);
+    assert.deepEqual(await service.begin(f.a, 'private-key', ids[0]), ready[0]);
+    assert.equal(providerCalls, 2);
+    assert.equal((await readProfiles(f.root)).length, 2);
+    assert.equal((await readdir(join(f.root, 'wallets'))).length, 2);
+    for (const name of ['private-key', 'hd/seed.json', 'run.lock', 'events.json']) await absent(join(f.root, name));
+    await assert.rejects(readdir(join(f.root, 'ui-requests')), { code: 'ENOENT' });
+    assert.deepEqual(external, []);
+  } finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
 });
 
 test('mode collisions, cross-view reads and unsupported tokens cannot reuse another setup request', async t => {

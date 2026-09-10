@@ -29,7 +29,7 @@ async function run(path: string, action = 'create', override?: string) {
     try {
       const result = process.argv[2] === 'account'
         ? { address: (await config.localAccount()).address }
-        : await config.createWallet();
+        : await config.createWallet({ platform: 'linux' });
       process.stdout.write(JSON.stringify(result));
     } catch (error) {
       process.stdout.write(JSON.stringify({ error: error.message }));
