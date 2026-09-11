@@ -153,7 +153,6 @@ test('actual and target rings share stable colors and exact boundary directions 
     boundary += Object.values(allocation)[index]! / 10000 * Math.PI * 2;
   }
   assert.ok(targets.every(node => sector(node).outer < 128));
-  assert.equal(page.element('c-legend').textContent, '');
   assert.match(page.element('chart-description').textContent, /Inner ring, targets: USDG 5%/);
   page.hide();
 });
@@ -263,16 +262,26 @@ test('a target with no holdings still gets its own target slice', async () => {
 test('empty and unobserved wallets show only explicitly labeled targets', async () => {
   const page = await browser();
   page.source.send({ ...current, portfolio: { totalUsdE8: '0', positions: current.portfolio.positions.map(p => ({ ...p, balance: '0', weightBps: 0 })) } });
-  assert.equal(page.element('c-state').textContent, 'Targets');
+  assert.equal(page.element('c-state').textContent, 'Target allocation');
   assert.equal(page.element('c-sub').textContent, 'Wallet empty');
   assert.equal(page.element('c-val').textContent, '');
-  assert.equal(page.element('c-legend').textContent, 'Targets only');
   assert.equal(page.element('arcs').children.length, 5);
   assert.equal(page.element('targets').children.length, 0);
-  assert.match(page.element('chart-description').textContent, /Targets only/);
+  assert.match(page.element('chart-description').textContent, /^Target allocation\. Wallet empty\. Ring weights: USDG 5%/);
   page.source.send({ ...current, portfolio: null });
   assert.equal(page.element('c-sub').textContent, 'Holdings not checked');
+  assert.equal(page.element('c-state').textContent, 'Target allocation');
   assert.equal(page.element('targets').children.length, 0);
+  page.source.send({ ...current, portfolio: { ...current.portfolio, totalUsdE8: '0' } });
+  assert.equal(page.element('c-sub').textContent, 'Holdings below precision');
+  assert.equal(page.element('c-state').textContent, 'Target allocation');
+  page.source.send({ ...current, portfolio: null, error: 'Read unavailable' });
+  assert.equal(page.element('c-state').textContent, 'Unavailable');
+  assert.equal(page.element('c-sub').textContent, 'Read unavailable');
+  assert.equal(page.element('c-val').textContent, 'Target allocation');
+  page.source.send({ ...current, portfolio: null, operation: { status: 'pending', kind: 'swap' } });
+  assert.equal(page.element('c-state').textContent, 'Rebalancing');
+  assert.equal(page.element('c-val').textContent, 'Waiting for receipt · Target allocation');
   page.hide();
 });
 
@@ -524,7 +533,7 @@ test('Ledger receipt barriers override signing intent and distinguish approvals 
 test('a collapsed Settings overlay keeps settings outside the centre with no gas fetches', async () => {
   const page = await browser();
   const markup = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
-  assert.doesNotMatch(markup, />Details<|id="panel"|id="sum"|>Fees<|id="gas(?:-|"|\s)/);
+  assert.doesNotMatch(markup, />Details<|id="panel"|id="sum"|id="c-legend"|>Fees<|id="gas(?:-|"|\s)/);
   const centre = markup.match(/<foreignObject[^>]*>([\s\S]*?)<\/foreignObject>/)?.[1];
   assert.ok(centre);
   for (const id of ["c-state", "c-sub", "c-val"]) assert.ok(centre.includes(`id="${id}"`));

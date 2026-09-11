@@ -364,15 +364,19 @@
       // and the drift reading is not lost underneath it.
       sub = band === null ? "Drift band unavailable" : deviation ? drift : "Exact drift unavailable";
     } else if (targets.length) {
-      state = "Targets";
+      state = "Target allocation";
       sub = portfolio ? positions.some((p) => positive(p.balance)) ? "Holdings below precision" : "Wallet empty" : "Holdings not checked";
+    }
+    // A target ring still needs a clear label when an error or transaction
+    // takes priority in the center. Keep its status explanation intact.
+    if (!funded && targets.length && state !== "Target allocation") {
+      value = [value, "Target allocation"].filter(Boolean).join(" · ");
     }
     byId("c-state").textContent = state;
     byId("c-state").classList.toggle("compact", state.length > 18);
     byId("c-sub").textContent = sub ?? "";
     byId("c-sub").setAttribute("title", sub ?? "");
     byId("c-val").textContent = value;
-    byId("c-legend").textContent = funded || !targets.length ? "" : "Targets only";
     byId("chart-title").textContent = state;
 
     if (window.rebalanceStockLinks?.setOffset) {
@@ -418,7 +422,7 @@
     const feeTarget = configuredFee === undefined ? "Not set" : feeDollars(configuredFee) || "Unavailable";
     byId("set-fee-target").textContent = feeTarget;
 
-    let allocationDescription = `${state}. ${sub}.${value ? ` ${value}.` : ""} ${funded ? "Outer ring, actual holdings" : "Targets only"}: ${entries.map((r) => `${r.id} ${percent.format(r.weight / 100)}%`).join(", ")}.${funded && targets.length ? ` Inner ring, targets: ${targets.map((r) => `${r.id} ${percent.format(r.weight / 100)}%`).join(", ")}.` : ""}`;
+    let allocationDescription = `${state}. ${sub}.${value ? ` ${value}.` : ""} ${funded ? "Outer ring, actual holdings" : "Ring weights"}: ${entries.map((r) => `${r.id} ${percent.format(r.weight / 100)}%`).join(", ")}.${funded && targets.length ? ` Inner ring, targets: ${targets.map((r) => `${r.id} ${percent.format(r.weight / 100)}%`).join(", ")}.` : ""}`;
     allocationDescription += ` ${renderRisk(snapshot, disconnected)}`;
     byId("chart-description").textContent = `${allocationDescription} Rebalance trigger: ${byId("set-band").textContent}. Cycle interval: ${every || "unavailable"}. Target rebalance fee: ${feeTarget}. ETH is excluded from allocation.`;
   }

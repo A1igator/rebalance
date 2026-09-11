@@ -766,3 +766,10 @@ Under [prompt 072](prompts/072-merge-share-codes.md), Codex and an independent r
 The four verified local chart servers on ports 4663–4666 were restarted to load the new asset route. Each served the exact merged share-code script. Existing Codex and Claude project skill symlinks resolved to the updated share commands without reinstalling. Public portfolio configuration, registry, pending/cycle/control records and the current conversation attachment matched their pre-refresh hashes; no wallet secret was inspected or changed, and no trading runner was started or stopped.
 
 The current Ledger portfolio's read-only `share export` returned its existing targets and settings. The current in-app browser initially retained stale page code with Share disabled; reloading enabled it. Clicking the actual Share control displayed **Copied**, with no clipboard fallback. No share import, configuration edit, wallet setup, signature or transaction was performed. Agent instructions now include this strategy-only copy action. This verifies the merged UI/CLI locally, not a new financial outcome.
+
+
+## Target-allocation copy cleanup — 2026-09-11
+
+Under [prompt 073](prompts/073-target-allocation-label.md), Codex removed the separate “Targets only” SVG legend and renamed the unfunded center heading to “Target allocation.” Its subtitle still distinguishes an empty wallet, unobserved holdings and below-precision balances. An independent reviewer identified that higher-priority error/transaction states also display target rings; those states now retain a compact target-allocation cue in the center without replacing their status or receipt explanation. Accessible ring descriptions no longer repeat the target label separately.
+
+The existing isolated display suite passed **41/41**, including updated empty/unobserved, below-precision, error and pending cases. In the current in-app browser, a reload showed “Target allocation” / “Holdings not checked” centered within the ring, with the bottom legend removed and no horizontal text overflow. No CSS geometry, dependency, backend, wallet, allocation, settings or runner changed. Git diff checks passed.
