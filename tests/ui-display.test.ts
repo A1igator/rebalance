@@ -741,12 +741,13 @@ test('Settings opens and closes accessibly without redrawing or changing the cha
     assert.equal(Object.hasOwn(panel.attrs, 'inert'), !open);
     assert.equal(page.renders, draws); assert.equal(page.element('arcs').children, ring);
   }
-  assert.match(css, /\.settings \{[^}]*flex: 0 0 46px/);
+  assert.match(css, /\.settings \{[^}]*position: absolute[^}]*bottom: 0/);
   assert.match(css, /\.settings-panel \{[^}]*transition: grid-template-rows/);
-  assert.match(css, /\.settings-panel \{[^}]*position: absolute; top: 100%/);
-  assert.doesNotMatch(css.match(/\.settings \{[^}]*\}/)?.[0] ?? "", /bottom:/);
+  assert.doesNotMatch(css.match(/\.settings-panel \{[^}]*\}/)?.[0] ?? "", /position: absolute|bottom:|top:/);
+  assert.doesNotMatch(css.match(/\.settings \{[^}]*\}/)?.[0] ?? "", /height:|flex:/);
   const markup = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
-  assert.ok(markup.indexOf('class="settings"') < markup.indexOf('class="main"'), 'Settings stays above the chart');
+  assert.ok(markup.indexOf('class="settings"') > markup.indexOf('class="main"'), 'Settings follows the chart');
+  assert.ok(markup.indexOf('id="settings-toggle"') < markup.indexOf('id="settings-panel"'), 'Header stays above its content');
   assert.match(css, /prefers-reduced-motion: reduce[\s\S]*?\.settings-panel[^}]*transition: none/);
   assert.deepEqual(page.calls, []);
   page.hide();

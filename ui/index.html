@@ -26,19 +26,6 @@
         </div>
       </nav>
 
-      <section class="settings" aria-label="Portfolio settings">
-        <button class="settings-toggle" id="settings-toggle" type="button" aria-expanded="false" aria-controls="settings-panel">Settings</button>
-        <div class="settings-panel" id="settings-panel" role="region" aria-labelledby="settings-toggle" aria-hidden="true" inert>
-          <div class="settings-clip"><div class="settings-content">
-            <dl class="settings-rows" aria-label="Rebalance settings">
-              <div><dt>Drift trigger</dt><dd id="set-band">Unavailable</dd></div>
-              <div><dt>Cycle interval</dt><dd id="set-every">Unavailable</dd></div>
-              <div><dt>Fee target</dt><dd id="set-fee-target">Not set</dd></div>
-            </dl>
-          </div></div>
-        </div>
-      </section>
-
       <div class="main">
         <svg class="ring" id="ring" viewBox="-60 -20 560 480" role="group" aria-labelledby="chart-title chart-description">
           <defs>
@@ -62,6 +49,19 @@
           <text class="ctr-val" id="c-legend" x="210" y="444"></text>
         </svg>
       </div>
+
+      <section class="settings" aria-label="Portfolio settings">
+        <button class="settings-toggle" id="settings-toggle" type="button" aria-expanded="false" aria-controls="settings-panel">Settings</button>
+        <div class="settings-panel" id="settings-panel" role="region" aria-labelledby="settings-toggle" aria-hidden="true" inert>
+          <div class="settings-clip"><div class="settings-content">
+            <dl class="settings-rows" aria-label="Rebalance settings">
+              <div><dt>Drift trigger</dt><dd id="set-band">Unavailable</dd></div>
+              <div><dt>Cycle interval</dt><dd id="set-every">Unavailable</dd></div>
+              <div><dt>Fee target</dt><dd id="set-fee-target">Not set</dd></div>
+            </dl>
+          </div></div>
+        </div>
+      </section>
     </main>
     <p id="control-message" class="control-message" role="status" hidden></p>
   </body>

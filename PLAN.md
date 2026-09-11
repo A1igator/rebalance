@@ -161,3 +161,5 @@ After checking hosted paymasters, independent relaying and UniswapX, the owner w
 ## Companion navigation verification — September 10
 
 [Prompt 069](docs/prompts/069-companion-ui-verification.md) fixes the selector busy state across browser Back and makes Settings a stationary header below navigation with animated content beneath it. The chart dimensions remain unchanged on expansion. The actual local companion was refreshed, linked to this chat, and checked for working grid/card navigation and stable geometry.
+
+Settings placement correction: [prompt 070](docs/prompts/070-bottom-settings-header.md) supersedes the top-of-page header in prompt 069. The whole bottom-anchored Settings section expands upward, with its header attached above its content and no pie movement. Start/Address keep their original top-right placement.
