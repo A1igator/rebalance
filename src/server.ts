@@ -27,6 +27,7 @@ const assets = {
   '/stock-links.js': ['stock-links.js', 'text/javascript; charset=utf-8'],
   '/allocation-ring.js': ['allocation-ring.js', 'text/javascript; charset=utf-8'],
   '/portfolio-controls.js': ['portfolio-controls.js', 'text/javascript; charset=utf-8'],
+  '/share-code.js': ['share-code.js', 'text/javascript; charset=utf-8'],
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
   '/style.css': ['style.css', 'text/css; charset=utf-8'],
 } as const;

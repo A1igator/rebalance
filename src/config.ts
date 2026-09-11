@@ -35,6 +35,20 @@ export type Config = {
   rebalanceFeeTargetUsdE8?: string;
 };
 
+/** Exactly USDG plus four manifest stocks, as integer basis points totalling 100%. */
+export function validateTargets(targets: unknown): asserts targets is Record<string, number> {
+  if (!targets || typeof targets !== 'object' || Array.isArray(targets) ||
+      Object.keys(targets).length !== 5 || !Object.hasOwn(targets, 'USDG') ||
+      Object.keys(targets).some(id => !Object.hasOwn(ASSETS, id))) {
+    throw new Error('Select exactly USDG plus four supported stock targets');
+  }
+  const weights = Object.values(targets);
+  for (const weight of weights) {
+    if (!Number.isInteger(weight) || weight < 0 || weight > 10000) throw new Error('Targets must be integer basis points');
+  }
+  if (weights.reduce((a, b) => a + b, 0) !== 10000) throw new Error('Targets must total 100%');
+}
+
 export function validateConfig(value: unknown): Config {
   if (!value || typeof value !== 'object') throw new Error('Configuration must be an object');
   // Do not reinterpret a saved gas-abstraction opt-in as native ETH execution.
@@ -50,15 +64,7 @@ export function validateConfig(value: unknown): Config {
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search) {
     throw new Error('Use an HTTP(S) RPC URL without credentials or query parameters');
   }
-  if (!c.targets || typeof c.targets !== 'object' || Array.isArray(c.targets) ||
-      Object.keys(c.targets).length !== 5 || !Object.hasOwn(c.targets, 'USDG') ||
-      Object.keys(c.targets).some(id => !Object.hasOwn(ASSETS, id))) {
-    throw new Error('Select exactly USDG plus four supported stock targets');
-  }
-  for (const weight of Object.values(c.targets)) {
-    if (!Number.isInteger(weight) || weight < 0 || weight > 10000) throw new Error('Targets must be integer basis points');
-  }
-  if (Object.values(c.targets).reduce((a, b) => a + b, 0) !== 10000) throw new Error('Targets must total 100%');
+  validateTargets(c.targets);
   for (const [name, min, max] of [
     ['driftThresholdBps', 0, 10000], ['slippageBps', 1, 9999],
     ['deadlineSeconds', 15, 600], ['pollSeconds', 5, 3600],

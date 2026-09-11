@@ -157,6 +157,51 @@ test('CLI configures the cycle interval without replacing targets, resetting cad
   assert.equal((await readJson<{ rebalanceIntervalSeconds: number }>(join(directory, 'config.json')))!.rebalanceIntervalSeconds, 7200);
 });
 
+test('share export prints only the strategy, and import previews before --apply saves it', async t => {
+  const { directory, command } = await fixture(t);
+  assert.deepEqual(JSON.parse((await command(['share', 'export'])).stdout),
+    { code: 'rebalance:v1 USDG=20,TSLA=20,AAPL=20,NVDA=20,AMZN=20 drift=5 interval=3600' });
+  const code = 'rebalance:v1 USDG=5,AAPL=23.75,NVDA=23.75,MSFT=23.75,AMD=23.75 drift=2.5 interval=7200';
+  const before = await readFile(join(directory, 'config.json'), 'utf8');
+  const preview = JSON.parse((await command(['share', 'import', code])).stdout);
+  assert.equal(preview.applied, false);
+  assert.deepEqual(preview.untrackedAssets, ['TSLA', 'AMZN']);
+  assert.deepEqual(preview.settingChanges, [{ setting: 'driftThresholdBps', current: 500, shared: 250 },
+    { setting: 'rebalanceIntervalSeconds', current: 3600, shared: 7200 }]);
+  assert.equal(await readFile(join(directory, 'config.json'), 'utf8'), before, 'a preview changes nothing');
+
+  const shared = { USDG: 500, AAPL: 2375, NVDA: 2375, MSFT: 2375, AMD: 2375 };
+  const applied = JSON.parse((await command(['share', 'import', code, '--apply'])).stdout);
+  assert.deepEqual([applied.applied, applied.settingsApplied, applied.targets], [true, false, shared]);
+  type Saved = typeof config & { rebalanceIntervalSeconds: number };
+  let saved = (await readJson<Saved>(join(directory, 'config.json')))!;
+  assert.deepEqual(saved.targets, shared);
+  assert.deepEqual([saved.driftThresholdBps, saved.rebalanceIntervalSeconds, saved.slippageBps], [500, 3600, 50]);
+  assert.deepEqual([saved.wallet, saved.mode, saved.rpcUrl], [config.wallet, config.mode, config.rpcUrl]);
+  await command(['share', 'import', code, '--apply', '--settings']);
+  saved = (await readJson<Saved>(join(directory, 'config.json')))!;
+  assert.deepEqual([saved.targets, saved.driftThresholdBps, saved.rebalanceIntervalSeconds], [shared, 250, 7200]);
+  assert.equal(existsSync(join(directory, 'run.lock')), false);
+  assert.equal(existsSync(join(directory, 'unexpected-network')), false);
+  assert.equal(existsSync(join(directory, 'private-key')), false);
+});
+
+test('share rejects malformed codes and misplaced flags without writing', async t => {
+  const { directory, command } = await fixture(t);
+  const before = await readFile(join(directory, 'config.json'), 'utf8');
+  const code = 'rebalance:v1 USDG=5,AAPL=23.75,NVDA=23.75,MSFT=23.75,AMD=23.75';
+  for (const args of [['share'], ['share', 'import'], ['share', 'export', 'extra'],
+    ['share', 'import', 'rebalance:v1 USDG=50,AAPL=50', '--apply'], ['share', 'import', `${code} slippage=5`, '--apply'],
+    ['share', 'import', code, '--settings'], ['share', 'export', '--apply'], ['share', 'import', code, '--apply', '--threshold', '1'],
+    ['targets', 'replace', 'USDG=20,TSLA=20,AAPL=20,NVDA=20,AMZN=20', '--apply']]) {
+    await assert.rejects(command(args), (error: unknown) => {
+      assert.equal((error as { code: number }).code, 1);
+      return true;
+    }, args.join(' '));
+    assert.equal(await readFile(join(directory, 'config.json'), 'utf8'), before, args.join(' '));
+  }
+});
+
 test('conditional launch start preserves a stop that arrived after preflight', async t => {
   const { directory, command } = await fixture(t);
   const before = { requestedAt: '2026-09-05T06:00:00Z', requestId: 'older-stop' };

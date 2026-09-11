@@ -70,6 +70,10 @@ Call the subjective objective a user-risk score; standard Sharpe is a separate e
 | Save the requested risk policy and derived targets | `npm run cli -- allocation set /absolute/path/to/policy.json` |
 | Read this wallet's risk policy and calculation | `npm run cli -- allocation status` |
 | Keep targets and return to manual allocation | `npm run cli -- allocation manual` |
+| Give the user this portfolio's share code | `npm run cli -- share export` |
+| Preview a share code the user pasted | `npm run cli -- share import '<code>'` |
+| Adopt a previewed share code's targets | `npm run cli -- share import '<code>' --apply` |
+| Also adopt its drift trigger and cycle interval, when asked | `npm run cli -- share import '<code>' --apply --settings` |
 | Inspect current holdings and preview the deterministic plan | `npm run cli -- check` |
 | Initialize and arm/reuse the app | `npm run cli -- launch` |
 | Initialize without starting an inactive trader | `npm run cli -- launch --setup-only` |
@@ -94,6 +98,12 @@ Call the subjective objective a user-risk score; standard Sharpe is a separate e
 The numbers above are syntax examples, not recommendations or authorized allocations. Substitute the user's percentages for all five symbols. Use supplied/saved weights or an explicit delegation to choose demo weights; replace `ID` with an actual event ID. If none of those apply, finish independent setup and ask for the desired five-asset split before configuring. Targets must total 100%; the CLI accepts percentages with up to two decimal places and stores integer basis points.
 
 Changing the selected symbols replaces the tracked allocation; it does not liquidate removed tokens. Inspect holdings first and account for any held asset before removing it. Recheck the new selection through `check`; catalog listing alone does not prove route availability.
+
+A share code such as `rebalance:v1 USDG=5,AAPL=23.75,NVDA=23.75,MSFT=23.75,AMD=23.75 drift=5 interval=3600` carries only targets, the drift trigger and the cycle interval. It never carries a wallet address, signer, RPC, slippage or holdings. The chart's Share button copies the same text. When a user pastes one to import:
+
+1. Preview it and report the target and setting changes.
+2. If `untrackedAssets` is not empty, check holdings as for any symbol change before applying. Importing does not sell those assets.
+3. Run `--apply`. Add `--settings` only when the user also wants the code's drift trigger and interval.
 
 For a one-target change, the CLI proportionally redistributes the remainder among the other configured assets. Report the resulting full allocation. If the prior targets cannot be redistributed, request a complete split instead of guessing.
 

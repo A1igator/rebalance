@@ -10,6 +10,7 @@
     <script src="/view-client.js" defer></script>
     <script src="/allocation-ring.js" defer></script>
     <script src="/portfolio-controls.js" defer></script>
+    <script src="/share-code.js" defer></script>
     <script src="/stock-links.js" defer></script>
     <script src="/app.js" defer></script>
   </head>
@@ -18,6 +19,10 @@
       <nav class="chart-nav" aria-label="Portfolio navigation">
         <a id="portfolios-back" href="/">← Portfolios</a>
         <div class="portfolio-actions">
+          <button id="share-code" class="share-button" type="button" disabled title="Share code unavailable until the saved targets load.">
+            <svg class="control-icon" viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M13 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/></svg>
+            <span id="share-code-label" aria-live="polite">Share</span>
+          </button>
           <a id="wallet-explorer" class="address-link" role="link" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" aria-disabled="true" tabindex="-1">
             <svg class="control-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M11 3h6v6M17 3l-8 8M8 4H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-3"/></svg>
             <span id="wallet-explorer-label">Address</span>

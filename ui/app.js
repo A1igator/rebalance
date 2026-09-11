@@ -437,6 +437,7 @@
   function show(snapshot, disconnected = false) {
     // Controls must regain freshness after browser restoration even when the chart pixels are unchanged.
     window.rebalanceControls?.updateStatus(snapshot, disconnected);
+    window.rebalanceShare?.update(snapshot, disconnected);
     clearTimeout(feeExpiryTimer); feeExpiryTimer = null;
     const feeAt = Date.parse(snapshot?.feeCheck?.observedAt ?? "");
     if (!disconnected && snapshot?.armed && snapshot.operation?.status === "fee-target" && Number.isFinite(feeAt) && feeAt <= Date.now() && feeAt + 90000 > Date.now()) {
@@ -534,6 +535,7 @@
     clearTimeout(feeExpiryTimer); feeExpiryTimer = null;
     controller?.abort(); controller = null; refreshing = false;
     window.rebalanceControls?.updateStatus(lastSnapshot, true);
+    window.rebalanceShare?.update(lastSnapshot, true);
     window.rebalanceControls?.updateRunner(null, true);
   }
   function resume() {

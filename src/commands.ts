@@ -22,6 +22,7 @@ import { chartPort, chartUrl } from './chart-address.js';
 import { loginPrivy, privyWallet } from './privy.js';
 import { launch } from './launch.js';
 import { recover } from './recovery.js';
+import { decodeShareCode, encodeShareCode, sharePreview } from './share.js';
 import { configureCodexNotifications, codexNotificationStatus, prepareCodexNotifications,
   runCodexNotifications, stopCodexNotifications } from './codex-notifications.js';
 
@@ -44,6 +45,9 @@ const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
     [--threshold 5] [--slippage 0.5] [--deadline 120] [--poll 30] [--rebalance-interval-seconds 3600]
   targets set AAPL 30                   Change one percentage; redistribute the rest
   targets replace <ASSET=percent,...>   Replace all five targets explicitly
+  share export                         Print a share code: targets, drift trigger and cycle interval
+  share import '<code>'                Preview a share code against this wallet; changes nothing
+    [--apply [--settings]]             Save its targets; --settings also saves drift trigger/interval
   allocation preview <policy.json>      Calculate targets from explicit inputs; no changes
   allocation set <policy.json>          Save per-wallet policy and calculated targets together
   allocation status                    Read policy, assumptions and last calculation
@@ -87,6 +91,7 @@ const { values, positionals: args } = parseArgs({ allowPositionals: true, option
   cancel: { type: 'boolean', default: false },
   thread: { type: 'string' }, codex: { type: 'string' },
   'enabled-only': { type: 'boolean', default: false }, 'notification-token': { type: 'string' },
+  apply: { type: 'boolean', default: false }, settings: { type: 'boolean', default: false },
 } });
 const print = (value: unknown) => process.stdout.write(stringifyJson(value));
 const requiredConfig = async () => { const c = await loadConfig(); if (!c) throw new Error('Configure explicit targets through the agent first'); return c; };
@@ -256,6 +261,7 @@ async function main() {
   if (values['setup-only'] && command !== 'launch') throw new Error('--setup-only applies only to launch');
   if (values['request-id'] !== undefined && !['launch', 'recover', 'ledger'].includes(command)) throw new Error('--request-id applies only to launch, recover or ledger rebalance');
   if (values.cancel && command !== 'recover') throw new Error('--cancel applies only to recover');
+  if ((values.apply || values.settings) && command !== 'share') throw new Error('--apply and --settings apply only to share import');
   if (values['expected-stop'] !== undefined && (!['start', 'launch', 'recover'].includes(command) || values['resume-start'] ||
       !/^(none|[a-f0-9]{64})$/.test(values['expected-stop']))) throw new Error('Invalid conditional-start token');
   if (command !== 'notifications' && (values.thread !== undefined || values.codex !== undefined ||
@@ -408,6 +414,36 @@ async function main() {
         await atomicWriteJson(CONFIG_PATH, validateConfig({ ...withoutAllocation(config), targets }));
         print({ targets, effective: 'next graph evaluation; an already-broadcast transaction still settles' });
       }); return;
+    case 'share': {
+      const action = args[1];
+      if (!(action === 'export' && args.length === 2) && !(action === 'import' && args.length === 3)) {
+        throw new Error("Use share export, or share import '<code>' [--apply [--settings]]");
+      }
+      for (const [name, value] of Object.entries(values)) {
+        if (!['apply', 'settings'].includes(name) && value !== undefined && value !== false) throw new Error(`--${name} does not apply to share commands`);
+      }
+      if (action === 'export') {
+        if (values.apply || values.settings) throw new Error('--apply and --settings apply only to share import');
+        print({ code: encodeShareCode(await requiredConfig()) }); return;
+      }
+      if (values.settings && !values.apply) throw new Error('--settings requires --apply');
+      const shared = decodeShareCode(args[2]!);
+      if (!values.apply) { print({ ...sharePreview(await requiredConfig(), shared), applied: false }); return; }
+      // Targets replace like `targets replace`; the drift trigger and interval
+      // stay suggestions unless --settings adopts them too.
+      await inLock('config.lock', async () => {
+        const config = await requiredConfig();
+        const settings = !values.settings ? {} : {
+          ...(shared.driftThresholdBps === undefined ? {} : { driftThresholdBps: shared.driftThresholdBps }),
+          ...(shared.rebalanceIntervalSeconds === undefined ? {} : { rebalanceIntervalSeconds: shared.rebalanceIntervalSeconds }),
+        };
+        const next = validateConfig({ ...withoutAllocation(config), targets: shared.targets, ...settings });
+        await atomicWriteJson(CONFIG_PATH, next);
+        print({ ...sharePreview(config, shared), applied: true, settingsApplied: values.settings, targets: next.targets,
+          driftThresholdBps: next.driftThresholdBps, rebalanceIntervalSeconds: next.rebalanceIntervalSeconds,
+          effective: 'next graph evaluation; an already-broadcast transaction still settles' });
+      }); return;
+    }
     case 'check':
       await inLock('run.lock', async () => { const current = await tick(false); print(current); if (current.error) process.exitCode = 1; }); return;
     case 'start': {
