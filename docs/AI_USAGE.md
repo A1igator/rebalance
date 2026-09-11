@@ -729,3 +729,31 @@ The assistant closed six obsolete Rebalance tabs, including the old preview, and
 [Prompt 070](prompts/070-bottom-settings-header.md), committed as c558ba6 before implementation, corrects the assistant's interpretation in prompt 069. The user wants the collapsed Settings bar at the bottom, rising with the top edge of its expanded content. Codex restored the previous bottom-anchored section and normal-flow header/panel in ui/index.html and ui/style.css, keeping only the closed 46px height reserved in chart layout. Start/Address retain their original top-right markup and styles. The Back fix is preserved; no runtime or wallet data changed. An independent reviewer checked positioning and suggested geometry invariants.
 
 The existing isolated display suite passed **41/41**; Git diff checks passed. In the user's current port-4664 Privy companion, screenshot and DOM measurements verified the header rises from y=614.006 to y=499.112 with its lower edge adjacent to the panel; the whole section remains at viewport bottom y=660 (within floating-point rounding). Chart and Start/Address rectangles are identical between open and closed states. The page was refreshed and left with Settings open. No trading controls were clicked. The required Tenjin search returned NETWORK_ERROR.
+
+
+## Portfolio share codes — September 11
+
+[Prompt 071](prompts/071-portfolio-share-codes.md) was committed as 3503356 before implementation. Claude Code (Opus 5) reviewed three options with the human: ENSv2 names on Sepolia, mainnet ENS costs, and a clipboard code. The human chose the free clipboard code. A Tenjin search found no prior sharing design, and the ENS research was published to the team shelf.
+
+Claude then implemented the feature in an isolated Git worktree:
+
+- `src/share.ts` encodes, decodes and previews codes.
+- `src/config.ts` exposes the existing target validation as `validateTargets`.
+- `src/commands.ts` adds `share export` and `share import` with `--apply` and `--settings`.
+- `ui/share-code.js` adds the chart's Share button; `src/server.ts` serves it and `ui/app.js` feeds it status updates.
+- The skill, README and companion-view guide describe the flow.
+
+No dependency, network request, trading, signing or runner behavior was added. Live `.local` data and the running charts were not touched.
+
+Validation:
+
+- The first full isolated `npm test` run passed 983 of 984 tests. The one failure was in the unchanged `tests/hd-wallet.test.ts`; that file then passed 10/10 twice on this branch and twice on unchanged origin/main 9ed36d0. The next full run passed **984/984**.
+- Typecheck and `git diff --check` passed.
+- New tests cover:
+  - a round trip for all 10,001 basis-point values;
+  - rejection of malformed codes, token addresses and unknown fields;
+  - CLI export, preview and apply, with unchanged wallet/signer/RPC;
+  - chart/CLI encoder parity;
+  - clipboard denial;
+  - the served script.
+- A headless Chrome screenshot of a fixture chart served from a temporary data directory on port 4799 showed Share left of the address and Start at 510×660. The clipboard click itself was exercised only in fixture tests.

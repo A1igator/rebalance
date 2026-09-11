@@ -110,6 +110,9 @@ test('runner GET projects only the injected portfolio state and retains local ho
   const script = await call(f.url, { path: '/portfolio-controls.js', method: 'GET' });
   assert.equal(script.code, 200); assert.match(String(script.headers['content-type']), /javascript/);
   assert.equal(script.body, await readFile(new URL('../ui/portfolio-controls.js', import.meta.url), 'utf8'));
+  const share = await call(f.url, { path: '/share-code.js', method: 'GET' });
+  assert.equal(share.code, 200); assert.match(String(share.headers['content-type']), /javascript/);
+  assert.equal(share.body, await readFile(new URL('../ui/share-code.js', import.meta.url), 'utf8'));
   for (const headers of [{ Host: 'foreign.invalid' }, { Origin: 'https://foreign.invalid' }]) {
     assert.equal((await call(f.url, { method: 'GET', headers })).code, 403);
   }
