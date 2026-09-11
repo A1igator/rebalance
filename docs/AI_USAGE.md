@@ -757,3 +757,12 @@ Validation:
   - clipboard denial;
   - the served script.
 - A headless Chrome screenshot of a fixture chart served from a temporary data directory on port 4799 showed Share left of the address and Start at 510×660. The clipboard click itself was exercised only in fixture tests.
+
+
+## Share-code integration and local refresh — 2026-09-11
+
+Under [prompt 072](prompts/072-merge-share-codes.md), Codex and an independent reviewer checked PR #22 at `7faadf0070304153679f1767a28e7af38c9e24ff`. Typecheck and the complete isolated test suite passed **984/984**, with no failures, cancellations or skips. The temporary checkout used the existing dependency installation; no dependency changed. The PR was merged without squashing as `dda1b6c3c3feb591b73cac81b1f1caa13ef0f570`, and the owner's main checkout was fast-forwarded. Its product source matched the tested head.
+
+The four verified local chart servers on ports 4663–4666 were restarted to load the new asset route. Each served the exact merged share-code script. Existing Codex and Claude project skill symlinks resolved to the updated share commands without reinstalling. Public portfolio configuration, registry, pending/cycle/control records and the current conversation attachment matched their pre-refresh hashes; no wallet secret was inspected or changed, and no trading runner was started or stopped.
+
+The current Ledger portfolio's read-only `share export` returned its existing targets and settings. The current in-app browser initially retained stale page code with Share disabled; reloading enabled it. Clicking the actual Share control displayed **Copied**, with no clipboard fallback. No share import, configuration edit, wallet setup, signature or transaction was performed. Agent instructions now include this strategy-only copy action. This verifies the merged UI/CLI locally, not a new financial outcome.
