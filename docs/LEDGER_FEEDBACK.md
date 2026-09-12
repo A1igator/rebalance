@@ -1,6 +1,6 @@
 # Ledger tooling and documentation feedback
 
-**Status: physical address onboarding verified; a live backend request reached the transaction prompt with “transaction check unavailable.” Completed signing, readable display and swap evidence remain pending.** No external feedback submission is claimed.
+**Status: physical address onboarding verified; a live backend request reached the transaction prompt with “transaction check unavailable.” A subsequent USDG approval was signed and confirmed onchain; readable display and swap evidence remain pending.** No external feedback submission is claimed.
 
 The initial September 4 deferral ended when the Nano Gen5 arrived. Keep address verification, isolated signing fixtures and actual mainnet signing evidence separate; the raw-key backend does not establish Ledger execution.
 
@@ -60,3 +60,12 @@ The owner reported a transaction prompt with “transaction check unavailable”
 Our custom Context Module omitted `originToken`. This was an application integration omission: [Ledger's wallet guide](https://developers.ledger.com/docs/clear-signing/for-wallets) and [custom-context migration example](https://developers.ledger.com/docs/device-interaction/dmk-ts/integration/migrations/signers/eth/1_3_3_to_1_4_0) document the credential. Runtime wiring is now implemented, but no actual token is available. The pinned Context Module 2.5.0 substitutes an empty token and omits `X-Ledger-Client-Origin`; it does not immediately throw for that missing prerequisite. Its check loader can return a generic service error while signing proceeds with other contexts. Clearer early diagnostics would have made this omission easier to identify.
 
 Missing authentication is a confirmed gap, not a proven sole cause of the on-device message: no service response was captured in this test. Robinhood 4663 Transaction Check coverage and trusted contract metadata remain unverified. A published chain/contract coverage check and a fast hackathon origin-token enrollment path would help custom-chain integrations. Successful threat screening alone would not verify Clear Signing. The support draft and runtime setup caveat are in [Ledger execution](LEDGER_EXECUTION.md); no external request or feedback submission has been sent.
+
+
+## Verified approval, unsupported swap and companion Retry — September 12
+
+A further owner-requested attempt completed an exact 1.1875 USDG approval to the configured Robinhood Uniswap router. Public RPC verified receipt success at block 61423563 and decoded the expected sender, token, spender and amount. [Evidence](evidence/ledger-approval-2026-09-12.json). The swap then requested the SDK's blind-signing fallback, which the adapter refused; the owner reported a device message directing them to enable transaction signing. This differs from the earlier unavailable Transaction Check warning and does not establish Clear Signing.
+
+The owner requested a Retry button rather than disconnect/reconnect or an agent command after cancellation. The companion now offers an explicit wallet/request-bound retry while preserving device confirmation, pending receipt barriers and fallback refusal. This closes an application workflow gap; it does not repair unsupported transaction display.
+
+Current public ERC-7730 data has no Robinhood-4663 entry for our router; the existing Router02 descriptor covers Ethereum mainnet/direct methods rather than our deadline-bearing multicall. One credential-free CAL request returned HTTP 403, so the hosted metadata inventory remains unknown. The [execution guide](LEDGER_EXECUTION.md) records the exact gap and source links. A searchable chain/deployment/selector support matrix and clear separation of credential failures, absent descriptors and device-setting errors would help integrators. No external feedback submission is claimed.

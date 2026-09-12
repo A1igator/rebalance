@@ -419,3 +419,31 @@ test('stop invalidation racing automatic request creation cannot establish an ex
   assert.equal(await execution.prepareAutomatic(f.config), false);
   assert.equal(execution.active, false); assert.equal(await f.read(), null);
 });
+
+
+test('a chart retry is atomically bound to one suspended request and never replaces a pending receipt', async t => {
+  const f = await fixture(t), execution = f.execution();
+  const original = await f.request(); await execution.prepare(f.config); await execution.finish('cancelled');
+  const retry = (retryOf = original.id, expectedWallet: string = f.config.wallet) => requestLedgerRebalance(randomUUID(), { ...f.options, retryOf, expectedWallet });
+  await assert.rejects(retry(randomUUID()), /no longer available/);
+  await assert.rejects(retry(original.id, '0x' + '2'.repeat(40)), /another wallet/);
+  await atomicWriteJson(f.path('pending.json'), { fixture: 'unknown transaction' });
+  await assert.rejects(retry(), /pending transaction/);
+  await rm(f.path('pending.json'));
+  const accepted = await retry();
+  await assert.rejects(retry(), /no longer available/);
+  await execution.prepare(f.config); await execution.finish('cancelled');
+  await assert.rejects(retry(), /no longer available/, 'a previous failed request cannot authorize another retry after a newer failure');
+  assert.equal((await f.read())?.id, accepted.id);
+});
+
+
+test('concurrent Retry clicks with different UUIDs admit only one new request for the same failure', async t => {
+  const f = await fixture(t), execution = f.execution();
+  const original = await f.request(); await execution.prepare(f.config); await execution.finish('cancelled');
+  const attempts = await Promise.allSettled([randomUUID(), randomUUID()].map(id => requestLedgerRebalance(id,
+    { ...f.options, retryOf: original.id, expectedWallet: f.config.wallet })));
+  assert.equal(attempts.filter(result => result.status === 'fulfilled').length, 1);
+  const journal = await readJson<{ records: unknown[] }>(f.path('ledger-request.json'));
+  assert.equal(journal?.records.length, 2);
+});

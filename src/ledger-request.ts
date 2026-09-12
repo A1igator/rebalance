@@ -177,13 +177,23 @@ class RequestStore {
 }
 
 /** Explicit user intent only. This never starts a runner, touches hardware or signs. */
-export async function requestLedgerRebalance(requestId: string = randomUUID(), options: LedgerRequestOptions = {}): Promise<LedgerRequest> {
+export async function requestLedgerRebalance(requestId: string = randomUUID(), options: LedgerRequestOptions & { retryOf?: string; expectedWallet?: string } = {}): Promise<LedgerRequest> {
   if (!UUID.test(requestId)) throw new Error('Ledger request ID must be a UUID');
+  if (options.retryOf !== undefined && !UUID.test(options.retryOf)) throw new Error('Ledger retry source must be a UUID');
   const id = requestId.toLowerCase();
   const store = new RequestStore(options);
   return store.locked(async () => {
     const journal = await store.journal();
     if (journal.records.some(record => record.id === id)) throw new Error('Ledger request ID was already used; a replay cannot authorize signing');
+    if (options.retryOf !== undefined) {
+      const prior = journal.records.at(-1);
+      if (!journal.suspension || journal.suspension.requestId !== options.retryOf.toLowerCase() ||
+          prior?.id !== options.retryOf.toLowerCase() || prior.state !== 'finished') {
+        throw new Error('This Ledger request is no longer available for retry');
+      }
+      // A retry click never replaces or discards a transaction awaiting reconciliation.
+      if (await readJson(store.path('pending.json')) !== null) throw new Error('A pending transaction must resolve before retrying');
+    }
     const now = store.now();
     const previous = journal.records.find(record => record.state !== 'finished');
     if (previous) {
@@ -195,6 +205,9 @@ export async function requestLedgerRebalance(requestId: string = randomUUID(), o
     }
     const config = await store.config();
     if (config.mode !== 'ledger') throw new Error('This portfolio does not use Ledger');
+    if (options.expectedWallet !== undefined && config.wallet.toLowerCase() !== options.expectedWallet.toLowerCase()) {
+      throw new Error('Ledger retry belongs to another wallet');
+    }
     if (await store.stopped()) throw new Error('Portfolio has a stop request; no Ledger signing request queued');
     const runner = await store.runner();
     if (!runner) throw new Error('Start this Ledger portfolio monitor before requesting a rebalance');

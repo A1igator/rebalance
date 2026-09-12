@@ -18,6 +18,7 @@ const initial: Status = { app: 'Rebalance', chain: { id: 4663, name: 'Robinhood'
   wallet: null, config: null, cycle: null, portfolio: null, operation: null,
   updatedAt: null, error: null, graph: { node: 'wait', trace: ['wait'] }, armed: false };
 type Command = Parameters<PortfolioControls['command']>[0];
+type Retry = Parameters<PortfolioControls['retry']>[0];
 
 async function fixture(t: TestContext, wallet = walletA) {
   const root = await mkdtemp(join(tmpdir(), 'rebalance-server-runner-'));
@@ -26,9 +27,11 @@ async function fixture(t: TestContext, wallet = walletA) {
   const configBefore = await readFile(join(directory, 'config.json'), 'utf8');
   let summary: RunnerSummary = { wallet, state: 'stopped' };
   let reads = 0, statusReads = 0, extraReads = 0, watchers = 0, failRead = false, failCommand = false;
-  const commands: Command[] = [];
-  const controls: Pick<PortfolioControls, 'read' | 'command'> = {
+  const commands: Command[] = [], retries: Retry[] = [];
+  const controls: Pick<PortfolioControls, 'read' | 'command' | 'retry'> = {
     read: async () => { reads++; if (failRead) throw new Error('fixture-sensitive-read-error'); return summary; },
+    retry: async input => { retries.push(structuredClone(input)); if (failCommand) throw new Error('fixture-sensitive-retry-error');
+      return { wallet, requestId: input.requestId, retryOf: input.retryOf, outcome: 'requested' }; },
     command: async input => {
       commands.push(structuredClone(input));
       if (failCommand) throw new Error('fixture-sensitive-command-error');
@@ -46,7 +49,7 @@ async function fixture(t: TestContext, wallet = walletA) {
   });
   const address = server.address(); assert.ok(address && typeof address === 'object');
   t.after(async () => { await server.closeChart(); await rm(root, { recursive: true, force: true }); });
-  return { root, directory, url: `http://127.0.0.1:${address.port}`, server, commands,
+  return { root, directory, url: `http://127.0.0.1:${address.port}`, server, commands, retries,
     get reads() { return reads; }, get statusReads() { return statusReads; }, get watchers() { return watchers; },
     summary: () => summary, update: (next: RunnerSummary) => { summary = next; },
     failRead: () => { failRead = true; }, failCommand: () => { failCommand = true; },
@@ -204,4 +207,25 @@ test('initial runner state is retained when the status frame encounters backpres
   await until(() => stream.events.some(event => event.type === 'runner'), 'runner snapshot survives the drain boundary');
   assert.deepEqual(stream.events.filter(event => event.type === 'runner').map(event => event.data), [f.summary()]);
   assert.deepEqual(f.commands, []); await f.unchanged();
+});
+
+
+test('Ledger retry HTTP requires exact same-origin JSON and a local view before dispatch', async t => {
+  const f = await fixture(t), { token } = await issueView(f.root, 'claude:ledger-retry-http-fixture');
+  const body = { token, wallet: walletA, requestId: randomUUID(), retryOf: randomUUID() };
+  const send = (options: Parameters<typeof call>[1] = {}) => call(f.url, { path: '/api/ledger/retry', body, ...options });
+  for (const headers of [{ Origin: undefined }, { Origin: 'https://foreign.invalid' }, { 'Content-Type': 'text/plain' }]) {
+    assert.equal((await send({ headers })).code, 403);
+  }
+  for (const method of ['GET', 'HEAD', 'DELETE']) assert.equal((await send({ method })).code, 405);
+  for (const invalid of [{ ...body, retryOf: 'invalid' }, { ...body, requestId: '../request' }, { ...body, wallet: 'invalid' },
+    { ...body, action: 'start' }, { ...body, retryOf: undefined }]) assert.equal((await send({ body: invalid })).code, 400);
+  assert.equal((await send({ body: { ...body, token: 'f'.repeat(64) } })).code, 403);
+  assert.equal(f.retries.length, 0);
+  const response = await send();
+  assert.equal(response.code, 200); assert.deepEqual(f.retries, [body]); assert.deepEqual(f.commands, []);
+  assert.deepEqual(JSON.parse(response.body), { wallet: walletA, requestId: body.requestId, retryOf: body.retryOf, outcome: 'requested' });
+  f.failCommand(); const failed = await send({ body: { ...body, requestId: randomUUID() } });
+  assert.equal(failed.code, 503); assert.doesNotMatch(failed.body, /fixture-sensitive-retry-error/);
+  await f.unchanged();
 });

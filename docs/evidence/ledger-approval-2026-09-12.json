@@ -1,0 +1,22 @@
+{
+  "observedAt": "2026-09-12T21:31:08.736Z",
+  "rpc": "https://rpc.mainnet.chain.robinhood.com",
+  "chainId": 4663,
+  "hash": "0x2f481158a42c5ae9d8990af46d7739098bc5542d6739eed5e202b429189889f8",
+  "kind": "approval",
+  "status": "success",
+  "from": "0xced38202ef03b2cb7dc69cd004f5cce70dc21808",
+  "token": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+  "spender": "0xCaf681a66D020601342297493863E78C959E5cb2",
+  "amountAtomic": "1187500",
+  "tokenDecimals": 6,
+  "nonce": "0",
+  "blockNumber": "61423563",
+  "blockHash": "0x4ca02805a8ab6f134a411c28e07a92b1d579618f88292f6302ebefb33c126bd5",
+  "observedHead": "61425745",
+  "observedConfirmations": "2183",
+  "gasUsed": "57976",
+  "effectiveGasPriceWei": "97276000",
+  "feeEth": "0.000005639673376",
+  "verification": "Public RPC receipt, transaction fields and matching block hash; not independently verified L1 finality."
+}

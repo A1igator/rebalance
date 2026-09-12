@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveProfile, walletIdentity, type RoutedProfile } from '../scripts/profile-routing.mjs';
+import { requestLedgerRebalance } from './ledger-request.js';
 import { validateConfig } from './config.js';
 import { readView, viewState } from './view-session.js';
 import { acquireLock, atomicWriteJson, readJson } from './storage.js';
@@ -10,6 +11,7 @@ import { acquireLock, atomicWriteJson, readJson } from './storage.js';
 export type RunnerSummary = { wallet: string | null; state: 'running' | 'stopped' | 'starting' | 'stopping' | 'unavailable' | 'deferred'; message?: string };
 export type RunnerResult = RunnerSummary & { requestId: string; outcome: string };
 export type RunnerRequest = { token: string; wallet: string; action: 'start' | 'stop'; requestId: string };
+export type LedgerRetryRequest = { token: string; wallet: string; requestId: string; retryOf: string };
 type Outcome = 'prepared' | 'armed' | 'starting' | 'stop-requested' | 'blocked' | 'busy' | 'deferred' | 'uncertain';
 type Entry = { version: 1; sessionId: string; requestId: string; wallet: string; action: 'start' | 'stop'; expectedStop: string; receivedAt: string; outcome: Outcome };
 export type PortfolioControlDependencies = {
@@ -148,6 +150,28 @@ export class PortfolioControls {
         ? { wallet, state: pending.action === 'start' ? 'starting' : 'stopping', message: messages.prepared } : unavailable(wallet);
       return { wallet, state: 'stopped' };
     } catch { return unavailable(wallet); }
+  }
+  /** An explicit retry belongs to one finished request on this already-running wallet. */
+  async retry(input: LedgerRetryRequest) {
+    if (!input || Object.keys(input).some(name => !['token','wallet','requestId','retryOf'].includes(name)) ||
+        typeof input.token !== 'string' || typeof input.wallet !== 'string' || !/^0x[0-9a-f]{40}$/i.test(input.wallet) ||
+        typeof input.requestId !== 'string' || !uuid.test(input.requestId) || typeof input.retryOf !== 'string' || !uuid.test(input.retryOf)) {
+      throw new PortfolioControlError(400, 'Invalid Ledger retry request.');
+    }
+    try {
+      const state = await viewState(this.rootDir, input.token);
+      if (state.connectedWallet?.toLowerCase() !== input.wallet.toLowerCase()) throw new Error();
+    } catch { throw new PortfolioControlError(403, 'Reconnect this chart to the selected wallet before controlling it.'); }
+    const { config } = await this.profile();
+    if (walletIdentity(config.wallet) !== input.wallet.toLowerCase()) throw new PortfolioControlError(403, 'This control belongs to another wallet chart.');
+    if (config.mode !== 'ledger' || (await this.read()).state !== 'running') {
+      throw new PortfolioControlError(409, 'Retry requires this Ledger portfolio to be running.');
+    }
+    try {
+      const request = await requestLedgerRebalance(input.requestId, { dataDir: this.dataDir, isAlive: this.deps.alive,
+        retryOf: input.retryOf, expectedWallet: input.wallet });
+      return { wallet: request.wallet, requestId: request.id, retryOf: input.retryOf.toLowerCase(), outcome: 'requested' as const };
+    } catch { throw new PortfolioControlError(409, 'The Ledger request changed or cannot be retried. Refresh its status; any pending transaction is preserved.'); }
   }
   async command(input: RunnerRequest): Promise<RunnerResult> {
     if (!input || Object.keys(input).some(name => !['token','wallet','action','requestId'].includes(name)) ||

@@ -2,7 +2,8 @@
   "use strict";
   const byId = (id) => document.getElementById(id);
   const run = byId("portfolio-run"), explorer = byId("wallet-explorer"), explorerLabel = byId("wallet-explorer-label");
-  const message = byId("control-message");
+  const message = byId("control-message"), retry = byId("ledger-retry");
+  const uuid = (value) => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
   const states = new Set(["running", "stopped", "starting", "stopping", "unavailable", "deferred"]);
   const validWallet = (value) => typeof value === "string" && /^0x[0-9a-f]{40}$/i.test(value);
   const same = (a, b) => validWallet(a) && validWallet(b) && a.toLowerCase() === b.toLowerCase();
@@ -10,6 +11,8 @@
   let wallet = null, mode = null, runner = null, attached = null, viewReady = false;
   let statusFresh = false, runnerFresh = false, busy = false, suspended = false;
   let readGeneration = 0, runnerRevision = 0;
+  let retrySource = null, ledgerConnected = false, retryUnsupported = false, retryBusy = false;
+  const attemptedRetries = new Set();
 
   function tell(text) { message.textContent = text; message.hidden = !text; }
   function render() {
@@ -25,6 +28,18 @@
       : state === "stopped" ? (mode === "ledger" ? "Start this Ledger wallet. The backend opens device prompts automatically; physically confirm each transaction." : "Start automatic rebalancing for this wallet with its saved targets.")
       : runner?.message || "Waiting for the local runner.";
     run.setAttribute("aria-label", `${run.textContent} portfolio${wallet ? ` ${short(wallet)}` : ""}`);
+    retry.hidden = mode !== "ledger" || !retrySource;
+    retry.disabled = suspended || busy || retryBusy || !statusFresh || !linked || state !== "running" || !ledgerConnected ||
+      !retrySource || attemptedRetries.has(retrySource);
+    retry.textContent = retryBusy ? "Retrying…" : "Retry";
+    retry.title = !linked ? "Open this portfolio through your agent to enable controls."
+      : !statusFresh ? "Waiting for current portfolio status."
+      : state !== "running" ? "Start this Ledger portfolio before retrying."
+      : !ledgerConnected ? "Connect and unlock Ledger to retry."
+      : attemptedRetries.has(retrySource) ? "This retry was sent. Waiting for the current request status."
+      : retryUnsupported ? "Retry after resolving Ledger signing support. Each transaction still requires device confirmation."
+      : "Prepare a fresh rebalance for this wallet. Physically confirm each transaction on Ledger.";
+    retry.setAttribute("aria-label", `Retry Ledger rebalance${wallet ? ` for ${short(wallet)}` : ""}`);
     // Public navigation follows this chart's wallet, independently of runner/chat controls.
     const available = !suspended && Boolean(wallet);
     if (available) explorer.setAttribute("href", `https://robinhoodchain.blockscout.com/address/${wallet}`);
@@ -51,6 +66,11 @@
     wallet = next;
     mode = next ? snapshot.mode : null;
     statusFresh = !disconnected && Boolean(wallet);
+    const request = snapshot?.ledgerRequest;
+    retrySource = mode === "ledger" && snapshot.armed === true && snapshot.ledgerPrompt?.suspended === true &&
+      request?.state === "finished" && request.chainId === 4663 && same(request.wallet, wallet) && uuid(request.id) ? request.id.toLowerCase() : null;
+    ledgerConnected = snapshot?.ledgerPrompt?.connected === true;
+    retryUnsupported = request?.outcome === "unsupported";
     render();
   }
   async function refreshRunner(expectedWallet) {
@@ -92,6 +112,25 @@
       if (!suspended) await refreshRunner(targetWallet);
       busy = false; render();
     }
+  });
+
+  retry.addEventListener("click", async () => {
+    if (retry.disabled || retry.hidden || retryBusy || !retrySource) return;
+    const targetWallet = wallet, retryOf = retrySource, requestId = crypto.randomUUID();
+    // A lost reply is not permission for a new signing attempt from stale status.
+    attemptedRetries.add(retryOf); retryBusy = true; tell(""); render();
+    try {
+      const response = await fetch("/api/ledger/retry", { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: window.rebalanceView.token, wallet: targetWallet, requestId, retryOf }) });
+      if (!response.ok) throw new Error("Retry request unavailable");
+      const result = await response.json();
+      if (!same(result.wallet, targetWallet) || result.requestId !== requestId || result.retryOf !== retryOf || result.outcome !== "requested") {
+        throw new Error("Retry result unavailable");
+      }
+    } catch {
+      attemptedRetries.delete(retryOf); // A later explicit click is still bound to this exact failed request on the server.
+      if (!suspended && same(wallet, targetWallet)) tell("Could not confirm the retry. Check the current request status before trying again.");
+    } finally { retryBusy = false; render(); }
   });
 
   window.rebalanceView?.subscribe((update) => {

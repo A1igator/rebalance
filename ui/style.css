@@ -30,6 +30,10 @@ text { text-anchor: middle; }
 .ctr-val { font-size: 10.5px; fill: var(--faint); }
 .centre .ctr-val { margin-top: 6px; line-height: 14px; color: var(--faint); }
 .centre .ctr-val:empty { display: none; }
+.retry-button { align-self: center; margin-top: 10px; border: 1px solid #486351; border-radius: 9px; padding: 7px 14px; font: inherit; font-size: 12px; color: var(--ink); background: #1a2920; cursor: pointer; }
+.retry-button:hover:enabled { background: #26392c; }
+.retry-button:focus-visible { outline: 2px solid #b4cbb8; outline-offset: 3px; }
+.retry-button:disabled { cursor: default; opacity: .5; }
 /* Reserve the collapsed bar once. The whole bottom-anchored section expands
    upward with its header attached above the content; the chart never moves. */
 .settings { position: absolute; z-index: 10; left: 0; right: 0; bottom: 0; }

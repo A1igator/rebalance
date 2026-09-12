@@ -491,7 +491,7 @@ test('Ledger monitoring and queued or consumed requests never imply an automatic
     page.source.send({ ...ledgerSnapshot, operation: { status: `ledger-${outcome}` },
       ledgerRequest: { ...ledgerRequest, state: 'finished', outcome } });
     assert.equal(page.element('c-state').textContent, label);
-    assert.equal(page.element('c-sub').textContent, 'Reconnect Ledger to retry');
+    assert.equal(page.element('c-sub').textContent, 'Use Retry when Ledger is ready');
     page.source.send({ ...ledgerSnapshot, operation: { status: 'waiting-ledger' }, ledgerRequest: { ...ledgerRequest, state: 'finished', outcome } });
     assert.equal(page.element('c-state').textContent, label, 'a later monitoring check retains the ended-request explanation');
   }
@@ -906,13 +906,13 @@ test('returning to a hidden chart rechecks the age of an otherwise unchanged fee
 });
 
 
-test('connected Ledger prompts are backend-driven and a suspended prompt explains reconnect', async () => {
+test('connected Ledger prompts are backend-driven and a suspended prompt explains Retry', async () => {
   const page = await browser();
   page.source.send({ ...ledgerSnapshot, operation: { status: 'waiting-ledger' }, ledgerPrompt: { connected: true, suspended: false } });
   assert.equal(page.element('c-state').textContent, 'Preparing rebalance');
   assert.equal(page.element('c-sub').textContent, 'Device prompts open automatically');
   page.source.send({ ...ledgerSnapshot, operation: { status: 'waiting-ledger' }, ledgerPrompt: { connected: true, suspended: true, outcome: 'unavailable' } });
   assert.equal(page.element('c-state').textContent, 'Ledger needs attention');
-  assert.equal(page.element('c-sub').textContent, 'Reconnect Ledger after resolving the issue');
+  assert.equal(page.element('c-sub').textContent, 'Resolve the issue, then use Retry');
   page.hide();
 });

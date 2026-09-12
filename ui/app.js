@@ -200,8 +200,8 @@
     }
     const ended = { rejected: "Request rejected", cancelled: "Request cancelled", timeout: "Request timed out", expired: "Request expired",
       "device-changed": "Device changed", "runner-restarted": "Request ended", invalidated: "Request ended", "cycle-invalidated": "Request ended" }[outcome];
-    if (ended) return { state: ended, sub: "Reconnect Ledger to retry" };
-    if (prompt?.suspended && needed) return { state: "Ledger needs attention", sub: "Reconnect Ledger after resolving the issue" };
+    if (ended) return { state: ended, sub: "Use Retry when Ledger is ready" };
+    if (prompt?.suspended && needed) return { state: "Ledger needs attention", sub: "Resolve the issue, then use Retry" };
     if (needed) return prompt?.connected
       ? { state: "Preparing rebalance", sub: "Device prompts open automatically" }
       : { state: "Ledger needed", sub: "Connect and unlock Ledger" };

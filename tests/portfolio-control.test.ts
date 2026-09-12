@@ -7,6 +7,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { test, type TestContext } from 'node:test';
 import { connectionPath } from '../scripts/profile-routing.mjs';
 import { PortfolioControls, type PortfolioControlDependencies, type RunnerRequest } from '../src/portfolio-control.js';
+import { LedgerExecution, requestLedgerRebalance, readLedgerRequest } from '../src/ledger-request.js';
+import { validateConfig } from '../src/config.js';
 import { issueView } from '../src/view-session.js';
 import { atomicWriteJson, readJson } from '../src/storage.js';
 
@@ -265,4 +267,63 @@ test('a stop can replace a damaged stop marker without reading keys or submittin
   assert.equal((await f.controls.read()).state, 'unavailable');
   assert.equal((await f.controls.command(f.request('stop'))).outcome, 'stop-requested');
   assert.deepEqual(f.calls.map(call => call.args), [['stop']]);
+});
+
+
+async function retryFixture(t: TestContext, outcome = 'cancelled') {
+  const f = await fixture(t, 'ledger');
+  f.alive.add(424242);
+  const options = { dataDir: f.root, pid: 424242, isAlive: (pid: number) => f.alive.has(pid) };
+  await atomicWriteJson(join(f.root, 'run.lock'), { pid: 424242, token: randomUUID() });
+  await atomicWriteJson(join(f.root, 'status.json'), { wallet: walletA, armed: true });
+  const request = await requestLedgerRebalance(randomUUID(), options);
+  const execution = new LedgerExecution(options);
+  await execution.prepare(validateConfig(configuration(walletA, 'ledger'))); await execution.finish(outcome);
+  return { ...f, options, request, input: () => ({ token: f.token, wallet: walletA, requestId: randomUUID(), retryOf: request.id }) };
+}
+
+test('Ledger Retry queues only the displayed running wallet, without launching or touching transaction state', async t => {
+  const f = await retryFixture(t), input = f.input();
+  await atomicWriteJson(join(f.root, 'cycle.json'), { fixture: 'existing cadence' });
+  const before = await Promise.all(['config.json', 'cycle.json', 'run.lock'].map(file => readFile(join(f.root, file), 'utf8')));
+  assert.deepEqual(await f.controls.retry(input), { wallet: walletA, requestId: input.requestId, retryOf: f.request.id, outcome: 'requested' });
+  assert.equal((await readLedgerRequest(f.options))?.id, input.requestId);
+  assert.equal((await readLedgerRequest(f.options))?.state, 'requested');
+  assert.equal(f.calls.length, 0); assert.equal(await readJson(join(f.other, 'ledger-request.json')), null);
+  assert.deepEqual(await Promise.all(['config.json', 'cycle.json', 'run.lock'].map(file => readFile(join(f.root, file), 'utf8'))), before);
+  await assert.rejects(f.controls.retry(input), /changed or cannot be retried/);
+  await assert.rejects(f.controls.retry(f.input()), /changed or cannot be retried/);
+  assert.equal((await readLedgerRequest(f.options))?.id, input.requestId, 'a second UUID from stale status cannot replace the accepted request');
+});
+
+test('Ledger Retry requires the same attached chart wallet, live runner and no pending send', async t => {
+  for (const condition of ['detached', 'wrong-wallet', 'stopped', 'dead', 'pending']) {
+    const f = await retryFixture(t), input = f.input();
+    if (condition === 'detached') await f.connect(walletB);
+    if (condition === 'wrong-wallet') { await f.connect(walletB); input.wallet = walletB; }
+    if (condition === 'stopped') await atomicWriteJson(join(f.root, 'stop.json'), { requestId: randomUUID() });
+    if (condition === 'dead') f.alive.clear();
+    if (condition === 'pending') await atomicWriteJson(join(f.root, 'pending.json'), { fixture: 'unresolved send' });
+    await assert.rejects(f.controls.retry(input), /selected wallet|another wallet|running|changed or cannot be retried/, condition);
+    assert.equal((await readLedgerRequest(f.options))?.id, f.request.id); assert.equal(f.calls.length, 0);
+    if (condition === 'pending') assert.deepEqual(await readJson(join(f.root, 'pending.json')), { fixture: 'unresolved send' });
+  }
+});
+
+test('Ledger Retry rejects malformed input and non-Ledger profiles without changing their controls', async t => {
+  const f = await retryFixture(t), input = f.input();
+  for (const invalid of [{ ...input, retryOf: '../unsafe' }, { ...input, requestId: 'invalid' }, { ...input, action: 'start' }]) {
+    await assert.rejects(f.controls.retry(invalid), /Invalid Ledger retry/);
+  }
+  const raw = await fixture(t);
+  await assert.rejects(raw.controls.retry({ ...input, token: raw.token }), /requires this Ledger/);
+  assert.equal(raw.calls.length, 0); assert.equal(f.calls.length, 0);
+});
+
+
+test('an unsupported outcome may retry fresh support checks after user action without changing the signing adapter', async t => {
+  const f = await retryFixture(t, 'unsupported'), input = f.input();
+  assert.equal((await f.controls.retry(input)).outcome, 'requested');
+  assert.equal((await readLedgerRequest(f.options))?.id, input.requestId);
+  assert.equal(f.calls.length, 0, 'the retry only queues intent, with no launch or signing here');
 });

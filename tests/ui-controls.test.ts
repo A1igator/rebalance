@@ -335,3 +335,68 @@ test('page suspension removes the explorer destination and restoration never tri
   await page.timersRun();
   assert.equal(page.calls.length, 0); assert.equal(page.uuidCalls, 0);
 });
+
+
+const cancelledRequestId = '99999999-1111-4111-8111-111111111111';
+const failedLedger = (outcome = 'cancelled') => ({ ...chart(), mode: 'ledger', armed: true,
+  ledgerPrompt: { suspended: true, connected: true, outcome },
+  ledgerRequest: { id: cancelledRequestId, chainId: 4663, wallet, state: 'finished', outcome } });
+
+test('Ledger Retry requires a suspended request, matching attached running wallet and connected device', async () => {
+  const page = await browser(); await page.ready('running');
+  assert.equal(page.byId('ledger-retry').hidden, true);
+  await page.status(failedLedger());
+  assert.equal(page.byId('ledger-retry').hidden, false); assert.equal(page.byId('ledger-retry').disabled, false);
+  for (const snapshot of [{ ...failedLedger(), mode: 'privy' }, { ...failedLedger(), armed: false },
+    { ...failedLedger(), ledgerPrompt: { suspended: false, connected: true } },
+    { ...failedLedger(), ledgerRequest: { ...failedLedger().ledgerRequest, wallet: otherWallet } },
+    { ...failedLedger(), ledgerRequest: { ...failedLedger().ledgerRequest, state: 'consumed' } }]) {
+    await page.status(snapshot); await page.click('ledger-retry', true); assert.equal(page.posts().length, 0);
+  }
+  for (const state of ['stopped', 'starting', 'stopping', 'unavailable']) {
+    await page.status(failedLedger()); await page.runner(runner(state));
+    assert.equal(page.byId('ledger-retry').disabled, true); await page.click('ledger-retry', true);
+  }
+  await page.runner(runner('running')); await page.status(failedLedger(), true);
+  assert.equal(page.byId('ledger-retry').disabled, true);
+  await page.status({ ...failedLedger(), ledgerPrompt: { suspended: true, connected: false } });
+  assert.equal(page.byId('ledger-retry').disabled, true);
+  await page.status(failedLedger('unsupported')); assert.equal(page.byId('ledger-retry').disabled, false);
+  assert.match(page.byId('ledger-retry').title, /after resolving Ledger signing support/);
+  await page.status(failedLedger()); await page.view({ snapshot: { connectedWallet: otherWallet } });
+  await page.click('ledger-retry', true); assert.equal(page.posts().length, 0);
+});
+
+test('Retry posts one fresh UUID tied to the failed request, with no runner command or automatic replay', async () => {
+  const pending = deferred<Reply>();
+  const page = await browser({ reply: async call => call.url === '/api/ledger/retry' ? pending.promise : undefined });
+  await page.ready('running'); await page.status(failedLedger());
+  await page.click('ledger-retry'); await page.click('ledger-retry', true);
+  assert.equal(page.posts().length, 1); assert.equal(page.uuidCalls, 1);
+  assert.deepEqual(page.posts()[0], { url: '/api/ledger/retry', method: 'POST', signal: undefined,
+    body: { token, wallet, requestId, retryOf: cancelledRequestId } });
+  assert.equal(page.byId('portfolio-run').disabled, false, 'Stop remains available while a retry is in flight');
+  pending.resolve(ok({ wallet, requestId, retryOf: cancelledRequestId, outcome: 'requested' })); await flush();
+  await page.status(failedLedger()); await page.click('ledger-retry', true); await page.timersRun();
+  assert.equal(page.posts().length, 1, 'unchanged failed status cannot resend');
+  await page.status({ ...failedLedger(), ledgerRequest: { ...failedLedger().ledgerRequest, id: requestId } });
+  assert.equal(page.byId('ledger-retry').disabled, false, 'a newly finished request permits another explicit Retry');
+  assert.ok(page.calls.every(call => !call.url.includes(token)));
+});
+
+test('unverified Retry replies never claim success or silently retry, and view/lifecycle changes remain closed', async () => {
+  for (const failure of ['network', 'wrong-wallet', 'wrong-source', 'http']) {
+    const page = await browser({ reply: async call => {
+      if (call.url !== '/api/ledger/retry') return undefined;
+      if (failure === 'network') throw new Error('Fixture network failure');
+      if (failure === 'http') return { ok: false, status: 409, json: async () => ({ error: 'Changed request' }) };
+      return ok({ wallet: failure === 'wrong-wallet' ? otherWallet : wallet, requestId,
+        retryOf: failure === 'wrong-source' ? requestId : cancelledRequestId, outcome: 'requested' });
+    } });
+    await page.ready('running'); await page.status(failedLedger()); await page.click('ledger-retry'); await page.timersRun();
+    assert.equal(page.posts().length, 1); assert.match(page.byId('control-message').textContent, /Could not confirm/);
+    assert.equal(page.byId('ledger-retry').disabled, false, 'another deliberate click still targets the exact old failure; the backend rejects it if already replaced');
+    await page.lifecycle('pagehide'); await page.lifecycle('pageshow');
+    await page.click('ledger-retry', true); assert.equal(page.posts().length, 1);
+  }
+});

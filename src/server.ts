@@ -16,7 +16,7 @@ import { createGasDisplayReader, type GasDisplay } from './gas-display.js';
 import { GAS_REFERENCE } from './gas-reference.js';
 import { projectRebalanceFees } from './fee-projection.js';
 import { chartPort } from './chart-address.js';
-import { PortfolioControls, PortfolioControlError } from './portfolio-control.js';
+import { PortfolioControls, PortfolioControlError, type LedgerRetryRequest } from './portfolio-control.js';
 
 const assets = {
   '/': ['selector.html', 'text/html; charset=utf-8'],
@@ -33,7 +33,7 @@ const assets = {
 } as const;
 
 type ChartDependencies = {
-  portfolioControls: Pick<PortfolioControls, 'read' | 'command'>;
+  portfolioControls: Pick<PortfolioControls, 'read' | 'command' | 'retry'>;
   walletSetups: WalletSetups;
   dataDir: string;
   rootDir: string;
@@ -218,7 +218,7 @@ export async function serve(port = chartPort(), overrides: Partial<ChartDependen
         (request.headers.origin !== undefined && request.headers.origin !== `http://${host}`)) {
       response.writeHead(403).end('Local chart only'); return;
     }
-    if (['/api/view', '/api/connect', '/api/setup', '/api/setup/status', '/api/setup/events', '/api/view/events'].includes(request.url ?? '') ||
+    if (['/api/ledger/retry', '/api/view', '/api/connect', '/api/setup', '/api/setup/status', '/api/setup/events', '/api/view/events'].includes(request.url ?? '') ||
         (request.url === '/api/runner' && !['GET','HEAD'].includes(request.method ?? ''))) {
       if (request.method !== 'POST') { response.writeHead(405, { Allow: 'POST' }).end('Use POST'); return; }
       if (request.headers.origin !== `http://${host}` || request.headers['content-type']?.split(';')[0]?.trim() !== 'application/json') {
@@ -233,7 +233,7 @@ export async function serve(port = chartPort(), overrides: Partial<ChartDependen
         let input: Record<string, unknown>;
         try { input = JSON.parse(body); } catch { response.writeHead(400).end('Invalid JSON'); return; }
         if (!input || typeof input !== 'object' || Array.isArray(input)) { response.writeHead(400).end('Invalid request'); return; }
-        const allowed = request.url === '/api/runner' ? ['token','wallet','action','requestId'] : request.url === '/api/connect' ? ['token','wallet'] : request.url === '/api/setup' ? ['token','mode','requestId'] : request.url?.startsWith('/api/setup/') ? ['token','requestId'] : ['token'];
+        const allowed = request.url === '/api/ledger/retry' ? ['token','wallet','requestId','retryOf'] : request.url === '/api/runner' ? ['token','wallet','action','requestId'] : request.url === '/api/connect' ? ['token','wallet'] : request.url === '/api/setup' ? ['token','mode','requestId'] : request.url?.startsWith('/api/setup/') ? ['token','requestId'] : ['token'];
         if (Object.keys(input).some(key => !allowed.includes(key)) || allowed.some(key => typeof input[key] !== 'string')) {
           response.writeHead(400).end('Invalid request fields'); return;
         }
@@ -241,12 +241,17 @@ export async function serve(port = chartPort(), overrides: Partial<ChartDependen
             !['start','stop'].includes(input.action as string) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.requestId as string))) {
           response.writeHead(400).end('Invalid runner control'); return;
         }
+        if (request.url === '/api/ledger/retry' && (!/^0x[0-9a-f]{40}$/i.test(input.wallet as string) ||
+            ![input.requestId, input.retryOf].every(value => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value as string)))) {
+          response.writeHead(400).end('Invalid Ledger retry'); return;
+        }
         try { await readView(deps.rootDir, input.token as string); }
         catch { response.writeHead(403).end('Open this view through the agent to reconnect it.'); return; }
         if (request.url === '/api/view/events') { await streamView(response, deps, input.token as string); return; }
         if (request.url === '/api/setup/events') { await streamSetup(response, deps, input.token as string, input.requestId as string); return; }
         let result: unknown;
-        if (request.url === '/api/runner') result = await deps.portfolioControls.command(input as { token: string; wallet: string; action: 'start' | 'stop'; requestId: string });
+        if (request.url === '/api/ledger/retry') result = await deps.portfolioControls.retry(input as LedgerRetryRequest);
+        else if (request.url === '/api/runner') result = await deps.portfolioControls.command(input as { token: string; wallet: string; action: 'start' | 'stop'; requestId: string });
         else if (request.url === '/api/view') result = await viewState(deps.rootDir, input.token as string);
         else if (request.url === '/api/connect') {
           const profile = await resolveProfile(deps.rootDir, { wallet: input.wallet as string });
