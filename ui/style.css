@@ -26,14 +26,18 @@ text { text-anchor: middle; }
 .centre p { margin: 0; }
 .ctr-state { font-size: 22px; line-height: 26px; font-weight: 500; letter-spacing: -.5px; color: var(--ink); }
 .ctr-state.compact { font-size: 16px; line-height: 23px; }
-.ctr-sub { margin-top: 4px !important; font-size: 12px; line-height: 15px; color: var(--mute); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.ctr-hint { display: flex; align-items: center; justify-content: center; gap: 2px; margin-top: 4px; min-width: 0; }
+.ctr-sub { min-width: 0; font-size: 12px; line-height: 15px; color: var(--mute); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .ctr-val { font-size: 10.5px; fill: var(--faint); }
 .centre .ctr-val { margin-top: 6px; line-height: 14px; color: var(--faint); }
 .centre .ctr-val:empty { display: none; }
-.retry-button { align-self: center; margin-top: 10px; border: 1px solid #486351; border-radius: 9px; padding: 7px 14px; font: inherit; font-size: 12px; color: var(--ink); background: #1a2920; cursor: pointer; }
-.retry-button:hover:enabled { background: #26392c; }
+.retry-button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 24px; width: 24px; height: 24px; padding: 4px; border: 0; border-radius: 50%; color: var(--mute); background: transparent; cursor: pointer; }
+.retry-button:hover:enabled { color: var(--ink); background: #26392c; }
 .retry-button:focus-visible { outline: 2px solid #b4cbb8; outline-offset: 3px; }
 .retry-button:disabled { cursor: default; opacity: .5; }
+.retry-button .retry-icon { width: 14px; height: 14px; }
+.retry-button[aria-busy="true"] .retry-icon { animation: retry-spin 1s linear infinite; }
+@keyframes retry-spin { to { transform: rotate(360deg); } }
 /* Reserve the collapsed bar once. The whole bottom-anchored section expands
    upward with its header attached above the content; the chart never moves. */
 .settings { position: absolute; z-index: 10; left: 0; right: 0; bottom: 0; }
@@ -62,7 +66,7 @@ text { text-anchor: middle; }
 
 @media (prefers-reduced-motion: reduce) {
   .arc, .ghost, .settings-panel { transition: none; }
-  .arc.active { animation: none; }
+  .arc.active, .retry-button[aria-busy="true"] .retry-icon { animation: none; }
 }
 
 /* Portfolio navigation and controls. */

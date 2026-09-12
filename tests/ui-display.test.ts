@@ -491,7 +491,7 @@ test('Ledger monitoring and queued or consumed requests never imply an automatic
     page.source.send({ ...ledgerSnapshot, operation: { status: `ledger-${outcome}` },
       ledgerRequest: { ...ledgerRequest, state: 'finished', outcome } });
     assert.equal(page.element('c-state').textContent, label);
-    assert.equal(page.element('c-sub').textContent, 'Use Retry when Ledger is ready');
+    assert.equal(page.element('c-sub').textContent, 'Open Ethereum on device');
     page.source.send({ ...ledgerSnapshot, operation: { status: 'waiting-ledger' }, ledgerRequest: { ...ledgerRequest, state: 'finished', outcome } });
     assert.equal(page.element('c-state').textContent, label, 'a later monitoring check retains the ended-request explanation');
   }
@@ -913,6 +913,144 @@ test('connected Ledger prompts are backend-driven and a suspended prompt explain
   assert.equal(page.element('c-sub').textContent, 'Device prompts open automatically');
   page.source.send({ ...ledgerSnapshot, operation: { status: 'waiting-ledger' }, ledgerPrompt: { connected: true, suspended: true, outcome: 'unavailable' } });
   assert.equal(page.element('c-state').textContent, 'Ledger needs attention');
-  assert.equal(page.element('c-sub').textContent, 'Resolve the issue, then use Retry');
+  assert.equal(page.element('c-sub').textContent, 'Resolve the Ledger issue');
   page.hide();
+});
+
+
+test('Ledger account-read failures retain a specific explanation and portfolio value after passive refresh', async () => {
+  const page = await browser();
+  for (const phase of ['anchor-read', 'account-read', 'final-anchor-read']) {
+    const snapshot = { ...ledgerSnapshot, error: null,
+      operation: { status: 'ledger-unavailable', message: `Ledger signing could not complete. [${phase}; signer.eth.steps.getAddress; 0x6982]` },
+      ledgerRequest: { ...ledgerRequest, state: 'finished', outcome: 'unavailable' },
+      ledgerPrompt: { connected: true, suspended: true, outcome: 'unavailable' } };
+    page.source.send(snapshot);
+    assert.equal(page.element('c-state').textContent, 'Ledger account check failed');
+    assert.equal(page.element('c-sub').textContent, 'Open Ethereum on device');
+    assert.match(page.element('c-val').textContent, /^\$5 · as of /);
+    page.source.send({ ...snapshot, graph: { node: 'receipt' }, updatedAt: new Date(initialTime + 1000).toISOString() });
+    assert.equal(page.element('c-state').textContent, 'Ledger account check failed');
+    assert.doesNotMatch(page.element('c-sub').textContent, /USB|0x6982|signer\.eth|could not complete/);
+  }
+  page.hide();
+});
+
+test('unsupported Ledger signing keeps the Clear Signing requirement visible through later monitoring', async () => {
+  const page = await browser();
+  for (const operation of [{ status: 'ledger-unsupported', message: 'Private fixture payload must not render' }, { status: 'waiting-ledger' }]) {
+    page.source.send({ ...ledgerSnapshot, error: null, operation,
+      ledgerRequest: { ...ledgerRequest, state: 'finished', outcome: 'unsupported' },
+      ledgerPrompt: { connected: true, suspended: true, outcome: 'unsupported' } });
+    assert.equal(page.element('c-state').textContent, 'Signing unsupported');
+    assert.equal(page.element('c-sub').textContent, 'Clear Signing support required');
+    assert.match(page.element('c-val').textContent, /^\$5 · as of /);
+    assert.doesNotMatch(page.element('chart-description').textContent, /Private fixture payload/);
+  }
+  page.hide();
+});
+
+test('Ledger pending receipts and a fresh signing request override retained failure classification', async () => {
+  const page = await browser();
+  const retained = { ...ledgerSnapshot, error: null,
+    ledgerRequest: { ...ledgerRequest, state: 'finished', outcome: 'unsupported' },
+    ledgerPrompt: { connected: true, suspended: true, outcome: 'unsupported' } };
+  for (const status of ['pending', 'confirming', 'unresolved']) {
+    page.source.send({ ...retained, operation: { status, kind: 'swap', message: 'Previous stage [anchor-read]' } });
+    assert.equal(page.element('c-state').textContent, 'Rebalancing');
+    assert.equal(page.element('c-sub').textContent, 'AAPL → USDG');
+  }
+  page.source.send({ ...retained, operation: { status: 'ledger-unavailable', message: 'Previous stage [anchor-read]' },
+    ledgerRequest: { ...ledgerRequest, state: 'requested' } });
+  assert.equal(page.element('c-state').textContent, 'Preparing rebalance');
+  assert.equal(page.element('c-sub').textContent, 'Queued for a fresh check');
+  page.hide();
+});
+
+test('unknown or malformed Ledger diagnostic text is not rendered or called an account-read failure', async () => {
+  const page = await browser();
+  for (const message of ['Private fixture payload', 'Private fixture payload [connect]', 'Private fixture payload [anchor-read] trailing',
+    'Private fixture payload [anchor-read\ninjection]', { phase: 'anchor-read' }]) {
+    page.source.send({ ...ledgerSnapshot, error: null,
+      operation: { status: 'ledger-unavailable', message }, ledgerPrompt: { connected: true, suspended: true, outcome: 'unavailable' },
+      ledgerRequest: { ...ledgerRequest, state: 'finished', outcome: 'unavailable' } });
+    assert.equal(page.element('c-state').textContent, 'Ledger needs attention');
+    assert.doesNotMatch(page.element('chart-description').textContent, /Private fixture payload|injection/);
+  }
+  page.hide();
+});
+
+
+test('fixed NodeHidSendReportError diagnostics identify USB failure without claiming its physical cause', async () => {
+  const page = await browser();
+  for (const phase of ['connect', 'anchor-read', 'account-read']) {
+    page.source.send({ ...ledgerSnapshot, error: null,
+      operation: { status: 'ledger-unavailable', message: `Ledger signing could not complete. [${phase}; NodeHidSendReportError]` },
+      ledgerRequest: { ...ledgerRequest, state: 'finished', outcome: 'unavailable' },
+      ledgerPrompt: { connected: true, suspended: true, outcome: 'unavailable' } });
+    assert.equal(page.element('c-state').textContent, 'USB connection failed');
+    assert.equal(page.element('c-sub').textContent, 'Check USB and open Ethereum');
+    assert.match(page.element('c-val').textContent, /^\$5 · as of /);
+    assert.doesNotMatch(page.element('chart-description').textContent, /NodeHidSendReportError|cable|firmware|locked/);
+  }
+  for (const message of ['Private fixture NodeHidSendReportError [connect]', 'Private fixture [connect; prefixNodeHidSendReportError]',
+    'Private fixture [invented-stage; NodeHidSendReportError]', 'Private fixture [connect; NodeHidSendReportError] trailing']) {
+    page.source.send({ ...ledgerSnapshot, error: null, operation: { status: 'ledger-unavailable', message },
+      ledgerPrompt: { connected: true, suspended: true, outcome: 'unavailable' } });
+    assert.equal(page.element('c-state').textContent, 'Ledger needs attention');
+    assert.doesNotMatch(page.element('chart-description').textContent, /Private fixture|NodeHidSendReportError/);
+  }
+  page.hide();
+});
+
+
+test('a suspended finished Ledger failure remains visible after cycle reads clear operation and proposal', async () => {
+  const page = await browser();
+  const baseline = { ...ledgerSnapshot, error: null, operation: null, proposal: undefined, graph: { node: 'wait' },
+    config: { ...ledgerSnapshot.config, targets: { USDG: 10000, AAPL: 0, NVDA: 0, MSFT: 0, AMD: 0 } } };
+  for (const [outcome, label] of [['unavailable', 'Ledger needs attention'], ['cancelled', 'Request cancelled'], ['unsupported', 'Signing unsupported']]) {
+    const snapshot = { ...baseline, ledgerRequest: { ...ledgerRequest, state: 'finished', outcome },
+      ledgerPrompt: { connected: true, suspended: true, outcome } };
+    page.source.send(snapshot);
+    assert.equal(page.element('c-state').textContent, label);
+    assert.match(page.element('c-val').textContent, /^\$5 · as of /);
+    page.source.send({ ...snapshot, ledgerPrompt: { connected: true, suspended: false } });
+    assert.equal(page.element('c-state').textContent, 'Off target', 'cleared suspension does not resurrect a historical failure');
+    page.source.send({ ...snapshot, ledgerRequest: { ...snapshot.ledgerRequest, wallet: `0x${'2'.repeat(40)}` } });
+    assert.equal(page.element('c-state').textContent, 'Off target', 'another wallet cannot supply the current failure');
+  }
+  page.hide();
+});
+
+test('a disconnected suspended Ledger explains why Retry is unavailable while receipts and active requests retain priority', async () => {
+  const page = await browser();
+  const snapshot = { ...ledgerSnapshot, error: null, operation: null, proposal: undefined,
+    ledgerRequest: { ...ledgerRequest, state: 'finished', outcome: 'unavailable' },
+    ledgerPrompt: { connected: false, suspended: true, outcome: 'unavailable' } };
+  page.source.send(snapshot);
+  assert.equal(page.element('c-state').textContent, 'Ledger disconnected');
+  assert.equal(page.element('c-sub').textContent, 'Connect USB and open Ethereum');
+  page.source.send({ ...snapshot, operation: { status: 'confirming', kind: 'approval' } });
+  assert.equal(page.element('c-state').textContent, 'Approval pending');
+  page.source.send({ ...snapshot, ledgerRequest: { ...ledgerRequest, state: 'requested' } });
+  assert.equal(page.element('c-state').textContent, 'Preparing rebalance');
+  page.source.send({ ...snapshot, ledgerPrompt: { suspended: true, outcome: 'unavailable' } });
+  assert.equal(page.element('c-state').textContent, 'Ledger needs attention', 'unknown connection state is not proof of disconnection');
+  page.hide();
+});
+
+
+test('the icon-only Ledger retry shares the hint row, keeps value below and respects reduced motion', async () => {
+  const [html, css] = await Promise.all(['index.html', 'style.css'].map(file => readFile(new URL(`../ui/${file}`, import.meta.url), 'utf8')));
+  const hint = html.match(/<div class="ctr-hint">([\s\S]*?)<\/div>/)?.[1];
+  assert.ok(hint, 'the hint has its own row inside the ring');
+  assert.match(hint, /id="c-sub"/);
+  assert.match(hint, /<button[^>]*id="ledger-retry"[^>]*aria-label="Retry Ledger rebalance"[^>]*aria-describedby="c-sub"/);
+  assert.match(hint, /<svg[^>]*class="control-icon retry-icon"[^>]*aria-hidden="true"[^>]*focusable="false"/);
+  assert.doesNotMatch(hint, />Retry<|id="c-val"/);
+  assert.match(html, /class="ctr-hint">[\s\S]*?<\/div>\s*<p class="ctr-val" id="c-val"/);
+  assert.match(css, /\.ctr-hint\s*\{[^}]*display: flex;[^}]*align-items: center/);
+  assert.match(css, /\.retry-button\[aria-busy="true"\] \.retry-icon\s*\{ animation: retry-spin/);
+  assert.match(css, /prefers-reduced-motion: reduce[\s\S]*?\.retry-button\[aria-busy="true"\] \.retry-icon\s*\{ animation: none/);
+  assert.match(css, /\.retry-button:focus-visible\s*\{[^}]*outline: 2px/);
 });

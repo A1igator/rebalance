@@ -390,3 +390,26 @@ test('Ledger diagnostics omit unrecognized provider fields and pending-step stri
     return true;
   });
 });
+
+
+test('Ledger USB write failure is classified without exposing the native error', async t => {
+  const f = await fixture(t);
+  const d = await device();
+  const secret = 'DO-NOT-LOG-native-message-or-device-path';
+  d.adapter.getAddress = () => ({ observable: of({ status: 'error', error: {
+    _tag: 'NodeHidSendReportError', originalError: new Error(secret),
+  } }), cancel() {} });
+  const signer = await ledgerSigner(account.address, { rootDir: f.rootDir, connect: async () => d.adapter });
+  await assert.rejects(signer.signTransaction(tx), error => {
+    assert.ok(error instanceof LedgerSigningError);
+    assert.equal(error.outcome, 'unavailable');
+    assert.equal(error.diagnostic?.phase, 'anchor-read');
+    assert.equal(error.diagnostic?.status, 'error');
+    assert.equal(error.diagnostic?.errorTag, 'NodeHidSendReportError');
+    assert.match(error.message, /Ledger USB communication failed/);
+    assert.ok(!error.message.includes(secret));
+    assert.ok(!JSON.stringify(error).includes(secret));
+    return true;
+  });
+  assert.equal(d.signed.length, 0);
+});

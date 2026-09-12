@@ -47,9 +47,13 @@
           <foreignObject x="121" y="120" width="178" height="180">
             <div xmlns="http://www.w3.org/1999/xhtml" class="centre">
               <p class="ctr-state" id="c-state">Connecting</p>
-              <p class="ctr-sub" id="c-sub">Local allocation</p>
+              <div class="ctr-hint">
+                <p class="ctr-sub" id="c-sub">Local allocation</p>
+                <button id="ledger-retry" class="retry-button" type="button" aria-label="Retry Ledger rebalance" aria-describedby="c-sub" aria-busy="false" title="Retry Ledger rebalance" hidden disabled>
+                  <svg class="control-icon retry-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M16.5 8a6.5 6.5 0 1 0 .1 3M16.5 3.5V8H12"/></svg>
+                </button>
+              </div>
               <p class="ctr-val" id="c-val"></p>
-              <button id="ledger-retry" class="retry-button" type="button" hidden disabled>Retry</button>
             </div>
           </foreignObject>
         </svg>

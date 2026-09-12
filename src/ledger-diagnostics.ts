@@ -13,7 +13,7 @@ const TAGS = new Set(['RefusedByUserDAError', 'EthAppCommandError', 'SendApduTim
   'SendApduConcurrencyError', 'SendApduEmptyResponseError', 'DeviceNotInitializedError', 'NoAccessibleDeviceError',
   'OpeningConnectionError', 'UnknownDeviceError', 'DeviceNotRecognizedError', 'DisconnectError',
   'ReconnectionFailedError', 'DeviceDisconnectedWhileSendingError', 'AlreadySendingApduError',
-  'DeviceDisconnectedBeforeSendingApdu', 'DmkNetworkClientError']);
+  'DeviceDisconnectedBeforeSendingApdu', 'NodeHidSendReportError', 'DmkNetworkClientError']);
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object';
 
 /** Fixed public fields only: no SDK messages, URLs, context, transaction bytes or signatures. */

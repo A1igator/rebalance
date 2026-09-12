@@ -31,15 +31,18 @@
     retry.hidden = mode !== "ledger" || !retrySource;
     retry.disabled = suspended || busy || retryBusy || !statusFresh || !linked || state !== "running" || !ledgerConnected ||
       !retrySource || attemptedRetries.has(retrySource);
-    retry.textContent = retryBusy ? "Retrying…" : "Retry";
+    const retryPending = retryBusy || Boolean(retrySource && attemptedRetries.has(retrySource));
+    retry.setAttribute("aria-busy", String(retryPending));
     retry.title = !linked ? "Open this portfolio through your agent to enable controls."
       : !statusFresh ? "Waiting for current portfolio status."
       : state !== "running" ? "Start this Ledger portfolio before retrying."
-      : !ledgerConnected ? "Connect and unlock Ledger to retry."
+      : !ledgerConnected ? "Connect USB, unlock Ledger and open Ethereum to retry."
+      : retryBusy ? "Sending the retry request. Each transaction still requires device confirmation."
       : attemptedRetries.has(retrySource) ? "This retry was sent. Waiting for the current request status."
       : retryUnsupported ? "Retry after resolving Ledger signing support. Each transaction still requires device confirmation."
       : "Prepare a fresh rebalance for this wallet. Physically confirm each transaction on Ledger.";
-    retry.setAttribute("aria-label", `Retry Ledger rebalance${wallet ? ` for ${short(wallet)}` : ""}`);
+    const retryLabel = retryBusy ? "Sending Ledger retry" : retryPending ? "Waiting for Ledger retry status" : "Retry Ledger rebalance";
+    retry.setAttribute("aria-label", `${retryLabel}${wallet ? ` for ${short(wallet)}` : ""}`);
     // Public navigation follows this chart's wallet, independently of runner/chat controls.
     const available = !suspended && Boolean(wallet);
     if (available) explorer.setAttribute("href", `https://robinhoodchain.blockscout.com/address/${wallet}`);

@@ -347,6 +347,9 @@ test('Ledger Retry requires a suspended request, matching attached running walle
   assert.equal(page.byId('ledger-retry').hidden, true);
   await page.status(failedLedger());
   assert.equal(page.byId('ledger-retry').hidden, false); assert.equal(page.byId('ledger-retry').disabled, false);
+  assert.match(page.byId('ledger-retry').attrs['aria-label'], /^Retry Ledger rebalance for 0x1111…1111$/);
+  assert.equal(page.byId('ledger-retry').attrs['aria-busy'], 'false');
+  assert.equal(page.byId('ledger-retry').textContent, '', 'rendering never replaces the refresh SVG with text');
   for (const snapshot of [{ ...failedLedger(), mode: 'privy' }, { ...failedLedger(), armed: false },
     { ...failedLedger(), ledgerPrompt: { suspended: false, connected: true } },
     { ...failedLedger(), ledgerRequest: { ...failedLedger().ledgerRequest, wallet: otherWallet } },
@@ -361,9 +364,11 @@ test('Ledger Retry requires a suspended request, matching attached running walle
   assert.equal(page.byId('ledger-retry').disabled, true);
   await page.status({ ...failedLedger(), ledgerPrompt: { suspended: true, connected: false } });
   assert.equal(page.byId('ledger-retry').disabled, true);
+  assert.match(page.byId('ledger-retry').title, /Connect USB, unlock Ledger and open Ethereum/);
   await page.status(failedLedger('unsupported')); assert.equal(page.byId('ledger-retry').disabled, false);
   assert.match(page.byId('ledger-retry').title, /after resolving Ledger signing support/);
   await page.status(failedLedger()); await page.view({ snapshot: { connectedWallet: otherWallet } });
+  assert.match(page.byId('ledger-retry').title, /Open this portfolio through your agent/);
   await page.click('ledger-retry', true); assert.equal(page.posts().length, 0);
 });
 
@@ -372,15 +377,22 @@ test('Retry posts one fresh UUID tied to the failed request, with no runner comm
   const page = await browser({ reply: async call => call.url === '/api/ledger/retry' ? pending.promise : undefined });
   await page.ready('running'); await page.status(failedLedger());
   await page.click('ledger-retry'); await page.click('ledger-retry', true);
+  assert.equal(page.byId('ledger-retry').attrs['aria-busy'], 'true');
+  assert.match(page.byId('ledger-retry').attrs['aria-label'], /^Sending Ledger retry for /);
+  assert.match(page.byId('ledger-retry').title, /^Sending the retry request/);
   assert.equal(page.posts().length, 1); assert.equal(page.uuidCalls, 1);
   assert.deepEqual(page.posts()[0], { url: '/api/ledger/retry', method: 'POST', signal: undefined,
     body: { token, wallet, requestId, retryOf: cancelledRequestId } });
   assert.equal(page.byId('portfolio-run').disabled, false, 'Stop remains available while a retry is in flight');
   pending.resolve(ok({ wallet, requestId, retryOf: cancelledRequestId, outcome: 'requested' })); await flush();
+  assert.equal(page.byId('ledger-retry').attrs['aria-busy'], 'true');
+  assert.match(page.byId('ledger-retry').attrs['aria-label'], /^Waiting for Ledger retry status for /);
   await page.status(failedLedger()); await page.click('ledger-retry', true); await page.timersRun();
   assert.equal(page.posts().length, 1, 'unchanged failed status cannot resend');
   await page.status({ ...failedLedger(), ledgerRequest: { ...failedLedger().ledgerRequest, id: requestId } });
   assert.equal(page.byId('ledger-retry').disabled, false, 'a newly finished request permits another explicit Retry');
+  assert.equal(page.byId('ledger-retry').attrs['aria-busy'], 'false');
+  assert.match(page.byId('ledger-retry').attrs['aria-label'], /^Retry Ledger rebalance for /);
   assert.ok(page.calls.every(call => !call.url.includes(token)));
 });
 
@@ -396,6 +408,7 @@ test('unverified Retry replies never claim success or silently retry, and view/l
     await page.ready('running'); await page.status(failedLedger()); await page.click('ledger-retry'); await page.timersRun();
     assert.equal(page.posts().length, 1); assert.match(page.byId('control-message').textContent, /Could not confirm/);
     assert.equal(page.byId('ledger-retry').disabled, false, 'another deliberate click still targets the exact old failure; the backend rejects it if already replaced');
+    assert.equal(page.byId('ledger-retry').attrs['aria-busy'], 'false');
     await page.lifecycle('pagehide'); await page.lifecycle('pageshow');
     await page.click('ledger-retry', true); assert.equal(page.posts().length, 1);
   }

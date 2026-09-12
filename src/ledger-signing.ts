@@ -25,7 +25,10 @@ export class LedgerSigningError extends Error {
   constructor(readonly outcome: LedgerSigningOutcome, readonly diagnostic?: LedgerDiagnostic) {
     const context = diagnostic ? [diagnostic.phase, diagnostic.step, diagnostic.interaction, diagnostic.errorTag, diagnostic.deviceCode,
       diagnostic.httpStatus ? `HTTP ${diagnostic.httpStatus}` : undefined].filter(Boolean).join('; ') : '';
-    super(`${MESSAGES[outcome]}${context ? ` [${context}]` : ''}`);
+    const message = outcome === 'unavailable' && diagnostic?.errorTag === 'NodeHidSendReportError'
+      ? 'Ledger USB communication failed before the command could complete. Check the USB connection and Ethereum app, then use Retry.'
+      : MESSAGES[outcome];
+    super(`${message}${context ? ` [${context}]` : ''}`);
   }
 }
 export type LedgerSigningOptions = LedgerOnboardingDependencies & { rootDir?: string; signal?: AbortSignal };
