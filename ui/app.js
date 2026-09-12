@@ -200,22 +200,22 @@
         : { state: "Ledger signing", sub: "Physical confirmation required" };
     }
     if (prompt?.suspended === true && needed && prompt.connected === false) {
-      return { state: "Ledger disconnected", sub: "Connect USB and open Ethereum" };
+      return { state: "Ledger disconnected", sub: "Connect USB and open Ethereum, then retry" };
     }
     const ended = { rejected: "Request rejected", cancelled: "Request cancelled", timeout: "Request timed out", expired: "Request expired",
       "device-changed": "Device changed", "runner-restarted": "Request ended", invalidated: "Request ended", "cycle-invalidated": "Request ended" }[outcome];
-    if (ended) return { state: ended, sub: "Open Ethereum on device" };
+    if (ended) return { state: ended, sub: "Open Ethereum on device, then retry" };
     // Project only a known diagnostic phase; never display SDK/operation payloads.
     const diagnostic = typeof operation?.message === "string" ? operation.message.slice(0, 400) : "";
     const fields = diagnostic.match(/\[(?:connect|account-binding|anchor-read|account-read|sign|final-anchor-read|signature-validation|cleanup)(?:;[^\]\r\n]*)?\]$/)?.[0].slice(1, -1).split("; ");
     if (outcome === "unavailable" && fields?.slice(1).includes("NodeHidSendReportError")) {
-      return { state: "USB connection failed", sub: "Check USB and open Ethereum" };
+      return { state: "USB connection failed", sub: "Check USB and open Ethereum, then retry" };
     }
     if (outcome === "unavailable" && ["anchor-read", "account-read", "final-anchor-read"].includes(fields?.[0])) {
-      return { state: "Ledger account check failed", sub: "Open Ethereum on device" };
+      return { state: "Ledger account check failed", sub: "Open Ethereum on device, then retry" };
     }
-    if (outcome === "unsupported") return { state: "Signing unsupported", sub: "Clear Signing support required" };
-    if (prompt?.suspended && needed) return { state: "Ledger needs attention", sub: "Resolve the Ledger issue" };
+    if (outcome === "unsupported") return { state: "Signing unsupported", sub: "Resolve Clear Signing support, then retry" };
+    if (prompt?.suspended && needed) return { state: "Ledger needs attention", sub: "Resolve the Ledger issue, then retry" };
     if (needed) return prompt?.connected
       ? { state: "Preparing rebalance", sub: "Device prompts open automatically" }
       : { state: "Ledger needed", sub: "Connect and unlock Ledger" };

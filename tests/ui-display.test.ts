@@ -491,7 +491,7 @@ test('Ledger monitoring and queued or consumed requests never imply an automatic
     page.source.send({ ...ledgerSnapshot, operation: { status: `ledger-${outcome}` },
       ledgerRequest: { ...ledgerRequest, state: 'finished', outcome } });
     assert.equal(page.element('c-state').textContent, label);
-    assert.equal(page.element('c-sub').textContent, 'Open Ethereum on device');
+    assert.equal(page.element('c-sub').textContent, 'Open Ethereum on device, then retry');
     page.source.send({ ...ledgerSnapshot, operation: { status: 'waiting-ledger' }, ledgerRequest: { ...ledgerRequest, state: 'finished', outcome } });
     assert.equal(page.element('c-state').textContent, label, 'a later monitoring check retains the ended-request explanation');
   }
@@ -913,7 +913,7 @@ test('connected Ledger prompts are backend-driven and a suspended prompt explain
   assert.equal(page.element('c-sub').textContent, 'Device prompts open automatically');
   page.source.send({ ...ledgerSnapshot, operation: { status: 'waiting-ledger' }, ledgerPrompt: { connected: true, suspended: true, outcome: 'unavailable' } });
   assert.equal(page.element('c-state').textContent, 'Ledger needs attention');
-  assert.equal(page.element('c-sub').textContent, 'Resolve the Ledger issue');
+  assert.equal(page.element('c-sub').textContent, 'Resolve the Ledger issue, then retry');
   page.hide();
 });
 
@@ -927,7 +927,7 @@ test('Ledger account-read failures retain a specific explanation and portfolio v
       ledgerPrompt: { connected: true, suspended: true, outcome: 'unavailable' } };
     page.source.send(snapshot);
     assert.equal(page.element('c-state').textContent, 'Ledger account check failed');
-    assert.equal(page.element('c-sub').textContent, 'Open Ethereum on device');
+    assert.equal(page.element('c-sub').textContent, 'Open Ethereum on device, then retry');
     assert.match(page.element('c-val').textContent, /^\$5 · as of /);
     page.source.send({ ...snapshot, graph: { node: 'receipt' }, updatedAt: new Date(initialTime + 1000).toISOString() });
     assert.equal(page.element('c-state').textContent, 'Ledger account check failed');
@@ -943,7 +943,7 @@ test('unsupported Ledger signing keeps the Clear Signing requirement visible thr
       ledgerRequest: { ...ledgerRequest, state: 'finished', outcome: 'unsupported' },
       ledgerPrompt: { connected: true, suspended: true, outcome: 'unsupported' } });
     assert.equal(page.element('c-state').textContent, 'Signing unsupported');
-    assert.equal(page.element('c-sub').textContent, 'Clear Signing support required');
+    assert.equal(page.element('c-sub').textContent, 'Resolve Clear Signing support, then retry');
     assert.match(page.element('c-val').textContent, /^\$5 · as of /);
     assert.doesNotMatch(page.element('chart-description').textContent, /Private fixture payload/);
   }
@@ -989,7 +989,7 @@ test('fixed NodeHidSendReportError diagnostics identify USB failure without clai
       ledgerRequest: { ...ledgerRequest, state: 'finished', outcome: 'unavailable' },
       ledgerPrompt: { connected: true, suspended: true, outcome: 'unavailable' } });
     assert.equal(page.element('c-state').textContent, 'USB connection failed');
-    assert.equal(page.element('c-sub').textContent, 'Check USB and open Ethereum');
+    assert.equal(page.element('c-sub').textContent, 'Check USB and open Ethereum, then retry');
     assert.match(page.element('c-val').textContent, /^\$5 · as of /);
     assert.doesNotMatch(page.element('chart-description').textContent, /NodeHidSendReportError|cable|firmware|locked/);
   }
@@ -1029,7 +1029,7 @@ test('a disconnected suspended Ledger explains why Retry is unavailable while re
     ledgerPrompt: { connected: false, suspended: true, outcome: 'unavailable' } };
   page.source.send(snapshot);
   assert.equal(page.element('c-state').textContent, 'Ledger disconnected');
-  assert.equal(page.element('c-sub').textContent, 'Connect USB and open Ethereum');
+  assert.equal(page.element('c-sub').textContent, 'Connect USB and open Ethereum, then retry');
   page.source.send({ ...snapshot, operation: { status: 'confirming', kind: 'approval' } });
   assert.equal(page.element('c-state').textContent, 'Approval pending');
   page.source.send({ ...snapshot, ledgerRequest: { ...ledgerRequest, state: 'requested' } });
