@@ -2,10 +2,10 @@ import { FeeTargetError, type FeeCheck } from './fee-target.js';
 import { projectSwapCount } from './fee-projection.js';
 import { resolve } from 'node:path';
 import { watch } from 'node:fs';
-import { createChain, type RouteQuote } from './chain.js';
+import { createChain, type BatchQuote } from './chain.js';
 import { DATA, STATE_PATH, PENDING_PATH, loadConfig, type Config } from './config.js';
 import { allocationSummary } from './allocation-management.js';
-import { planTrade, type Portfolio, type TradePlan } from './core.js';
+import { planRebalance, type Portfolio, type TradePlan, type RebalancePlan } from './core.js';
 import { attentionCondition, ledgerCondition, rebalanceCompleted, transactionRecovered, type FailurePhase, type RebalanceAttention } from './events.js';
 import { automaticRecovery } from './recovery.js';
 import { CYCLE_PATH, ACTIVE_CYCLE_SECONDS, readCycle, publicCycle, rebalanceInterval, beginRebalanceCycle, finishRebalanceCycle, type RebalanceCycle } from './cadence.js';
@@ -37,7 +37,7 @@ export type Status = {
   nativeBalance?: bigint;
   blockNumber?: bigint;
   valuationNote?: string;
-  proposal?: TradePlan | null;
+  proposal?: RebalancePlan | TradePlan | null;
   ledgerRequest?: LedgerRequest | null;
   ledgerPrompt?: LedgerPromptState & { connected: boolean };
   feeCheck?: FeeCheck | null;
@@ -172,7 +172,7 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
     finally { await release(); }
   };
   const recoveryObservation: { operation: Operation | null } = { operation: null };
-  await runGraph({
+  await runGraph<RebalancePlan>({
     canExecute: execute,
     configured: async () => {
       const loaded = configured;
@@ -223,7 +223,7 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
       return snapshot.portfolio;
     },
     plan: async portfolio => {
-      const proposal = planTrade(portfolio, 'USDG', config.driftThresholdBps);
+      const proposal = planRebalance(portfolio, 'USDG', config.driftThresholdBps);
       state.proposal = proposal;
       if (!proposal) {
         await withCurrentConfig(() => finishRebalanceCycle());
@@ -236,7 +236,7 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
       state.cycle = interval.cycle;
       return interval.operation;
     },
-    quote: trade => chain.quote(trade),
+    quote: trade => chain.quoteBatch(trade),
     execute: async (trade, quote) => {
       if (await readJson(STOP_PATH)) return { status: 'stopping', message: 'Stop requested; no new transaction sent.' };
       await requireCurrentConfig();
@@ -251,7 +251,7 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
         // execution. These fee checks never access the device or keys.
         if (config.rebalanceFeeTargetUsdE8 !== undefined) {
           try {
-            const transaction = await chain.transaction(trade, quote as RouteQuote);
+            const transaction = await chain.transactionBatch(trade, quote as BatchQuote);
             const swaps = state.portfolio ? projectSwapCount(state.portfolio.positions, config.driftThresholdBps) : null;
             state.feeCheck = await readRebalanceFee(config, chain, transaction, swaps);
           } catch {
@@ -284,7 +284,7 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
         }
         await ledger!.assertReady(config);
       }
-      const transaction = await chain.transaction(trade, quote as RouteQuote);
+      const transaction = await chain.transactionBatch(trade, quote as BatchQuote);
       const fees: FeeContext | undefined = config.rebalanceFeeTargetUsdE8 === undefined ? undefined : {
         swaps: state.portfolio ? projectSwapCount(state.portfolio.positions, config.driftThresholdBps) : null,
         onCheck: async check => { state.feeCheck = check; await atomicWriteJson(STATE_PATH, state); },

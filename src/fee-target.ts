@@ -20,6 +20,10 @@ export type FeeTargetInput = {
   /** Remaining planner swaps, including the swap associated with this transaction. */
   swaps: number;
   kind: 'swap' | 'approval';
+  /** Inner swaps already covered by this transaction's actual gas estimate. */
+  swapsInCurrentTransaction?: number;
+  /** Required future approval transactions, excluding this transaction. */
+  remainingApprovals?: number;
   /** Current transaction gas and gas price already contain dispatch's 20% buffer. */
   gas: bigint;
   gasPrice: bigint;
@@ -54,6 +58,13 @@ function validate(input: FeeTargetInput): bigint {
       !['swap', 'approval'].includes(input.kind) || typeof input.gas !== 'bigint' || input.gas <= 0n || input.gas > MAX_UINT256 ||
       typeof input.gasPrice !== 'bigint' || input.gasPrice <= 0n || input.gasPrice > MAX_UINT256) {
     throw new Error('Invalid rebalance fee-target inputs');
+  }
+  const included = input.swapsInCurrentTransaction ?? (input.kind === 'swap' ? 1 : 0);
+  const approvals = input.remainingApprovals ?? input.swaps - 1;
+  if (!Number.isInteger(included) || included < 0 || included > input.swaps ||
+      (input.kind === 'approval' ? included !== 0 : included < 1) ||
+      !Number.isInteger(approvals) || approvals < 0 || approvals > 16) {
+    throw new Error('Invalid rebalance batch fee counts');
   }
   const target = BigInt(input.targetUsdE8);
   if (target > MAX_UINT256) throw new Error('Invalid rebalance fee-target inputs');
@@ -92,8 +103,8 @@ async function boundedJson(response: Response, signal: AbortSignal): Promise<unk
 
 /**
  * Fresh execution-specific estimate; never reads the cached display quote. Uses
- * actual buffered gas for this transaction, measured reference gas +20% for all
- * remaining swaps, and one conservative approval per remaining swap. Current
+ * actual buffered gas for this entire transaction, measured reference gas +20%
+ * for uncovered swap legs, and required/conservative future approvals. Current
  * gas price applies throughout. This is an approximation, not a spend budget,
  * a fee guarantee, or an estimate of swap fees/slippage.
  */
@@ -104,8 +115,8 @@ export async function checkRebalanceFee(input: FeeTargetInput, overrides: Partia
       typeof dependencies.fetch !== 'function' || typeof dependencies.now !== 'function') throw new Error('Invalid rebalance fee-quote dependencies');
   const check: FeeCheck = { targetUsdE8: input.targetUsdE8, estimatedUsdE8: null, gasPriceWei: input.gasPrice.toString(),
     ethUsdE8: null, observedAt: null, state: 'unavailable' };
-  const remainingSwaps = BigInt(input.swaps - (input.kind === 'swap' ? 1 : 0));
-  const remainingApprovals = BigInt(input.swaps - 1);
+  const remainingSwaps = BigInt(input.swaps - (input.swapsInCurrentTransaction ?? (input.kind === 'swap' ? 1 : 0)));
+  const remainingApprovals = BigInt(input.remainingApprovals ?? input.swaps - 1);
   const bufferedSwapGas = (BigInt(GAS_REFERENCE.swapGas) * 120n + 99n) / 100n;
   const bufferedApprovalGas = (BigInt(GAS_REFERENCE.approvalGas) * 120n + 99n) / 100n;
   const estimatedWei = (input.gas + remainingSwaps * bufferedSwapGas + remainingApprovals * bufferedApprovalGas) * input.gasPrice;

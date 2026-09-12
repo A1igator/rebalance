@@ -12,7 +12,7 @@ import {
 } from "viem";
 import { ASSETS, DISCOVERY_TTL_MS, QUOTER, ROBINHOOD, ROUTER, RPC_RETRY_COUNT, RPC_TIMEOUT_MS,
   createChain, type ChainConfig } from "../src/chain.js";
-import type { TradePlan } from "../src/core.js";
+import type { RebalancePlan, TradePlan } from "../src/core.js";
 
 // Local protocol fixtures only: no mainnet requests, wallets, or bytecode copies.
 // These addresses and the seven-field SwapRouter02 layout are documented in
@@ -66,6 +66,8 @@ function fixture(t: TestContext, targets: Record<string, number> = originalTarge
     pending: false,
     omitTimestamp: false,
     allowance: 0n,
+    allowances: {} as Record<string, bigint>,
+    unquotable: new Set<string>(),
     native: ETHER,
     balances: Object.fromEntries(selectedAssets.map(asset => [asset.id, asset.id === 'USDG' ? 5_000n * 10n ** 6n : 2n * ETHER])),
     decimals: Object.fromEntries(selectedAssets.map(asset => [asset.id, asset.decimals])),
@@ -134,7 +136,7 @@ function fixture(t: TestContext, targets: Record<string, number> = originalTarge
           case "allowance":
             assert(asset);
             assert.deepEqual(decoded.args, [WALLET, ROUTER]);
-            result = uint(state.allowance);
+            result = uint(state.allowances[asset] ?? state.allowance);
             break;
           case "factory":
             assert([getAddress(QUOTER), getAddress(ROUTER)].includes(target));
@@ -163,7 +165,8 @@ function fixture(t: TestContext, targets: Record<string, number> = originalTarge
             const sellStock = getAddress(tokenIn) !== getAddress(USDG);
             assert.equal(getAddress(sellStock ? tokenOut : tokenIn), getAddress(USDG));
             assert(selectedAssets.some(a => a.id !== "USDG" && getAddress(a.address) === getAddress(sellStock ? tokenIn : tokenOut)));
-            const output = sellStock
+            const stockId = selectedAssets.find(a => getAddress(a.address) === getAddress(sellStock ? tokenIn : tokenOut))!.id;
+            const output = state.unquotable.has(stockId) ? 0n : sellStock
               ? (state.forward[fee]! * amountIn) / SAMPLE
               : (state.reverse[fee]! * amountIn) / 10_000_000n;
             result = encodeAbiParameters(
@@ -461,4 +464,119 @@ test("known but unconfigured stocks cannot be quoted or used to build transactio
     await assert.rejects(chain.transaction(unconfigured, previous), /configured stock/);
   }
   assert.deepEqual(state.requests, [], 'unconfigured trades must fail before any RPC request');
+});
+
+
+const buyBatch = (): RebalancePlan => ({ reason: 'Buy the target stocks', trades: ['TSLA', 'AAPL', 'NVDA', 'AMZN'].map(buyAssetId => ({
+  sellAssetId: 'USDG', buyAssetId, amountIn: 1_187_500n, reason: 'Batch fixture',
+})) });
+
+test('four buys need one exact aggregate USDG approval then one multicall with fresh routes', async t => {
+  const { state, chain } = fixture(t);
+  state.balances.USDG = 5_000_000n;
+  const plan = buyBatch();
+  const quoted = await chain.quoteBatch(plan);
+  assert.equal(quoted.quotes.length, 4);
+  assert(quoted.quotes.every(q => q.blockNumber === quoted.blockNumber));
+  const approval = await chain.transactionBatch(plan, quoted);
+  assert.equal(approval.kind, 'approval');
+  assert.equal(approval.swapCount, 4);
+  assert.equal(approval.approvalCount, 1);
+  assert.equal(approval.to, USDG);
+  assert.equal(approval.value, 0n);
+  assert.deepEqual(decodeFunctionData({ abi: TRANSACTION_ABI, data: approval.data }).args, [ROUTER, 4_750_000n]);
+  assert.equal(state.requests.filter(r => r.method === 'eth_call' && decodeFunctionData({ abi: RPC_ABI, data: (r.params[0] as {data: Hex}).data }).functionName === 'allowance').length, 1);
+
+  state.allowances.USDG = 4_750_000n;
+  state.blockNumber++; state.timestamp += 12n; state.now += 12n;
+  state.reverse[3000] = 6n * 10n ** 15n;
+  const tx = await chain.transactionBatch(plan, quoted);
+  assert.equal(tx.kind, 'swap'); assert.equal(tx.swapCount, 4); assert.equal(tx.approvalCount, 0);
+  assert.equal(tx.to, ROUTER); assert.equal(tx.value, 0n);
+  const decoded = decodeFunctionData({ abi: TRANSACTION_ABI, data: tx.data });
+  assert.equal(decoded.functionName, 'multicall');
+  if (decoded.functionName !== 'multicall') assert.fail();
+  assert.equal(decoded.args[0], state.timestamp + 60n);
+  assert.equal(tx.expiresAt, decoded.args[0]);
+  assert.equal(decoded.args[1].length, 4);
+  decoded.args[1].forEach((data, index) => {
+    const inner = decodeFunctionData({ abi: TRANSACTION_ABI, data });
+    assert.equal(inner.functionName, 'exactInputSingle');
+    if (inner.functionName !== 'exactInputSingle') assert.fail();
+    assert.deepEqual(inner.args[0], { tokenIn: USDG, tokenOut: ASSETS[plan.trades[index]!.buyAssetId as keyof typeof ASSETS].address,
+      fee: 3000, recipient: WALLET, amountIn: 1_187_500n, amountOutMinimum: 708_937_500_000_000n, sqrtPriceLimitX96: 0n });
+    assert.notEqual(inner.args[0].amountOutMinimum, quoted.quotes[index]!.minimumOut);
+  });
+});
+
+test('sale batches approve only distinct deficient inputs then include both swaps atomically', async t => {
+  const { state, chain } = fixture(t);
+  const plan: RebalancePlan = { reason: 'Sells', trades: [trade, { ...trade, sellAssetId: 'AAPL' }] };
+  const quoted = await chain.quoteBatch(plan);
+  const first = await chain.transactionBatch(plan, quoted);
+  assert.equal(first.to, TSLA); assert.equal(first.approvalCount, 2); assert.equal(first.swapCount, 2);
+  state.allowances.TSLA = trade.amountIn;
+  const second = await chain.transactionBatch(plan, quoted);
+  assert.equal(second.to, ASSETS.AAPL.address); assert.equal(second.approvalCount, 1);
+  state.allowances.AAPL = trade.amountIn;
+  const swaps = await chain.transactionBatch(plan, quoted);
+  assert.equal(swaps.kind, 'swap'); assert.equal(swaps.approvalCount, 0);
+  const decoded = decodeFunctionData({ abi: TRANSACTION_ABI, data: swaps.data });
+  assert.equal(decoded.functionName, 'multicall');
+  if (decoded.functionName !== 'multicall') assert.fail();
+  assert.equal(decoded.args[1].length, 2);
+});
+
+test('batch validation rejects aggregate overspend, overflow, duplicate pools and mixed phases', async t => {
+  const { state, chain } = fixture(t);
+  const quoted = { quotes: [], blockNumber: 100n };
+  for (const plan of [
+    { reason: 'empty', trades: [] },
+    { ...buyBatch(), trades: [...buyBatch().trades, trade] },
+    { reason: 'duplicate', trades: [trade, trade] },
+    { reason: 'mixed', trades: [trade, { ...trade, sellAssetId: 'USDG', buyAssetId: 'AAPL' }] },
+    { reason: 'overflow', trades: [{ ...buyBatch().trades[0]!, amountIn: maxUint256 }, { ...buyBatch().trades[1]!, amountIn: 1n }] },
+    { reason: 'unconfigured', trades: [{ ...trade, sellAssetId: 'RUN' }] },
+    { reason: 'zero', trades: [{ ...trade, amountIn: 0n }] },
+  ]) {
+    await assert.rejects(chain.quoteBatch(plan));
+    await assert.rejects(chain.transactionBatch(plan, quoted));
+  }
+  assert.equal(state.requests.length, 0, 'invalid plans fail before RPC reads');
+  state.balances.USDG = 4_749_999n;
+  await assert.rejects(chain.quoteBatch(buyBatch()), /Insufficient aggregate USDG/);
+  await assert.rejects(chain.transactionBatch(buyBatch(), quoted), /Insufficient aggregate USDG/);
+});
+
+test('all batch legs must remain tradable, quotable and unexpired before construction', async t => {
+  const { state, chain } = fixture(t);
+  const plan = buyBatch();
+  const quoted = await chain.quoteBatch(plan);
+  state.paused.add('AMZN');
+  await assert.rejects(chain.quoteBatch(plan), /paused for a corporate action: AMZN/);
+  await assert.rejects(chain.transactionBatch(plan, quoted), /paused for a corporate action: AMZN/);
+  state.paused.clear(); state.unquotable.add('NVDA');
+  await assert.rejects(chain.transactionBatch(plan, quoted), /No positive NVDA/);
+  state.unquotable.clear(); state.allowance = maxUint256; state.advanceAfterQuote = 61n;
+  await assert.rejects(chain.transactionBatch(plan, quoted), /deadline elapsed/);
+});
+
+test('batch input is copied before asynchronous reads so caller mutations cannot change its authorization', async t => {
+  const { state, chain } = fixture(t);
+  state.allowance = maxUint256;
+  const original = buyBatch();
+  const quotePending = chain.quoteBatch(original);
+  original.trades[0]!.amountIn = maxUint256;
+  original.trades.push(trade);
+  const quoted = await quotePending;
+  assert.equal(quoted.quotes.length, 4);
+  const plan = buyBatch();
+  const transactionPending = chain.transactionBatch(plan, quoted);
+  plan.trades[0]!.buyAssetId = 'RUN';
+  plan.trades.length = 0;
+  const tx = await transactionPending;
+  const decoded = decodeFunctionData({ abi: TRANSACTION_ABI, data: tx.data });
+  assert.equal(decoded.functionName, 'multicall');
+  if (decoded.functionName !== 'multicall') assert.fail();
+  assert.equal(decoded.args[1].length, 4);
 });

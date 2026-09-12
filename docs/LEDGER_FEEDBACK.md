@@ -73,3 +73,10 @@ Current public ERC-7730 data has no Robinhood-4663 entry for our router; the exi
 ## Device presence and failed USB writes — September 12
 
 The owner reported ineffective Retry despite a visible device. Request-journal timestamps established immediate dispatch, but public-account reads failed before any transaction prompt. Our narrow diagnostic allowlist had omitted the official Node HID `NodeHidSendReportError` tag, hiding the actionable layer. Adding that fixed tag and retaining explicit chart states corrected the application diagnostics. USB discovery alone did not establish command readiness; a later enumeration contained no Ledger device. No specific cable, firmware or hardware defect was established, and no physical connection fix is claimed from the UI tests.
+
+
+## Published CLI indexed-account discovery — September 12
+
+An owner-approved official CLI 2.1.0 account-discovery check initially reported a locked device. After the owner unlocked it, Ethereum discovery completed but returned only the first account, which differed from the funded account previously verified through the SDK at an indexed derivation path. The public discover command exposes network/output/device-timeout, with no account index, derivation path or gap-limit option. The source's scan stops at an unused account; a later funded indexed account can therefore be unreachable through this command. Quote inputs require discovered session labels, so we did not substitute the wrong address or fabricate a local session.
+
+Suggested improvement: expose an explicit account index/path or bounded empty-account scan option, and allow a public-address read-only quote without first requiring device discovery. This would make multi-account application comparisons reproducible without altering existing wallets. This observation concerns the published discovery/quote workflow, not a claim that Ethereum swaps or indexed hardware signing are unsupported. [Sanitized outcomes](evidence/ledger-mainnet-account-check-2026-09-12.json).

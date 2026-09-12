@@ -58,6 +58,12 @@ function fixture() {
     transaction: async () => {
       transactions++; return { to: wallet, data: '0x1234', value: 0n, kind: 'approval' };
     },
+    quoteBatch: async (plan: { trades: unknown[] }) => ({
+      quotes: await Promise.all(plan.trades.map(() => chain.quote())), blockNumber: 100n,
+    }),
+    transactionBatch: async (plan: { trades: unknown[] }) => ({
+      ...await chain.transaction(), swapCount: plan.trades.length, approvalCount: 1,
+    }),
   };
   return { chain: chain as unknown as Chain, sent, transactions: () => transactions };
 }

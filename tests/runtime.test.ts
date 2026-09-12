@@ -169,6 +169,8 @@ test('runtime failure alerts omit provider text, stop repeating after acknowledg
       },
       quote: async () => { throw new Error('Balanced fixture cannot quote'); },
       transaction: async () => { throw new Error('Fixture cannot prepare transactions'); },
+      async quoteBatch(plan) { return { quotes: await Promise.all(plan.trades.map(trade => this.quote(trade))), blockNumber: 1n }; },
+      async transactionBatch(plan, batch) { return this.transaction(plan.trades[0], batch.quotes[0]); },
     }) } });
     const runtime = await import(process.argv[2]);
     const notifications = await import(process.argv[3]);
@@ -278,7 +280,7 @@ test('monitor preserves a new stop before its first tick and disarms even after 
   assert.equal((await events())[0]?.type, 'rebalance-attention');
 });
 
-test('one cycle can complete four buys and their approvals, then persistent cooldown blocks later drift', async t => {
+test('graph permits multiple confirmed phases in one cycle, then persistent cooldown blocks later drift', async t => {
   let now = 2_000_000_000_000;
   t.mock.method(Date, 'now', () => now);
   const legs = ['TSLA', 'AAPL', 'NVDA', 'AMZN'].flatMap(stock => [
@@ -430,6 +432,8 @@ test('production tick bounds an approval by the active cycle and rejects expiry 
       snapshot: async () => ({ portfolio, nativeBalance: 1000000000000000000n, blockNumber: 100n, valuationNote: 'Local fixture' }),
       quote: async () => ({ amountOut: 1n, minimumOut: 1n, fee: 500, blockNumber: 100n }),
       transaction: async () => ({ to: wallet, data: '0x', value: 0n, kind: 'approval' }),
+      quoteBatch: async plan => ({ quotes: await Promise.all(plan.trades.map(trade => chain.quote(trade))), blockNumber: 100n }),
+      transactionBatch: async (plan, batch) => ({ ...await chain.transaction(plan.trades[0], batch.quotes[0]), swapCount: plan.trades.length, approvalCount: 1 }),
     };
     mock.module(process.argv[2], { namedExports: { createChain: () => chain } });
     const configModule = await import(process.argv[1]);
@@ -538,6 +542,8 @@ test('recovery preserves the remaining attempt window and does not impose an hou
       },
       quote: async () => { throw new Error('Balanced fixture must not quote'); },
       transaction: async () => { throw new Error('Recovery must never prepare a new trade'); },
+      async quoteBatch(plan) { return { quotes: await Promise.all(plan.trades.map(trade => this.quote(trade))), blockNumber: 101n }; },
+      async transactionBatch(plan, batch) { return this.transaction(plan.trades[0], batch.quotes[0]); },
     }) } });
     configModule = await import(process.argv[2]);
     const runtime = await import(process.argv[3]);

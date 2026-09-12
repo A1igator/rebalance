@@ -1,0 +1,34 @@
+{
+  "checkedOn": "2026-09-12",
+  "cliVersion": "2.1.0",
+  "network": "ethereum:main",
+  "fundingCheck": {
+    "chainId": 1,
+    "blockNumber": "25964554",
+    "intendedAccountHasUsdc": true,
+    "intendedAccountHasNativeEth": true
+  },
+  "firstDiscovery": {
+    "exitCode": 6,
+    "outcome": "locked",
+    "transactionRequested": false
+  },
+  "afterOwnerUnlock": {
+    "timestamp": "2026-09-12T23:21:21.510Z",
+    "exitCode": 0,
+    "outcome": "success",
+    "accountCount": 1,
+    "matchedIntendedAccount": false
+  },
+  "limitation": "Published account discover has no index/path option; discovery stopped before the intended indexed account. Do not substitute the different returned account.",
+  "quoteRequested": false,
+  "transactionSigned": false,
+  "transactionSubmitted": false,
+  "applicationNetworkChanged": false,
+  "isolation": "Official binary, temporary XDG state, serialized with the existing local device mutex. Built-in CLI analytics were disclosed and approved.",
+  "redactions": [
+    "wallet addresses",
+    "local session state",
+    "raw CLI output"
+  ]
+}

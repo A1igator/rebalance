@@ -250,6 +250,25 @@ test('receipt progress stays in the center and a pending swap uses only a ghost 
   page.hide();
 });
 
+test('a pending batch names its swap count without pretending any holdings have settled', async () => {
+  const page = await browser();
+  const hash = `0x${'b'.repeat(64)}`;
+  const before = page.element('arcs').children.map(child => child.attrs.d);
+  const trades = ['AAPL', 'AMD', 'MSFT', 'NVDA'].map(buyAssetId => ({
+    sellAssetId: 'USDG', buyAssetId, amountIn: '1187500', reason: 'Prepared buy',
+  }));
+  page.source.send({ ...current, operation: { status: 'pending', kind: 'swap', hash },
+    proposal: { trades, reason: 'Buy four underweight assets' } });
+  assert.equal(page.element('c-state').textContent, 'Rebalancing');
+  assert.equal(page.element('c-sub').textContent, '4 swaps in one transaction');
+  assert.equal(page.element('c-val').textContent, 'Waiting for receipt');
+  assert.deepEqual(page.element('arcs').children.map(child => child.attrs.d), before);
+  page.source.send({ ...current, operation: { status: 'pending', kind: 'swap', hash },
+    proposal: { trades: [trades[0]], reason: 'One remaining purchase' } });
+  assert.equal(page.element('c-sub').textContent, 'USDG → AAPL');
+  page.hide();
+});
+
 test('a target with no holdings still gets its own target slice', async () => {
   const page = await browser();
   const positions = current.portfolio.positions.map(p => ({ ...p, weightBps: p.id === 'AAPL' ? 10000 : 0 }));

@@ -130,3 +130,34 @@ test('a backward clock, delayed observation or invalid date cannot look like a f
     assert.equal(check.state, 'unavailable'); assert.equal(check.observedAt, null);
   }
 });
+
+
+test('a four-swap multicall counts actual transaction gas once and no already-covered legs', async () => {
+  const batch = await checkRebalanceFee({ ...input, swaps: 4, gas: 400_000n,
+    swapsInCurrentTransaction: 4, remainingApprovals: 0 }, dependencies);
+  assert.equal(batch.estimatedUsdE8, '60000000');
+  const approval = await checkRebalanceFee({ ...input, swaps: 4, kind: 'approval', gas: 70_000n,
+    swapsInCurrentTransaction: 0, remainingApprovals: 0 }, dependencies);
+  // Until allowance exists the swap cannot be simulated normally. Retain a
+  // conservative sum of four measured swap references, with no extra approvals.
+  assert.equal(approval.estimatedUsdE8, '132025200');
+  const legacy = await checkRebalanceFee({ ...input, swaps: 4, kind: 'approval', gas: 70_000n }, dependencies);
+  assert.ok(BigInt(approval.estimatedUsdE8!) < BigInt(legacy.estimatedUsdE8!));
+});
+
+test('a sell batch still reserves gas for all projected later purchases and their approvals', async () => {
+  const batch = await checkRebalanceFee({ ...input, swaps: 5, gas: 300_000n,
+    swapsInCurrentTransaction: 2, remainingApprovals: 3 }, dependencies);
+  const gas = 300_000n + 3n * 202_542n + 3n * 69_572n;
+  assert.equal(batch.estimatedUsdE8, (gas * 150n).toString());
+});
+
+test('invalid batch coverage cannot omit required swap gas or issue a fee-price request', async () => {
+  const fetch: typeof globalThis.fetch = async () => assert.fail('Invalid batch must fail locally');
+  for (const patch of [
+    { swapsInCurrentTransaction: 0 }, { swapsInCurrentTransaction: 4 },
+    { swapsInCurrentTransaction: 1.5 }, { swapsInCurrentTransaction: NaN },
+    { kind: 'approval' as const, swapsInCurrentTransaction: 1 },
+    { remainingApprovals: -1 }, { remainingApprovals: 17 }, { remainingApprovals: 0.5 },
+  ]) await assert.rejects(checkRebalanceFee({ ...input, ...patch }, { ...dependencies, fetch }), /batch fee counts/);
+});

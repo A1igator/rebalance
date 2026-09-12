@@ -9,21 +9,21 @@ export const GRAPH = {
 } as const;
 export type Node = keyof typeof GRAPH;
 export type GraphState = { node: Node; trace: Node[] };
-export type GraphDependencies = {
+export type GraphDependencies<Plan extends { reason: string } = TradePlan> = {
   configured(): Promise<boolean>;
   reconcile(): Promise<{ blocked: boolean; operation: Operation | null }>;
   recover?(): Promise<{ blocked: boolean; operation: Operation | null } | null>;
   observe(): Promise<Portfolio>;
-  plan(portfolio: Portfolio): TradePlan | null | Promise<TradePlan | null>;
+  plan(portfolio: Portfolio): Plan | null | Promise<Plan | null>;
   interval(): Promise<Operation | null>;
-  quote(trade: TradePlan): Promise<unknown>;
-  execute(trade: TradePlan, quote: unknown): Promise<Operation>;
+  quote(trade: Plan): Promise<unknown>;
+  execute(trade: Plan, quote: unknown): Promise<Operation>;
   publish(graph: GraphState, operation: Operation | null): Promise<void>;
   canExecute: boolean;
 };
 
 /** One traversal of the graph. The timer only schedules the next traversal. */
-export async function runGraph(deps: GraphDependencies): Promise<GraphState> {
+export async function runGraph<Plan extends { reason: string } = TradePlan>(deps: GraphDependencies<Plan>): Promise<GraphState> {
   const trace: Node[] = [];
   let operation: Operation | null = null;
   const enter = async (node: Node) => {

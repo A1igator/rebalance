@@ -13,7 +13,7 @@ import {
   type Address,
   type Hex,
 } from "viem";
-import { evaluatePortfolio, type Portfolio, type TradePlan } from "./core.ts";
+import { evaluatePortfolio, type Portfolio, type TradePlan, type RebalancePlan } from "./core.ts";
 import { ASSETS } from "./assets.ts";
 export { ASSETS } from "./assets.ts";
 
@@ -53,6 +53,8 @@ export type RouteQuote = {
   blockNumber: bigint;
 };
 
+export type BatchQuote = { quotes: RouteQuote[]; blockNumber: bigint };
+
 export type ChainTransaction = {
   to: Address;
   data: Hex;
@@ -60,6 +62,10 @@ export type ChainTransaction = {
   kind: "approval" | "swap" | "wrap";
   /** Swap or active-cycle deadline; dispatch rechecks it before signing/sending. */
   expiresAt?: bigint;
+  /** Number of inner swaps in this phase (planned swaps for an approval). */
+  swapCount?: number;
+  /** Deficient input-token approvals still required, including this approval. */
+  approvalCount?: number;
 };
 
 // Official ABI sources:
@@ -366,5 +372,83 @@ export function createChain(config: ChainConfig) {
     };
   }
 
-  return { publicClient, snapshot, quote, transaction };
+  function validatedBatch(plan: RebalancePlan): TradePlan[] {
+    if (!plan || !Array.isArray(plan.trades) || plan.trades.length === 0 || plan.trades.length > 4) {
+      throw new Error("A rebalance batch requires one to four distinct stock trades");
+    }
+    const stocks = new Set<string>();
+    let phase: boolean | undefined;
+    const inputs = new Map<string, bigint>();
+    return plan.trades.map(candidate => {
+      if (!candidate || typeof candidate !== "object") throw new Error("Invalid rebalance trade");
+      const trade = { ...candidate };
+      const { sell, buy } = assetsFor(trade, assetList);
+      const buying = sell.id === "USDG";
+      const stock = buying ? buy.id : sell.id;
+      if (stocks.has(stock)) throw new Error("A rebalance batch may use each stock pool only once");
+      if (phase !== undefined && phase !== buying) throw new Error("Sales and purchases require separate rebalance batches");
+      stocks.add(stock); phase = buying;
+      inputs.set(sell.id, amount((inputs.get(sell.id) ?? 0n) + trade.amountIn, "Aggregate batch input"));
+      return trade;
+    });
+  }
+
+  async function batchState(trades: TradePlan[], block: Header) {
+    const inputs = new Map<string, { asset: Asset; amountIn: bigint }>();
+    for (const trade of trades) {
+      const { sell } = assetsFor(trade, assetList);
+      const amountIn = amount((inputs.get(sell.id)?.amountIn ?? 0n) + trade.amountIn, "Aggregate batch input");
+      inputs.set(sell.id, { asset: sell, amountIn });
+    }
+    await Promise.all([
+      ...[...inputs.values()].map(async ({ asset, amountIn }) => {
+        if (amountIn > await tokenBalance(asset, block.number)) throw new Error(`Insufficient aggregate ${asset.id} balance`);
+      }),
+      ...trades.map(trade => requireTradable(trade, block.number)),
+    ]);
+    fresh(block);
+    return [...inputs.values()];
+  }
+
+  async function quoteBatch(plan: RebalancePlan): Promise<BatchQuote> {
+    const trades = validatedBatch(plan);
+    const block = await header();
+    await batchState(trades, block);
+    const quotes = await Promise.all(trades.map(trade => quoteAt(trade, block)));
+    fresh(block);
+    return { quotes, blockNumber: block.number };
+  }
+
+  async function transactionBatch(plan: RebalancePlan, _previous: BatchQuote): Promise<ChainTransaction> {
+    const trades = validatedBatch(plan);
+    const block = await header();
+    const inputs = await batchState(trades, block);
+    const [current, allowances] = await Promise.all([
+      Promise.all(trades.map(trade => quoteAt(trade, block))),
+      Promise.all(inputs.map(async input => ({ ...input, allowance: amount(await publicClient.readContract({
+        address: input.asset.address, abi: erc20Abi, functionName: "allowance", args: [wallet, ROUTER], blockNumber: block.number,
+      }), "Router allowance", true) }))),
+    ]);
+    fresh(block);
+    const deficient = allowances.filter(({ allowance, amountIn }) => allowance < amountIn);
+    if (deficient.length) {
+      const first = deficient[0]!;
+      return { to: first.asset.address, value: 0n, kind: "approval", swapCount: trades.length, approvalCount: deficient.length,
+        data: encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: [ROUTER, first.amountIn] }) };
+    }
+    const deadline = block.timestamp + deadlineSeconds;
+    if (deadline <= BigInt(Math.floor(Date.now() / 1000))) throw new Error("Swap deadline elapsed while quoting; retry from a fresh block");
+    const swaps = trades.map((trade, index) => {
+      const { sell, buy } = assetsFor(trade, assetList);
+      const route = current[index]!;
+      return encodeFunctionData({ abi: ROUTER_ABI, functionName: "exactInputSingle", args: [{
+        tokenIn: sell.address, tokenOut: buy.address, fee: route.fee, recipient: wallet,
+        amountIn: trade.amountIn, amountOutMinimum: route.minimumOut, sqrtPriceLimitX96: 0n,
+      }] });
+    });
+    return { to: ROUTER, value: 0n, kind: "swap", expiresAt: deadline, swapCount: trades.length, approvalCount: 0,
+      data: encodeFunctionData({ abi: ROUTER_ABI, functionName: "multicall", args: [deadline, swaps] }) };
+  }
+
+  return { publicClient, snapshot, quote, transaction, quoteBatch, transactionBatch };
 }

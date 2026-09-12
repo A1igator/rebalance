@@ -1,5 +1,5 @@
 import { ASSETS, QUOTE_ASSET_ID } from './assets.js';
-import { evaluatePortfolio, planTrade, type AssetPosition, type Portfolio } from './core.js';
+import { evaluatePortfolio, planRebalance, type AssetPosition, type Portfolio } from './core.js';
 import type { Config } from './config.js';
 import type { Status } from './runtime.js';
 
@@ -41,7 +41,7 @@ function withinThreshold(portfolio: Portfolio, threshold: number): boolean {
 }
 
 /**
- * Display-only fixed-price projection of the existing planner's sequential legs.
+ * Display-only fixed-price projection of the phase planner's inner swap legs.
  * This never quotes a route, forecasts slippage/corporate actions, or executes a
  * transaction. Preserve the observation's age and identity for UI invalidation.
  */
@@ -98,17 +98,21 @@ export function projectSwapCount(input: AssetPosition[], threshold: number): num
     const positions = input.map(position => ({ ...position }));
     let portfolio = evaluatePortfolio(positions);
     if (portfolio.totalUsdE8 <= 0n) return null;
-    for (let swaps = 0; swaps <= MAX_SWAPS; swaps++) {
-      const trade = planTrade(portfolio, QUOTE_ASSET_ID, threshold);
-      if (!trade) return withinThreshold(portfolio, threshold) ? swaps : null;
-      if (swaps === MAX_SWAPS) return null;
-      const sell = positions.find(position => position.id === trade.sellAssetId)!;
-      const buy = positions.find(position => position.id === trade.buyAssetId)!;
-      if (!sell || !buy || sell === buy || trade.amountIn <= 0n || trade.amountIn > sell.balance) return null;
-      const amountOut = trade.amountIn * sell.priceUsdE8 * 10n ** BigInt(buy.decimals) /
-        (10n ** BigInt(sell.decimals) * buy.priceUsdE8);
-      if (amountOut <= 0n || buy.balance + amountOut > MAX_UINT256) return null;
-      sell.balance -= trade.amountIn; buy.balance += amountOut;
+    let swaps = 0;
+    while (swaps <= MAX_SWAPS) {
+      const plan = planRebalance(portfolio, QUOTE_ASSET_ID, threshold);
+      if (!plan) return withinThreshold(portfolio, threshold) ? swaps : null;
+      if (swaps + plan.trades.length > MAX_SWAPS) return null;
+      for (const trade of plan.trades) {
+        const sell = positions.find(position => position.id === trade.sellAssetId)!;
+        const buy = positions.find(position => position.id === trade.buyAssetId)!;
+        if (!sell || !buy || sell === buy || trade.amountIn <= 0n || trade.amountIn > sell.balance) return null;
+        const amountOut = trade.amountIn * sell.priceUsdE8 * 10n ** BigInt(buy.decimals) /
+          (10n ** BigInt(sell.decimals) * buy.priceUsdE8);
+        if (amountOut <= 0n || buy.balance + amountOut > MAX_UINT256) return null;
+        sell.balance -= trade.amountIn; buy.balance += amountOut;
+      }
+      swaps += plan.trades.length;
       portfolio = evaluatePortfolio(positions);
       if (portfolio.totalUsdE8 <= 0n) return null;
     }

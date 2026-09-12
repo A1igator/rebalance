@@ -152,6 +152,22 @@ async function requireDispatchReady(tx: ChainTransaction): Promise<void> {
 
 export type FeeContext = { swaps: number | null; onCheck(check: FeeCheck): Promise<void> };
 
+/** Count current phase gas once; future phases retain one approval per leg. */
+function batchFeeCounts(tx: ChainTransaction, swaps: number): {
+  swapsInCurrentTransaction?: number; remainingApprovals?: number;
+} {
+  if (tx.swapCount === undefined && tx.approvalCount === undefined) return {};
+  if (!Number.isInteger(tx.swapCount) || tx.swapCount! < 1 || tx.swapCount! > swaps || tx.swapCount! > 4 ||
+      !Number.isInteger(tx.approvalCount) || tx.approvalCount! < 0 || tx.approvalCount! > tx.swapCount! ||
+      (tx.kind === 'swap' ? tx.approvalCount !== 0 : tx.kind !== 'approval' || tx.approvalCount! < 1)) {
+    throw new Error('Invalid prepared rebalance batch counts');
+  }
+  return {
+    swapsInCurrentTransaction: tx.kind === 'swap' ? tx.swapCount : 0,
+    remainingApprovals: tx.approvalCount! - (tx.kind === 'approval' ? 1 : 0) + swaps - tx.swapCount!,
+  };
+}
+
 /** Passive Ledger fee assessment: public calls only, without loading a signer. */
 export async function readRebalanceFee(config: Config, chain: Chain, tx: ChainTransaction, swaps: number | null): Promise<FeeCheck> {
   if (config.rebalanceFeeTargetUsdE8 === undefined) throw new Error('No fee target configured');
@@ -166,7 +182,7 @@ export async function readRebalanceFee(config: Config, chain: Chain, tx: ChainTr
     if (typeof gasEstimate !== 'bigint' || typeof suggestedPrice !== 'bigint' || gasEstimate <= 0n || suggestedPrice <= 0n) return unavailable;
     const gas = (gasEstimate * 120n + 99n) / 100n;
     const gasPrice = (suggestedPrice * 120n + 99n) / 100n;
-    return await checkRebalanceFee({ targetUsdE8: config.rebalanceFeeTargetUsdE8, swaps, kind: tx.kind, gas, gasPrice });
+    return await checkRebalanceFee({ targetUsdE8: config.rebalanceFeeTargetUsdE8, swaps, kind: tx.kind, gas, gasPrice, ...batchFeeCounts(tx, swaps) });
   } catch { return unavailable; }
 }
 
@@ -236,7 +252,7 @@ export async function dispatch(config: Config, chain: Chain, tx: ChainTransactio
     if (gasPrice >= 2n ** 256n) throw new Error('Buffered gas price exceeds uint256; no transaction was signed');
     if (config.rebalanceFeeTargetUsdE8 !== undefined) {
       if (tx.kind !== 'approval' && tx.kind !== 'swap') throw new Error('Fee targets cover rebalance approvals and swaps only; no transaction was signed');
-      feeInput = { targetUsdE8: config.rebalanceFeeTargetUsdE8, swaps: fees!.swaps!, kind: tx.kind, gas, gasPrice };
+      feeInput = { targetUsdE8: config.rebalanceFeeTargetUsdE8, swaps: fees!.swaps!, kind: tx.kind, gas, gasPrice, ...batchFeeCounts(tx, fees!.swaps!) };
       await ready();
     }
     const balance = await rpc.getBalance({ address: config.wallet, blockTag: 'pending' });

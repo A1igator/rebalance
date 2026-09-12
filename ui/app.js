@@ -357,9 +357,11 @@
       sub = "Receipt recovery required";
     } else if (receiptWait) {
       const plan = snapshot?.proposal;
+      const firstTrade = plan?.trades?.[0] ?? plan;
       state = kind === "approval" ? "Approval pending" : "Rebalancing";
       sub = kind === "approval" ? "Token spending approval"
-        : plan?.sellAssetId && plan?.buyAssetId ? `${plan.sellAssetId} \u2192 ${plan.buyAssetId}` : `${transaction} in progress`;
+        : Array.isArray(plan?.trades) && plan.trades.length > 1 ? `${plan.trades.length} swaps in one transaction`
+        : firstTrade?.sellAssetId && firstTrade?.buyAssetId ? `${firstTrade.sellAssetId} \u2192 ${firstTrade.buyAssetId}` : `${transaction} in progress`;
       // Mid-trade, how the send is going matters more than the portfolio total.
       value = receiptWait;
     } else if (snapshot?.operation?.status === "configuration-changed") {
@@ -418,8 +420,11 @@
     drawLabels(entries, deviation?.outside);
 
     // Motion reports settlement: an unconfirmed swap gets a ghost, never a moved arc.
-    const moving = receiptWait && kind === "swap" ? snapshot?.proposal?.sellAssetId : null;
-    for (const [id, arc] of arcStore) arc.classList.toggle("active", id === moving);
+    const movingIds = receiptWait && kind === "swap"
+      ? (snapshot?.proposal?.trades ?? [snapshot?.proposal]).filter(Boolean).map(trade => trade.sellAssetId)
+      : [];
+    const moving = movingIds.length === 1 ? movingIds[0] : null;
+    for (const [id, arc] of arcStore) arc.classList.toggle("active", movingIds.includes(id));
     const ghost = byId("ghost");
     const ghostTarget = moving !== null && moving !== undefined && funded && Object.hasOwn(targetMap, moving) ? moving : null;
     if (ghostTarget) {

@@ -90,6 +90,8 @@ const chain = {
  },
  quote:async()=>{quotes++; if(scenario==='quote-failed') throw new Error('Quote fixture failed'); if(scenario==='config-changed') await storage.atomicWriteJson(configModule.CONFIG_PATH,{...config,slippageBps:75}); return {amountOut:1n,minimumOut:1n,fee:500,blockNumber:102n};},
  transaction:async()=>({to:account.address,data:approvalDone?'0x02':'0x01',value:0n,kind:approvalDone?'swap':'approval'}),
+ quoteBatch:async plan=>({quotes:await Promise.all(plan.trades.map(trade=>chain.quote(trade))),blockNumber:102n}),
+ transactionBatch:async(plan,batch)=>({...await chain.transaction(plan.trades[0],batch.quotes[0]),swapCount:plan.trades.length,approvalCount:approvalDone?0:1}),
 };
 let ledger=new request.LedgerExecution();
 const presence={connected:scenario!=='disconnected',revision:1};

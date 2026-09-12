@@ -23,6 +23,11 @@ export type TradePlan = {
   reason: string;
 };
 
+export type RebalancePlan = {
+  trades: TradePlan[];
+  reason: string;
+};
+
 const BPS = 10_000n;
 
 function compareIds(a: string, b: string): number {
@@ -232,4 +237,58 @@ export function planTrade(
     };
   }
   return null;
+}
+
+
+/**
+ * Plan one atomic phase: sell overweight assets first, then use a later fresh
+ * observation to buy with cash actually held. Never budget hypothetical proceeds.
+ */
+export function planRebalance(
+  portfolio: Portfolio,
+  quoteAssetId: string,
+  driftThresholdBps: number,
+): RebalancePlan | null {
+  checkBps(driftThresholdBps, "Drift threshold");
+  checkId(quoteAssetId);
+  const current = evaluatePortfolio(portfolio.positions);
+  if (current.positions.length === 0) return null;
+  const quote = current.positions.find(({ id }) => id === quoteAssetId);
+  if (!quote) throw new Error(`Unknown quote asset ID: ${quoteAssetId}`);
+  if (current.totalUsdE8 === 0n) return null;
+  const deviations = current.positions.map(position => ({
+    position,
+    delta: position.valueUsdE8 * BPS - current.totalUsdE8 * BigInt(position.targetBps),
+  }));
+  const threshold = current.totalUsdE8 * BigInt(driftThresholdBps);
+  if (!deviations.some(({ delta }) => (delta < 0n ? -delta : delta) > threshold)) return null;
+  const largestFirst = (a: typeof deviations[number], b: typeof deviations[number]): number => {
+    const left = a.delta < 0n ? -a.delta : a.delta;
+    const right = b.delta < 0n ? -b.delta : b.delta;
+    return left === right ? compareIds(a.position.id, b.position.id) : left > right ? -1 : 1;
+  };
+  const sells: TradePlan[] = [];
+  for (const { position, delta } of deviations.filter(({ position, delta }) => position.id !== quoteAssetId && delta > 0n).sort(largestFirst)) {
+    const correction = (delta * 10n ** BigInt(position.decimals)) / (BPS * position.priceUsdE8);
+    const amountIn = correction < position.balance ? correction : position.balance;
+    if (amountIn === 0n || estimatedOutput(amountIn, position, quote) === 0n) continue;
+    sells.push({ sellAssetId: position.id, buyAssetId: quoteAssetId, amountIn,
+      reason: `Sell overweight ${position.symbol} into ${quote.symbol}` });
+  }
+  if (sells.length) return { trades: sells, reason: `Sell ${sells.length} overweight asset${sells.length === 1 ? "" : "s"} into ${quote.symbol}` };
+  const surplus = deviations.find(({ position }) => position.id === quoteAssetId)!.delta;
+  if (surplus <= 0n) return null;
+  const available = (surplus * 10n ** BigInt(quote.decimals)) / (BPS * quote.priceUsdE8);
+  const budget = available < quote.balance ? available : quote.balance;
+  if (budget === 0n) return null;
+  const deficits = deviations.filter(({ position, delta }) => position.id !== quoteAssetId && delta < 0n).sort(largestFirst);
+  if (!deficits.length) return null;
+  const portions = apportion(budget, deficits.map(({ position, delta }) => ({ id: position.id, weight: -delta })));
+  const buys = deficits.flatMap(({ position }): TradePlan[] => {
+    const amountIn = portions.get(position.id)!;
+    if (amountIn === 0n || estimatedOutput(amountIn, quote, position) === 0n) return [];
+    return [{ sellAssetId: quoteAssetId, buyAssetId: position.id, amountIn,
+      reason: `Buy underweight ${position.symbol} with excess ${quote.symbol}` }];
+  });
+  return buys.length ? { trades: buys, reason: `Buy ${buys.length} underweight asset${buys.length === 1 ? "" : "s"} with excess ${quote.symbol}` } : null;
 }
