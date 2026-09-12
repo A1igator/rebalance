@@ -230,6 +230,25 @@ export function ledgerContextWithoutReports(context: ContextModule): ContextModu
   };
 }
 
+type LedgerContextOptions = ConstructorParameters<typeof import('@ledgerhq/context-module').ContextModuleBuilder>[0];
+type LedgerContextChain = import('@ledgerhq/context-module').ContextModuleChainID;
+type LedgerContextBuilder = new (options: LedgerContextOptions) => {
+  setChain(chain: LedgerContextChain): { build(): ContextModule };
+};
+
+/** Runtime credentials belong on our custom context, not the overridden signer default. */
+export function buildLedgerContext(Builder: LedgerContextBuilder, chain: LedgerContextChain,
+  loggerFactory: LedgerContextOptions['loggerFactory'], originToken = process.env.LEDGER_ORIGIN_TOKEN): ContextModule {
+  // Treat an explicitly empty or malformed header as a setup error; never echo it.
+  // Leave absent credentials optional for public account onboarding/discovery.
+  if (originToken !== undefined && !/^[\x21-\x7e]+$/.test(originToken)) {
+    throw new Error('LEDGER_ORIGIN_TOKEN must be a nonempty token without whitespace or control characters.');
+  }
+  const context = new Builder({ loggerFactory, ...(originToken === undefined ? {} : { originToken }) })
+    .setChain(chain).build();
+  return ledgerContextWithoutReports(context);
+}
+
 function loadNativeSdk(): LedgerSdk {
   // These pinned packages publish Node-compatible CJS exports; their ESM files
   // contain extensionless imports. Native modules stay unloaded on other paths.
@@ -262,11 +281,9 @@ function loadNativeSdk(): LedgerSdk {
       close: () => closing ??= closeLedgerSdk(() => dmk.close(), () => transport?.destroy()),
     },
     signer: sessionId => {
-      const context = new ContextModuleBuilder({
-        loggerFactory: tag => dmk.getLoggerFactory()(['ContextModule', tag]),
-      }).setChain(ContextModuleChainID.Ethereum).build();
-      return new SignerEthBuilder({ dmk, sessionId })
-        .withContextModule(ledgerContextWithoutReports(context)).build();
+      const context = buildLedgerContext(ContextModuleBuilder, ContextModuleChainID.Ethereum,
+        tag => dmk.getLoggerFactory()(['ContextModule', tag]));
+      return new SignerEthBuilder({ dmk, sessionId }).withContextModule(context).build();
     },
   };
 }

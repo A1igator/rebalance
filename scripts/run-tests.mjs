@@ -10,7 +10,7 @@ const temporaryRoot = await realpath(process.platform === 'win32' ? tmpdir() : '
 const directory = await mkdtemp(join(temporaryRoot, 'rebalance-tests-'));
 const environment = { ...process.env, REBALANCE_ROOT_DIR: directory, REBALANCE_DATA_DIR: directory, TMPDIR: directory, TMP: directory, TEMP: directory };
 // Host portfolio selection and credentials never become test defaults.
-for (const name of ['REBALANCE_PRIVATE_KEY', 'REBALANCE_ALCHEMY_API_KEY', 'REBALANCE_PROFILE_WALLET', 'REBALANCE_PROFILE_PINNED',
+for (const name of ['REBALANCE_PRIVATE_KEY', 'REBALANCE_ALCHEMY_API_KEY', 'LEDGER_ORIGIN_TOKEN', 'REBALANCE_PROFILE_WALLET', 'REBALANCE_PROFILE_PINNED',
   'REBALANCE_CHART_PORT', 'REBALANCE_SESSION_ID', 'CODEX_THREAD_ID', 'CLAUDE_CODE_SESSION_ID', 'NODE_OPTIONS', 'NODE_TEST_CONTEXT']) delete environment[name];
 let child;
 let interrupted;

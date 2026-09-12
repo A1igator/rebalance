@@ -2,7 +2,7 @@
 
 The initial request-driven integration was implemented September 10, 2026 under [prompt 053](prompts/053-ledger-execution.md). [Prompt 075](prompts/075-ledger-direct-device-validation.md), committed as `920f337` before implementation on September 12, changes the normal workflow to direct backend preparation and device prompts. The integration uses the existing pinned Ledger DMK 1.9.0, Node HID transport 1.0.1, Ethereum Signer Kit 1.18.0 and Context Module 2.5.0 on Robinhood mainnet, chain ID 4663.
 
-Physical address onboarding succeeded on the owner's Nano Gen5. The first live rebalance request ended unavailable before a transaction hash was recorded; the owner saw no device prompt. A separate read-only SDK address check succeeded for the selected verified account. Transaction signing, actual display, Clear Signing, rejection and swap evidence remain unverified. Unit fixtures and public-account reads do not establish those outcomes.
+Physical address onboarding succeeded on the owner's Nano Gen5. The first live request ended unavailable without a prompt or recorded transaction hash. A later backend request reached the Signer Kit transaction-signing step; the owner saw a transaction and “transaction check unavailable.” That attempt ended cancelled with no pending or last-transaction record. Readable token/amount/spender/network display, a completed signature and swap receipt remain unverified. Neither public-account reads nor isolated fixtures establish Clear Signing.
 
 ## Using an existing Ledger portfolio
 
@@ -36,9 +36,23 @@ Viem serializes the exact prepared legacy transaction for chain 4663. The device
 
 Ledger uses normal receipt reconciliation with two observed confirmations. It never signs an automatic same-nonce cancellation. An unresolved hash remains a receipt barrier; a mined reverted transaction retains its record for the existing explicit receipt-recovery workflow (`acknowledge-revert` after verified onchain failure). Another `ledger rebalance` request alone does not clear that barrier. Routine raw-key/Privy recovery is unchanged.
 
+## Transaction Check credentials and readable display
+
+**Transaction Check** is Ledger's transaction threat-screening service. **Clear Signing** renders trusted transaction details on the device. A successful check does not by itself prove readable display, and an unavailable check does not by itself prove that the transaction was blind-signed.
+
+[Ledger's wallet integration guide](https://developers.ledger.com/docs/clear-signing/for-wallets) requires a Ledger-issued application `originToken` for its security services. Under [prompt 076](prompts/076-ledger-transaction-check.md), the custom Context Module now accepts `LEDGER_ORIGIN_TOKEN` from the runtime environment. It must reach this custom builder; setting it only on the Signer Kit's default builder would be overridden. An absent token leaves the existing public-account path available. An explicitly blank or malformed header value fails context construction without echoing the value. The app does not manufacture a token, hide a warning or enable a signing fallback.
+
+Obtain an application token through the partner-program form linked in the guide or ask the [official ETHOnline Ledger support group](https://t.me/LedgerETHGlobal). Confirm Transaction Check coverage for Robinhood chain **4663**, plus trusted token/contract metadata for USDG approvals and the project's Uniswap swaps. The pinned SDK accepts numeric chain IDs in check requests; that is not evidence of server coverage. No Ledger-issued token was supplied or tested in this task.
+
+Supply the token locally as `LEDGER_ORIGIN_TOKEN` to the process that launches the Ledger monitor. Never put the value in chat, source control, portfolio JSON, URLs or logs. There is no automatic `.env` loader for this setting. An existing companion server and monitor keep their startup environment: exporting a variable in another shell, then clicking Start in the old companion, will not propagate it. Reload the relevant launcher/companion with the token environment before starting the next test. Token presence only authenticates the integration; it does not certify contracts or guarantee chain support.
+
+Suggested support request (not sent):
+
+> We are building Rebalance for ETHOnline using DMK 1.9.0, Ethereum Signer Kit 1.18.0 and Context Module 2.5.0 on Robinhood mainnet, chain 4663. Our Nano Gen5 shows “transaction check unavailable.” Can you issue a Rebalance originToken and confirm Transaction Check and trusted Clear Signing metadata support for USDG approvals and Uniswap V3 swaps on this chain?
+
 ## Display, network and sponsor evidence
 
-Metadata/context resolution uses the official Context Module. Signing report/analytics methods are replaced with no-ops; metadata requests can still contact Ledger infrastructure and expose the chain/contract/selector needed for resolution. RPC remains an external trust dependency. No consensus-verifying light client or Key Ring credential broker is introduced by this change.
+Metadata/context resolution uses the official Context Module. Signing report/analytics methods are replaced with no-ops; metadata requests still contact Ledger infrastructure. Transaction Check sends the sender, unsigned serialized transaction and chain ID to Ledger's service; metadata resolution also exposes the chain/contract/selector needed for display. Disabling reports does not disable these service requests. RPC remains an external trust dependency. No consensus-verifying light client or Key Ring credential broker is introduced by this change.
 
 The pinned Signer Kit can announce a fallback after a failed signing path; the adapter cancels that second attempt instead of silently reopening it. This does not prove transactions are Clear Signed. Actual device wording, token metadata and Robinhood contract support must be checked on the physical screen. No blind-signing setting, credential, device app installation or firmware change is made automatically. No session keys, unattended hardware signing or raw-key fallback are introduced.
 

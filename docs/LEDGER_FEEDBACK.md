@@ -1,6 +1,6 @@
 # Ledger tooling and documentation feedback
 
-**Status: physical address onboarding verified; transaction wiring implemented, with live transaction/display evidence pending.** No external feedback submission is claimed.
+**Status: physical address onboarding verified; a live backend request reached the transaction prompt with “transaction check unavailable.” Completed signing, readable display and swap evidence remain pending.** No external feedback submission is claimed.
 
 The initial September 4 deferral ended when the Nano Gen5 arrived. Keep address verification, isolated signing fixtures and actual mainnet signing evidence separate; the raw-key backend does not establish Ledger execution.
 
@@ -51,3 +51,12 @@ Before this change, physical address verification succeeded for the selected ind
 Fixed diagnostics now distinguish connection, anchor/account reads, signing/context steps, signature verification and cleanup. They retain allowlisted SDK steps/error categories, APDU status codes and network status/timeout fields, without arbitrary provider messages, URLs, context payloads, signatures or transaction bytes. This is intended to make the next actual device attempt diagnosable without enabling SDK logs or blind-sign fallback.
 
 Pinned Node HID 1.0.1 source review identified two lifecycle hazards: its discovered-device BehaviorSubject starts with a synthetic empty list, and its destroy/exit cleanup removes all listeners from the shared USB emitter. The app now treats initial emptiness as unknown until that listener has observed a device, and uses a guarded per-instance lifecycle adapter that removes only callbacks installed by that transport. Eight injected lifecycle tests cover monitor/signer coexistence, teardown and failure paths. This is a compatibility seam against the pinned emitted private method/controller, not a new official SDK API or live reconnect proof. A supported per-transport disposal API and discovery-initialization signal would remove the need for these adaptations.
+
+
+## Transaction Check prerequisite — September 12
+
+The owner reported a transaction prompt with “transaction check unavailable” on Nano Gen5. The backend reached `signer.eth.steps.signTransaction`; the attempt ended cancelled, with no pending or last-transaction record. Cancellation does not establish whether the user rejected it or the prompt expired. No completed signature, broadcast receipt or readable token/amount/spender/network display was established.
+
+Our custom Context Module omitted `originToken`. This was an application integration omission: [Ledger's wallet guide](https://developers.ledger.com/docs/clear-signing/for-wallets) and [custom-context migration example](https://developers.ledger.com/docs/device-interaction/dmk-ts/integration/migrations/signers/eth/1_3_3_to_1_4_0) document the credential. Runtime wiring is now implemented, but no actual token is available. The pinned Context Module 2.5.0 substitutes an empty token and omits `X-Ledger-Client-Origin`; it does not immediately throw for that missing prerequisite. Its check loader can return a generic service error while signing proceeds with other contexts. Clearer early diagnostics would have made this omission easier to identify.
+
+Missing authentication is a confirmed gap, not a proven sole cause of the on-device message: no service response was captured in this test. Robinhood 4663 Transaction Check coverage and trusted contract metadata remain unverified. A published chain/contract coverage check and a fast hackathon origin-token enrollment path would help custom-chain integrations. Successful threat screening alone would not verify Clear Signing. The support draft and runtime setup caveat are in [Ledger execution](LEDGER_EXECUTION.md); no external request or feedback submission has been sent.
