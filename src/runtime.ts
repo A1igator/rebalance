@@ -16,11 +16,11 @@ import { atomicWriteJson, readJson, type PendingTransaction } from './storage.js
 import { driveMonitor } from './monitor.js';
 import { acquireConfigLock, ConfigLockBusyError } from './config-lock.js';
 import { ConfigChangedError, dispatch, reconcile, readRebalanceFee, type Operation, type FeeContext } from './transactions.js';
-import { LedgerExecution, readLedgerRequest, type LedgerRequest } from './ledger-request.js';
+import { LedgerExecution, readLedgerRequest, readLedgerPromptState, type LedgerRequest, type LedgerPromptState } from './ledger-request.js';
 import { LedgerSigningError } from './ledger-signing.js';
 import { watchLedgerPresence } from './ledger-onboarding.js';
 import { createWakeSource } from './wake.js';
-export type LedgerPresence = { connected: boolean; revision: number };
+export type LedgerPresence = { connected: boolean; revision: number; observed?: boolean };
 
 export const STOP_PATH = resolve(DATA, 'stop.json');
 export type Status = {
@@ -39,6 +39,7 @@ export type Status = {
   valuationNote?: string;
   proposal?: TradePlan | null;
   ledgerRequest?: LedgerRequest | null;
+  ledgerPrompt?: LedgerPromptState & { connected: boolean };
   feeCheck?: FeeCheck | null;
   feeTargetVersion?: 1;
 };
@@ -89,7 +90,10 @@ export async function status(): Promise<Status> {
       if (state.operation?.status === 'fee-target') state.operation = null;
     }
   }
-  if (config?.mode === 'ledger') state.ledgerRequest = await readLedgerRequest();
+  if (config?.mode === 'ledger') {
+    state.ledgerRequest = await readLedgerRequest();
+    state.ledgerPrompt = { ...await readLedgerPromptState(), connected: state.ledgerPrompt?.connected ?? false };
+  }
   state.cycle = publicCycle(await readCycle());
   const [lock, stopped] = await Promise.all([
     readJson<{ pid: number }>(resolve(DATA, 'run.lock')), readJson(STOP_PATH),
@@ -178,8 +182,9 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
       }
       config = loaded;
       if (execute && ledger && config.mode === 'ledger') {
+        if (presence && presence.revision > 0 && presence.observed !== false) await ledger.observePresence(presence.connected);
         await ledger.prepare(config);
-        if (ledger.active) await ledgerCondition(config.wallet, config.targets, true, false);
+        await ledgerCondition(config.wallet, config.targets, false);
       }
       else if (ledger?.active) await ledger.finish('configuration-changed');
       state.mode = config.mode;
@@ -236,8 +241,14 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
       if (await readJson(STOP_PATH)) return { status: 'stopping', message: 'Stop requested; no new transaction sent.' };
       await requireCurrentConfig();
       if (config.mode === 'ledger' && !ledger?.active) {
-        // Keep unaffordable work local until a fresh public estimate permits a
-        // meaningful signing request; this never accesses the device or keys.
+        state.ledgerPrompt = { ...await readLedgerPromptState(), connected: presence?.connected ?? false };
+        if (state.ledgerPrompt.suspended) {
+          // A disconnected or paused wait must not erase fixed failure diagnostics.
+          if (previous?.operation?.status.startsWith('ledger-')) return previous.operation;
+          return { status: 'waiting-ledger', message: 'Ledger confirmation is paused after the previous attempt. Disconnect and reconnect Ledger, or retry the rebalance explicitly.' };
+        }
+        // Keep unaffordable work local before creating a bounded backend
+        // execution. These fee checks never access the device or keys.
         if (config.rebalanceFeeTargetUsdE8 !== undefined) {
           try {
             const transaction = await chain.transaction(trade, quote as RouteQuote);
@@ -253,13 +264,23 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
           if (state.feeCheck.state !== 'within-target') throw new FeeTargetError(state.feeCheck);
         }
         if (await readJson(STOP_PATH)) return { status: 'stopping', message: 'Stop requested; no new transaction sent.' };
-        if (JSON.stringify(await loadConfig()) !== JSON.stringify(config)) return { status: 'configuration-changed', message: 'Configuration changed; refresh the portfolio before requesting Ledger attention.' };
-        return { status: 'waiting-ledger', message: 'Drift detected. Connect Ledger and request a rebalance through your agent; every transaction requires physical confirmation.' };
+        await requireCurrentConfig();
+        if (!ledger || !presence?.connected || presence.revision !== connectionRevision) {
+          return { status: 'waiting-ledger', message: 'Drift detected. Connect and unlock Ledger, then open Ethereum. The backend will prepare each transaction for physical confirmation.' };
+        }
+        if (!await ledger.prepareAutomatic(config)) {
+          state.ledgerPrompt = { ...await readLedgerPromptState(), connected: presence?.connected ?? false };
+          // Preserve the fixed signer diagnostics across repeated waits and restarts.
+          if (state.ledgerPrompt.suspended && previous?.operation?.status.startsWith('ledger-')) return previous.operation;
+          return { status: 'waiting-ledger', message: state.ledgerPrompt.suspended
+            ? 'Ledger confirmation is paused after the previous attempt. Disconnect and reconnect Ledger, or retry the rebalance explicitly.'
+            : 'Ledger execution is not ready. The running backend will prepare a fresh transaction when its controls permit.' };
+        }
       }
       if (config.mode === 'ledger') {
         if (!presence?.connected || presence.revision !== connectionRevision) {
           await ledger!.finish('device-changed');
-          return { status: 'waiting-ledger', message: 'Connect and unlock Ledger, then request a fresh rebalance. No transaction was signed.' };
+          return { status: 'waiting-ledger', message: 'Ledger connection changed. Reconnect and unlock Ledger, then open Ethereum for fresh transaction preparation.' };
         }
         await ledger!.assertReady(config);
       }
@@ -313,6 +334,7 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
       await ledger.finish(state.error ? 'failed' : state.proposal === null ? 'on-target' : state.operation!.status);
     }
     state.ledgerRequest = await readLedgerRequest();
+    state.ledgerPrompt = { ...await readLedgerPromptState(), connected: presence?.connected ?? false };
     await atomicWriteJson(STATE_PATH, state);
   }
   try {
@@ -325,12 +347,7 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
     }
     if (!state.error && configured && state.portfolio && state.proposal !== undefined &&
         state.operation?.status !== 'configuration-changed' && JSON.stringify(await loadConfig()) === JSON.stringify(configured)) {
-      if (configured.mode === 'ledger') {
-        // A cooldown or device rejection does not clear and recreate an incident.
-        if (state.proposal === null || state.operation?.status === 'fee-target') await ledgerCondition(configured.wallet, configured.targets, false);
-        else if (presence?.connected && !ledger?.active && !['cooling-down', 'fee-target', 'stopping', 'configuration-changed'].includes(state.operation?.status ?? '') &&
-            !await readJson(STOP_PATH) && JSON.stringify(await loadConfig()) === JSON.stringify(configured)) await ledgerCondition(configured.wallet, configured.targets, true);
-      }
+      // Connected Ledger work proceeds in this backend; drift never wakes a model.
       const total = state.portfolio.totalUsdE8;
       const withinThreshold = total > 0n && state.portfolio.positions.every(position => {
         const delta = position.valueUsdE8 * 10000n - total * BigInt(position.targetBps);
@@ -382,9 +399,21 @@ async function ledgerDispatch(config: Config, chain: ReturnType<typeof createCha
 
 export async function monitor(signal: AbortSignal): Promise<void> {
   const ledger = new LedgerExecution();
-  const presence: LedgerPresence = { connected: false, revision: 0 };
+  const presence: LedgerPresence = { connected: false, revision: 0, observed: false };
   let closePresence: (() => Promise<void>) | undefined;
   let wakeLedger: (() => void) | undefined;
+  let presenceChanges = Promise.resolve();
+  let presenceRetryAt: number | undefined;
+  const presenceUnavailable = () => { presenceRetryAt = Date.now() + 5000; wakeLedger?.(); };
+  const onPresence = (connected: boolean, observed: boolean) => {
+    presence.connected = connected; presence.observed = observed; presence.revision++;
+    // Only actual enumeration may release suspension. A later valid observation
+    // can recover from a failed local write, but never replay an unrecorded edge.
+    presenceChanges = presenceChanges.catch(() => {}).then(async () => {
+      if (observed) await ledger.observePresence(connected);
+    });
+    void presenceChanges.then(() => wakeLedger?.(), () => wakeLedger?.());
+  };
   let observedMode: Config['mode'] | undefined;
   let cached: { key: string; chain: ReturnType<typeof createChain> } | undefined;
   const chainFor: typeof createChain = config => {
@@ -400,26 +429,28 @@ export async function monitor(signal: AbortSignal): Promise<void> {
         wakeLedger = () => options.onWake('ledger');
         // The scheduler calls source only after validating config/stop/signal.
         if (observedMode === 'ledger' && !closePresence) {
-          closePresence = watchLedgerPresence(connected => {
-            presence.connected = connected; presence.revision++; wakeLedger?.();
-          });
+          closePresence = watchLedgerPresence(onPresence, {}, presenceUnavailable);
         }
         return createWakeSource(options);
       },
       read: async () => {
         try {
+          await presenceChanges;
           const [config, cycle, pending, stop] = await Promise.all([
             loadConfig(), readCycle(), readJson<PendingTransaction>(PENDING_PATH), readJson(STOP_PATH),
           ]);
           observedMode = config?.mode;
+          // Retry only a terminated discovery stream, using the existing local
+          // control watchdog. Its failure did not establish a physical unplug.
+          if (presenceRetryAt !== undefined && Date.now() >= presenceRetryAt) {
+            await closePresence?.(); closePresence = undefined; presenceRetryAt = undefined;
+          }
           if (config?.mode !== 'ledger' && closePresence) {
-            const close = closePresence; closePresence = undefined; await close();
+            const close = closePresence; closePresence = undefined; presenceRetryAt = undefined; await close();
             presence.connected = false; presence.revision++;
           }
           if (config?.mode === 'ledger' && wakeLedger && !stop && !signal.aborted && !closePresence) {
-            closePresence = watchLedgerPresence(connected => {
-              presence.connected = connected; presence.revision++; wakeLedger?.();
-            });
+            closePresence = watchLedgerPresence(onPresence, {}, presenceUnavailable);
           }
           const request = config?.mode === 'ledger' ? await readLedgerRequest() : null;
           return { config, cycle: publicCycle(cycle), pending, stopped: stop !== null, ledgerRequest: request ? `${request.id}:${presence.revision}` : `none:${presence.revision}` };
@@ -439,6 +470,7 @@ export async function monitor(signal: AbortSignal): Promise<void> {
   } finally {
     wakeLedger = undefined;
     await closePresence?.();
+    await presenceChanges;
     await ledger.finish('stopped');
     const current = await readJson<Record<string, unknown>>(STATE_PATH) ?? await initialStatus();
     await atomicWriteJson(STATE_PATH, { ...current, armed: false });

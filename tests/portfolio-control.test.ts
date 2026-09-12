@@ -232,7 +232,7 @@ test('Ledger controls launch public monitoring and stop it without creating sign
   const started = await f.controls.command(start);
   assert.equal(started.state, 'running'); assert.equal(started.outcome, 'armed');
   assert.equal(f.calls.length, 1); assert.equal(f.calls[0]!.args[0], 'launch');
-  assert.match((await f.controls.read()).message!, /separate request and physical confirmation/);
+  assert.match((await f.controls.read()).message!, /backend opens device prompts automatically; physical confirmation/);
   assert.equal((await f.controls.command(start)).outcome, 'already-handled');
   assert.equal(f.calls.length, 1);
   assert.equal((await f.controls.command(f.request('stop'))).state, 'stopping');

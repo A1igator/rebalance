@@ -400,8 +400,8 @@ test('Ledger launch stays selected and reports monitoring with separate physical
   const launched = await launch({}, f.deps);
   assert.equal(launched.outcome, 'armed');
   assert.equal(launched.status?.mode, 'ledger');
-  assert.match(launched.messages.join(' '), /Ledger Start enables public monitoring/);
-  assert.match(launched.messages.join(' '), /separate request and physical confirmation of every transaction/);
+  assert.match(launched.messages.join(' '), /Ledger Start enables monitoring and automatic device prompts/);
+  assert.match(launched.messages.join(' '), /Physical confirmation is required for every transaction/);
   assert.ok(f.calls.every(args => ['status', 'check', 'start'].includes(args[0]!)));
   assert.equal(count(f.calls, 'wallet'), 0);
   assert.equal(count(f.calls, 'configure'), 0);

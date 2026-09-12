@@ -246,7 +246,7 @@ export async function launch(options: LaunchOptions = {}, overrides: Partial<Lau
       if (['unresolved', 'reverted'].includes(result.status!.operation?.status ?? '')) {
         // Pending state blocks another trade, while runners can still reconcile
         // receipts or use automatic-signer recovery. Preflight errors still block;
-        // Ledger launch only enables monitoring and creates no signing intent.
+        // Ledger launch preserves receipt barriers; unresolved transactions cannot trigger device prompts.
         if (!options.setupOnly && !preparationBlocked && result.status!.mode === 'ledger') {
           result.messages.push('Ledger monitoring will reconcile the earlier transaction from its saved hash. No cancellation or signing request is created; its records and cycle timing are preserved.');
         } else if (!options.setupOnly && ['private-key', 'privy'].includes(result.status!.mode ?? '') && !preparationBlocked) {
@@ -273,7 +273,7 @@ export async function launch(options: LaunchOptions = {}, overrides: Partial<Lau
     }
     if (result.chart.state !== 'ready' || result.status!.error) preparationBlocked = true;
     if (result.status!.mode === 'ledger') {
-      result.messages.push('Ledger Start enables public monitoring. Each rebalance requires a separate request and physical confirmation of every transaction.');
+      result.messages.push('Ledger Start enables monitoring and automatic device prompts when a rebalance is needed. Physical confirmation is required for every transaction.');
     }
     if (result.status!.armed) { result.outcome = 'armed'; return result; }
     if (preparationBlocked) return result;

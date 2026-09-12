@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { validateConfig } from '../src/config.js';
-import { LedgerExecution, ledgerConfigFingerprint, readLedgerRequest, requestLedgerRebalance } from '../src/ledger-request.js';
+import { LedgerExecution, ledgerConfigFingerprint, readLedgerRequest, readLedgerPromptState, requestLedgerRebalance } from '../src/ledger-request.js';
 import { atomicWriteJson, readJson } from '../src/storage.js';
 
 async function fixture(t: TestContext) {
@@ -318,4 +318,104 @@ test('queue expiration during claim persistence and expiry during assertion rema
   expire = true;
   await assert.rejects(execution.assertReady(f.config), /expired/);
   assert.equal(execution.active, false); assert.equal((await f.read())?.state, 'finished');
+});
+
+
+test('connected backend creates one bounded runner-owned execution without an explicit request', async t => {
+  const f = await fixture(t), execution = f.execution();
+  assert.equal(await execution.prepareAutomatic(f.config), false);
+  await execution.observePresence(true);
+  assert.equal(await execution.prepareAutomatic(f.config), true);
+  const first = await f.read();
+  assert.equal(first?.state, 'consumed');
+  assert.equal(first?.runnerToken, f.runner.token);
+  await execution.assertReady(f.config);
+  assert.equal(await execution.prepareAutomatic(f.config), true);
+  assert.equal((await f.read())?.id, first?.id);
+  await execution.finish('on-target');
+  assert.equal(await execution.prepareAutomatic(f.config), true);
+  assert.notEqual((await f.read())?.id, first?.id, 'a later successful cycle gets fresh bounded execution');
+});
+
+for (const outcome of ['rejected', 'timeout', 'unavailable', 'unsupported', 'invalid-signature', 'failed']) {
+  test(`automatic ${outcome} suspension survives restart and clears only after observed reconnect or explicit retry`, async t => {
+    const f = await fixture(t), first = f.execution();
+    await first.observePresence(true); await first.prepareAutomatic(f.config); await first.finish(outcome);
+    assert.deepEqual(await readLedgerPromptState(f.options), { suspended: true, outcome });
+    const restarted = f.execution();
+    await restarted.observePresence(true);
+    assert.equal(await restarted.prepareAutomatic(f.config), false, 'a fresh process observing connected is not a reconnect');
+    await restarted.observePresence(false);
+    const again = f.execution();
+    await again.observePresence(true);
+    assert.equal(await again.prepareAutomatic(f.config), true, 'the actual disconnect edge survives a process restart');
+    await again.finish(outcome);
+    const retry = await f.request();
+    assert.deepEqual(await readLedgerPromptState(f.options), { suspended: false });
+    await again.prepare(f.config);
+    assert.equal(again.active, true); assert.equal((await f.read())?.id, retry.id);
+  });
+}
+
+test('an interrupted automatic execution suspends instead of silently replacing the consumed request', async t => {
+  const f = await fixture(t), first = f.execution();
+  await first.observePresence(true); await first.prepareAutomatic(f.config);
+  const id = (await f.read())!.id;
+  const restarted = f.execution(); await restarted.observePresence(true); await restarted.prepare(f.config);
+  assert.equal(await restarted.prepareAutomatic(f.config), false);
+  assert.equal((await f.read())?.id, id);
+  assert.deepEqual(await readLedgerPromptState(f.options), { suspended: true, outcome: 'runner-restarted' });
+});
+
+test('automatic creation preserves stop, pending request and wrong runner/config boundaries', async t => {
+  for (const change of ['stop', 'owner', 'config', 'explicit']) {
+    const f = await fixture(t), execution = f.execution();
+    await execution.observePresence(true);
+    if (change === 'stop') await atomicWriteJson(f.path('stop.json'), { requestedAt: 'fixture' });
+    if (change === 'owner') await atomicWriteJson(f.path('run.lock'), { ...f.runner, pid: 111 });
+    if (change === 'config') await atomicWriteJson(f.path('config.json'), { ...f.config, slippageBps: 51 });
+    if (change === 'explicit') {
+      const pending = await f.request();
+      assert.equal(await execution.prepareAutomatic(f.config), true);
+      assert.equal((await f.read())?.id, pending.id);
+    } else {
+      assert.equal(await execution.prepareAutomatic(f.config), false);
+      assert.equal(await f.read(), null);
+    }
+  }
+});
+
+test('legacy failed journal upgrade stays suspended until explicit retry or genuine reconnection', async t => {
+  const f = await fixture(t), execution = f.execution();
+  await f.request(); await execution.prepare(f.config); await execution.finish('unavailable');
+  const journal = await readJson<Record<string, unknown>>(f.path('ledger-request.json'));
+  delete journal!.suspension;
+  await atomicWriteJson(f.path('ledger-request.json'), journal);
+  await execution.observePresence(true);
+  assert.equal(await execution.prepareAutomatic(f.config), false);
+  await execution.observePresence(false); await execution.observePresence(true);
+  assert.equal(await execution.prepareAutomatic(f.config), true);
+});
+
+
+test('a genuine disconnect observed before restart invalidation still permits the subsequent reconnect', async t => {
+  const f = await fixture(t), original = f.execution();
+  await original.observePresence(true); await original.prepareAutomatic(f.config);
+  const restarted = f.execution();
+  await restarted.observePresence(false); await restarted.prepare(f.config);
+  assert.equal((await readLedgerPromptState(f.options)).suspended, true);
+  await restarted.observePresence(true);
+  assert.equal(await restarted.prepareAutomatic(f.config), true);
+});
+
+test('stop invalidation racing automatic request creation cannot establish an execution', async t => {
+  const f = await fixture(t);
+  let invalidate = false;
+  const execution = new LedgerExecution({ ...f.options, isAlive: pid => {
+    if (invalidate) { invalidate = false; void execution.finish('stopped'); }
+    return pid === f.runner.pid;
+  } });
+  await execution.observePresence(true); invalidate = true;
+  assert.equal(await execution.prepareAutomatic(f.config), false);
+  assert.equal(execution.active, false); assert.equal(await f.read(), null);
 });

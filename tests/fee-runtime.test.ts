@@ -143,6 +143,7 @@ for (const quote of ['above-target', 'unavailable'] as const) {
       const binding = t.mock.method(ledger, 'bindCycle', async () => assert.fail('Passive fee checks must not bind a signing cycle'));
       const nonce = t.mock.method(f.chain.publicClient, 'getTransactionCount', async () => assert.fail('Passive fee checks must not prepare a signing nonce'));
       const balance = t.mock.method(f.chain.publicClient, 'getBalance', async () => assert.fail('Passive fee checks must not enter dispatch balance validation'));
+      const backend = t.mock.method(ledger, 'prepareAutomatic', async () => false);
       const assertPassive = async () => {
         assert.equal(ledger.active, false); assert.equal(f.sent.length, 0);
         assert.equal(readiness.mock.callCount(), 0); assert.equal(binding.mock.callCount(), 0);
@@ -160,17 +161,14 @@ for (const quote of ['above-target', 'unavailable'] as const) {
           assert.deepEqual(await events(), [], 'unaffordable or unavailable fees must not request Ledger attention');
           await assertPassive();
         }
-        assert.equal(prices, 2); affordable = true;
+        assert.equal(prices, 2); assert.equal(backend.mock.callCount(), 0); affordable = true;
         const waitingForUser = await tick(true, () => f.chain, ledger, undefined, presence);
         assert.equal(waitingForUser.error, null); assert.equal(waitingForUser.operation?.status, 'waiting-ledger');
         assert.equal(waitingForUser.feeCheck?.state, 'within-target');
         assert.equal(waitingForUser.ledgerRequest, null); assert.equal(waitingForUser.cycle, null);
         const attention = await events();
-        assert.equal(attention.length, connected ? 1 : 0);
-        if (connected) {
-          assert.equal(attention[0]?.type, 'ledger-rebalance-needed');
-          assert.match(attention[0]!.message, /request a rebalance through your agent/);
-        }
+        assert.equal(attention.length, 0, 'backend-handled Ledger work never wakes a model');
+        assert.equal(backend.mock.callCount(), connected ? 1 : 0, 'only affordable connected work reaches backend execution preparation');
         await assertPassive();
         const repeated = await tick(true, () => f.chain, ledger, undefined, presence);
         assert.equal(repeated.operation?.status, 'waiting-ledger');

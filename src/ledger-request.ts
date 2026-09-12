@@ -31,7 +31,14 @@ export type LedgerRequestOptions = {
   pid?: number;
   isAlive?: (pid: number) => boolean;
 };
-type Journal = { version: 1; records: LedgerRequest[] };
+type Suspension = { requestId: string; outcome: string; disconnected: boolean };
+type Journal = { version: 1; records: LedgerRequest[]; suspension?: Suspension | null };
+export type LedgerPromptState = { suspended: boolean; outcome?: string };
+// Normal backend waits can evaluate again. Device failures and uncertain or
+// interrupted execution need a real reconnection or an explicit retry.
+const RETRYABLE_OUTCOMES = new Set(['completed', 'on-target', 'cooling-down', 'fee-target',
+  'configuration-changed', 'stopped', 'stopping']);
+const suspends = (outcome: string) => !RETRYABLE_OUTCOMES.has(outcome);
 type Runner = { pid: number; token: string };
 
 function isAlive(pid: number): boolean {
@@ -93,11 +100,26 @@ class RequestStore {
     try { value = await readJson<Journal>(this.path('ledger-request.json')); }
     catch { throw new Error('Ledger request journal is unavailable or invalid; signing remains unavailable'); }
     if (value === null) return { version: 1, records: [] };
-    if (!value || Object.keys(value).some(field => !['version', 'records'].includes(field)) ||
+    if (!value || Object.keys(value).some(field => !['version', 'records', 'suspension'].includes(field)) ||
         value.version !== 1 || !Array.isArray(value.records) || !value.records.every(validRecord) ||
         new Set(value.records.map(record => record.id)).size !== value.records.length ||
         value.records.filter(record => record.state !== 'finished').length > 1) {
       throw new Error('Invalid Ledger request journal; signing remains unavailable');
+    }
+    const suspension = value.suspension;
+    if (suspension !== undefined && suspension !== null &&
+        (!suspension || typeof suspension !== 'object' || Array.isArray(suspension) ||
+          Object.keys(suspension).some(field => !['requestId', 'outcome', 'disconnected'].includes(field)) ||
+          typeof suspension.requestId !== 'string' || !UUID.test(suspension.requestId) ||
+          !value.records.some(record => record.id === suspension.requestId && record.state === 'finished') ||
+          typeof suspension.outcome !== 'string' || !OUTCOME.test(suspension.outcome) ||
+          typeof suspension.disconnected !== 'boolean')) {
+      throw new Error('Invalid Ledger request journal; signing remains unavailable');
+    }
+    // Existing failed requests must not become automatic retries after upgrade.
+    const latest = value.records.at(-1);
+    if (suspension === undefined && latest?.state === 'finished' && suspends(latest.outcome!)) {
+      value.suspension = { requestId: latest.id, outcome: latest.outcome!, disconnected: false };
     }
     return value;
   }
@@ -129,8 +151,15 @@ class RequestStore {
     const release = await acquireLock(this.directory, 'ledger-request.lock');
     try { return await work(); } finally { await release(); }
   }
-  terminal(record: LedgerRequest, outcome: string) {
+  terminal(journal: Journal, record: LedgerRequest, outcome: string, disconnected = false) {
     record.state = 'finished'; record.outcome = outcome; record.finishedAt = this.now();
+    if (suspends(outcome)) journal.suspension = { requestId: record.id, outcome, disconnected };
+  }
+  record(config: Config, runner: Runner, id: string = randomUUID()): LedgerRequest {
+    const now = this.now();
+    return { id, state: 'requested', wallet: config.wallet.toLowerCase(), chainId: 4663,
+      configFingerprint: ledgerConfigFingerprint(config), runnerPid: runner.pid, runnerToken: runner.token,
+      createdAt: now, queueExpiresAt: now + QUEUE_MS, expiresAt: now + EXECUTION_MS };
   }
   async invalidReason(record: LedgerRequest, config: Config, owned: boolean): Promise<string | null> {
     const now = this.now();
@@ -161,7 +190,7 @@ export async function requestLedgerRebalance(requestId: string = randomUUID(), o
       if (now < (previous.state === 'requested' ? previous.queueExpiresAt : previous.expiresAt)) {
         throw new Error('A Ledger rebalance request is already pending or active');
       }
-      store.terminal(previous, 'expired');
+      store.terminal(journal, previous, 'expired');
       await store.write(journal);
     }
     const config = await store.config();
@@ -169,10 +198,9 @@ export async function requestLedgerRebalance(requestId: string = randomUUID(), o
     if (await store.stopped()) throw new Error('Portfolio has a stop request; no Ledger signing request queued');
     const runner = await store.runner();
     if (!runner) throw new Error('Start this Ledger portfolio monitor before requesting a rebalance');
-    const record: LedgerRequest = { id, state: 'requested', wallet: config.wallet.toLowerCase(), chainId: 4663,
-      configFingerprint: ledgerConfigFingerprint(config), runnerPid: runner.pid, runnerToken: runner.token,
-      createdAt: now, queueExpiresAt: now + QUEUE_MS, expiresAt: now + EXECUTION_MS };
+    const record = store.record(config, runner, id);
     journal.records.push(record);
+    journal.suspension = null; // Only an accepted explicit retry clears a failure.
     await store.write(journal);
     return { ...record };
   });
@@ -183,16 +211,63 @@ export async function readLedgerRequest(options: LedgerRequestOptions = {}): Pro
   return (await new RequestStore(options).journal()).records.at(-1) ?? null;
 }
 
-/** In-memory capability belongs only to the runner that durably consumed this intent. */
+export async function readLedgerPromptState(options: LedgerRequestOptions = {}): Promise<LedgerPromptState> {
+  const suspension = (await new RequestStore(options).journal()).suspension;
+  return suspension ? { suspended: true, outcome: suspension.outcome } : { suspended: false };
+}
+
+/** A bounded execution belongs only to the runner that durably consumed it. */
 export class LedgerExecution {
   private readonly store: RequestStore;
   private current: LedgerRequest | undefined;
   private boundCycle: { startedAt: number; activeUntil: number } | undefined;
   private generation = 0;
+  private connected: boolean | undefined;
   constructor(options: LedgerRequestOptions = {}) { this.store = new RequestStore(options); }
   get active(): boolean { return !!this.current && this.store.now() >= this.current.createdAt && this.store.now() < this.expiresAt!; }
   get expiresAt(): number | undefined {
     return this.current && Math.min(this.current.expiresAt, this.boundCycle?.activeUntil ?? this.current.expiresAt);
+  }
+
+  /** Only actual discovery observations count; process startup is not a reconnect. */
+  async observePresence(connected: boolean): Promise<void> {
+    this.connected = connected;
+    await this.store.locked(async () => {
+      const journal = await this.store.journal();
+      if (!journal.suspension) return;
+      if (!connected && !journal.suspension.disconnected) journal.suspension.disconnected = true;
+      else if (connected && journal.suspension.disconnected) journal.suspension = null;
+      else return;
+      await this.store.write(journal);
+    });
+  }
+
+  /** Called only after the running graph establishes actionable fresh work. */
+  async prepareAutomatic(config: Config): Promise<boolean> {
+    if (this.active) return true;
+    if (this.connected !== true) return false;
+    const generation = this.generation;
+    await this.store.locked(async () => {
+      const journal = await this.store.journal();
+      if (journal.suspension || journal.records.some(record => record.state !== 'finished')) return;
+      const saved = await this.store.config();
+      const runner = await this.store.runner();
+      if (!runner || runner.pid !== this.store.pid || await this.store.stopped() || config.mode !== 'ledger' ||
+          ledgerConfigFingerprint(saved) !== ledgerConfigFingerprint(config) ||
+          generation !== this.generation || this.connected !== true) return;
+      const record = this.store.record(config, runner);
+      if (generation !== this.generation || this.connected !== true) return;
+      journal.records.push(record);
+      journal.suspension = null;
+      await this.store.write(journal);
+      if (generation !== this.generation || this.connected !== true) {
+        this.store.terminal(journal, record, 'invalidated', !this.connected);
+        await this.store.write(journal);
+      }
+    });
+    if (generation !== this.generation) return false;
+    await this.prepare(config);
+    return this.active;
   }
 
   /** Bind the first dispatched cycle. A later approval receipt cannot renew its window. */
@@ -226,25 +301,25 @@ export class LedgerExecution {
       let reason: string | null;
       try { reason = await this.store.invalidReason(record, config, true); }
       catch (error) {
-        this.store.terminal(record, 'invalidated');
+        this.store.terminal(journal, record, 'invalidated', this.connected === false);
         await this.store.write(journal);
         throw error;
       }
       if (reason || record.state === 'consumed') {
-        this.store.terminal(record, reason ?? 'runner-restarted');
+        this.store.terminal(journal, record, reason ?? 'runner-restarted', this.connected === false);
         await this.store.write(journal);
         return;
       }
       const consumedAt = this.store.now();
       if (consumedAt < record.createdAt || consumedAt >= record.queueExpiresAt) {
-        this.store.terminal(record, 'expired'); await this.store.write(journal); return;
+        this.store.terminal(journal, record, 'expired', this.connected === false); await this.store.write(journal); return;
       }
       record.state = 'consumed'; record.consumedAt = consumedAt;
       // Persist BEFORE establishing any in-memory permission to quote/sign.
       await this.store.write(journal);
       const claimedAt = this.store.now();
       if (generation !== this.generation || claimedAt < record.createdAt || claimedAt >= record.queueExpiresAt) {
-        this.store.terminal(record, generation !== this.generation ? 'invalidated' : 'expired');
+        this.store.terminal(journal, record, generation !== this.generation ? 'invalidated' : 'expired', this.connected === false);
         await this.store.write(journal);
         return;
       }
@@ -261,7 +336,10 @@ export class LedgerExecution {
       const saved = journal.records.at(-1);
       if (!saved || canonical(saved) !== canonical(current)) throw new Error('Ledger request changed or was already consumed elsewhere');
       const reason = await this.store.invalidReason(saved, config, true);
-      if (reason) throw new Error(`Ledger rebalance request is no longer valid: ${reason}`);
+      if (reason) {
+        await this.finish(reason);
+        throw new Error(`Ledger rebalance request is no longer valid: ${reason}`);
+      }
       if (this.boundCycle) {
         let cycle: { wallet: string; startedAt: number; activeUntil: number } | null;
         try { cycle = await readJson(this.store.path('cycle.json')); }
@@ -292,7 +370,7 @@ export class LedgerExecution {
       const journal = await this.store.journal();
       const saved = journal.records.find(record => record.id === current.id);
       if (!saved || canonical(saved) !== canonical(current)) return;
-      this.store.terminal(saved, outcome);
+      this.store.terminal(journal, saved, outcome, this.connected === false);
       await this.store.write(journal);
     });
   }

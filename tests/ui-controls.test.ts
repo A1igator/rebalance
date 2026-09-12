@@ -139,13 +139,13 @@ test('Ledger Start describes monitoring and uses only the ordinary runner contro
   const page = await browser({ reply: async call => call.method === 'POST' ? ok(result()) : ok(runner('running')) });
   await page.ready(); await page.status({ ...chart(), mode: 'ledger' });
   assert.equal(page.byId('portfolio-run').disabled, false);
-  assert.match(page.byId('portfolio-run').title, /Start monitoring this Ledger wallet/);
-  assert.match(page.byId('portfolio-run').title, /separate request and physical confirmation/);
+  assert.match(page.byId('portfolio-run').title, /Start this Ledger wallet/);
+  assert.match(page.byId('portfolio-run').title, /backend opens device prompts automatically; physically confirm each transaction/);
   await page.click('portfolio-run');
   assert.deepEqual(page.posts().map(call => ({ url: call.url, body: call.body })), [
     { url: '/api/runner', body: { token, wallet, action: 'start', requestId } },
   ]);
-  assert.match(page.byId('portfolio-run').title, /Stop monitoring this Ledger portfolio/);
+  assert.match(page.byId('portfolio-run').title, /Stop this Ledger portfolio and cancel waiting device prompts/);
   await page.status({ ...chart(), mode: 'privy' }); await page.runner(runner('stopped'));
   assert.match(page.byId('portfolio-run').title, /Start automatic rebalancing/);
   assert.equal(page.posts().length, 1);

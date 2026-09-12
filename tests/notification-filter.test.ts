@@ -166,3 +166,16 @@ test('selection preserves queue order, event identity and immutable raw data wit
   assert.equal(JSON.stringify(queue), before);
   assert.ok(queue.every(item => item.acknowledgedAt === undefined));
 });
+
+
+test('retired Ledger agent-request alerts are retained locally while other hardware attention still delivers', async () => {
+  const message = 'Your Ledger portfolio has drifted beyond its target threshold. Connect and unlock Ledger, open Ethereum, and request a rebalance through your agent. Every transaction needs physical confirmation; this alert does not start signing.';
+  const legacy = event('old-ledger-gate', 'ledger-rebalance-needed', message);
+  const actionable = event('device-failure', 'rebalance-attention', 'Ledger requires device troubleshooting.');
+  const hashed = { ...legacy, id: 'with-transaction', hash: transactionHash };
+  const history = [legacy, actionable, hashed];
+  const before = structuredClone(history);
+  assert.equal(isLocalOnlyNotification(legacy), true);
+  assert.deepEqual(await createNotificationFilter().select(history), { events: [actionable, hashed], nextAt: null });
+  assert.deepEqual(history, before);
+});

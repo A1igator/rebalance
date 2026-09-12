@@ -484,14 +484,14 @@ test('Ledger monitoring and queued or consumed requests never imply an automatic
   page.source.send({ ...ledgerSnapshot, ledgerRequest, operation: { status: 'ledger-rejected' } });
   assert.equal(page.element('c-sub').textContent, 'Queued for a fresh check', 'a new request supersedes the prior request outcome');
   page.source.send({ ...ledgerSnapshot, ledgerRequest: { ...ledgerRequest, state: 'consumed' }, graph: { node: 'execute' } });
-  assert.equal(page.element('c-state').textContent, 'Ledger request');
+  assert.equal(page.element('c-state').textContent, 'Ledger signing');
   assert.equal(page.element('c-sub').textContent, 'Physical confirmation required');
   assert.ok(!page.element('ghost').classes.has('show'));
   for (const [outcome, label] of [['rejected', 'Request rejected'], ['cancelled', 'Request cancelled'], ['timeout', 'Request timed out'], ['expired', 'Request expired']]) {
     page.source.send({ ...ledgerSnapshot, operation: { status: `ledger-${outcome}` },
       ledgerRequest: { ...ledgerRequest, state: 'finished', outcome } });
     assert.equal(page.element('c-state').textContent, label);
-    assert.equal(page.element('c-sub').textContent, 'New request required');
+    assert.equal(page.element('c-sub').textContent, 'Reconnect Ledger to retry');
     page.source.send({ ...ledgerSnapshot, operation: { status: 'waiting-ledger' }, ledgerRequest: { ...ledgerRequest, state: 'finished', outcome } });
     assert.equal(page.element('c-state').textContent, label, 'a later monitoring check retains the ended-request explanation');
   }
@@ -621,7 +621,7 @@ test('armed quote and execution stages show progress while receipts and Ledger r
   page.source.send({ ...current, graph: { node: 'execute' }, operation: { status: 'pending', kind: 'approval' } });
   assert.equal(page.element('c-state').textContent, 'Approval pending');
   page.source.send({ ...ledgerSnapshot, graph: { node: 'execute' }, ledgerRequest: { ...ledgerRequest, state: 'consumed' } });
-  assert.equal(page.element('c-state').textContent, 'Ledger request');
+  assert.equal(page.element('c-state').textContent, 'Ledger signing');
   page.source.send({ ...current, armed: false, graph: { node: 'execute' }, config: { targets: allocation, driftThresholdBps: 500 } });
   assert.equal(page.element('c-state').textContent, 'Paused');
   page.hide();
@@ -902,5 +902,17 @@ test('returning to a hidden chart rechecks the age of an otherwise unchanged fee
   page.visible(true); page.sources[1]!.send(feeSnapshot);
   assert.equal(page.element('c-state').textContent, 'Fee estimate unavailable');
   assert.equal(page.element('c-val').textContent, '');
+  page.hide();
+});
+
+
+test('connected Ledger prompts are backend-driven and a suspended prompt explains reconnect', async () => {
+  const page = await browser();
+  page.source.send({ ...ledgerSnapshot, operation: { status: 'waiting-ledger' }, ledgerPrompt: { connected: true, suspended: false } });
+  assert.equal(page.element('c-state').textContent, 'Preparing rebalance');
+  assert.equal(page.element('c-sub').textContent, 'Device prompts open automatically');
+  page.source.send({ ...ledgerSnapshot, operation: { status: 'waiting-ledger' }, ledgerPrompt: { connected: true, suspended: true, outcome: 'unavailable' } });
+  assert.equal(page.element('c-state').textContent, 'Ledger needs attention');
+  assert.equal(page.element('c-sub').textContent, 'Reconnect Ledger after resolving the issue');
   page.hide();
 });

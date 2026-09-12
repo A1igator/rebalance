@@ -141,7 +141,7 @@ export class PortfolioControls {
       if (run) {
         const running = saved?.wallet?.toLowerCase() === wallet && saved.armed === true;
         return { wallet, state: running ? 'running' : 'starting',
-          ...(config.mode === 'ledger' && running ? { message: 'Ledger monitoring is active. Each rebalance requires a separate request and physical confirmation of every transaction.' } : {}) };
+          ...(config.mode === 'ledger' && running ? { message: 'Ledger monitoring is active. The backend opens device prompts automatically; physical confirmation is required for every transaction.' } : {}) };
       }
       if (launch || spawning) return { wallet, state: 'starting', message: messages.starting };
       if (pending) return inFlight

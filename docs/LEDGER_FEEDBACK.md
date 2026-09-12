@@ -13,11 +13,11 @@ Complete with actual evidence:
 - Selected-chain domain and transaction signing behavior, including meaningful device display.
 - Context resolution, any credentials or external requests, and local-operation limitations.
 - Confirm/reject/disconnect results and protection of the proposal-to-authorization boundary.
-- Drift tracking without the device, connection/app readiness detection, one fresh agent prompt on connect and reconciliation of earlier sends.
+- Drift tracking without the device, connection/app readiness detection, fresh backend transaction preparation on connect and reconciliation of earlier sends.
 - Specific confusing flows, gaps and suggested improvements; screenshots or PRs if useful.
 - Reproduction instructions and exact code links.
 
-Distinguish actual Clear Signing behavior from host UI previews and generic signing support. Agent Stack reuse is planned; record adopted versions and actual scope. If Ring is adopted, record its observed local/remote lifecycle and broker enforcement separately.
+Distinguish actual Clear Signing behavior from host UI previews and generic signing support. Agent Stack reuse is implemented; record adopted versions and actual scope. If Ring is adopted, record its observed local/remote lifecycle and broker enforcement separately.
 
 ## Documentation/source observations — no runtime test
 
@@ -40,3 +40,14 @@ These observations are not hardware feedback, successful integration evidence or
 - Node HID owns a process exit listener in addition to transport subscriptions. Explicit lifecycle documentation and cleanup tests would make long-running agents with repeated device operations easier to integrate.
 
 Still to record: exact firmware/Ethereum app versions, real approval/swap signing and rejection, on-device network/token wording, confirmed mainnet receipt, and the final human-narrated demonstration. The unit suite uses injected observable/RPC fixtures and cannot establish these outcomes.
+
+
+## Live validation and direct device flow — September 12
+
+The user requested direct backend-to-device preparation while running, with physical confirmation for each approval/swap. The compulsory agent-request gate has been removed in source. Bounded requests are now an internal backend execution record; a rejected, timed-out or failed attempt durably suppresses repeat prompts until real disconnection/reconnection or an optional explicit retry. Process startup or a discovery error alone cannot clear that suppression. Receipt reconciliation, cycle timing, fresh preparation and device-account verification remain required.
+
+Before this change, physical address verification succeeded for the selected indexed account. After funding, one explicit live request was consumed and finished as unavailable before recording a transaction hash; the user reported no device prompt. A separate subsequent public-address read through the same SDK completed for the selected account. These observations do not localize the original failure to signing, metadata or hardware transport, and they do not establish Clear Signing or a completed swap.
+
+Fixed diagnostics now distinguish connection, anchor/account reads, signing/context steps, signature verification and cleanup. They retain allowlisted SDK steps/error categories, APDU status codes and network status/timeout fields, without arbitrary provider messages, URLs, context payloads, signatures or transaction bytes. This is intended to make the next actual device attempt diagnosable without enabling SDK logs or blind-sign fallback.
+
+Pinned Node HID 1.0.1 source review identified two lifecycle hazards: its discovered-device BehaviorSubject starts with a synthetic empty list, and its destroy/exit cleanup removes all listeners from the shared USB emitter. The app now treats initial emptiness as unknown until that listener has observed a device, and uses a guarded per-instance lifecycle adapter that removes only callbacks installed by that transport. Eight injected lifecycle tests cover monitor/signer coexistence, teardown and failure paths. This is a compatibility seam against the pinned emitted private method/controller, not a new official SDK API or live reconnect proof. A supported per-transport disposal API and discovery-initialization signal would remove the need for these adaptations.

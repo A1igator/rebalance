@@ -188,19 +188,23 @@
     const request = saved?.chainId === 4663 && typeof saved.wallet === "string" &&
       saved.wallet.toLowerCase() === snapshot.wallet?.toLowerCase() ? saved : null;
     const needed = status === "waiting-ledger" || Boolean(snapshot.proposal);
+    const prompt = snapshot.ledgerPrompt;
     let outcome = status?.startsWith("ledger-") ? status.slice(7)
       : request?.state === "finished" && needed ? request.outcome : null;
     if (request && ["requested", "consumed"].includes(request.state)) {
       const deadline = request.state === "requested" ? request.queueExpiresAt : request.expiresAt;
       if (!Number.isSafeInteger(deadline) || deadline <= Date.now()) outcome = "expired";
       else return request.state === "requested"
-        ? { state: "Ledger request", sub: "Queued for a fresh check" }
-        : { state: "Ledger request", sub: "Physical confirmation required" };
+        ? { state: "Preparing rebalance", sub: "Queued for a fresh check" }
+        : { state: "Ledger signing", sub: "Physical confirmation required" };
     }
     const ended = { rejected: "Request rejected", cancelled: "Request cancelled", timeout: "Request timed out", expired: "Request expired",
       "device-changed": "Device changed", "runner-restarted": "Request ended", invalidated: "Request ended", "cycle-invalidated": "Request ended" }[outcome];
-    if (ended) return { state: ended, sub: "New request required" };
-    if (needed) return { state: "Ledger needed", sub: "Request rebalance through agent" };
+    if (ended) return { state: ended, sub: "Reconnect Ledger to retry" };
+    if (prompt?.suspended && needed) return { state: "Ledger needs attention", sub: "Reconnect Ledger after resolving the issue" };
+    if (needed) return prompt?.connected
+      ? { state: "Preparing rebalance", sub: "Device prompts open automatically" }
+      : { state: "Ledger needed", sub: "Connect and unlock Ledger" };
     return null;
   }
 

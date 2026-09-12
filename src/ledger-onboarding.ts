@@ -8,6 +8,7 @@ import type { Observable, Subscription } from 'rxjs';
 import type { ContextModule } from '@ledgerhq/context-module';
 import { getAddress, isAddress, type Address } from 'viem';
 import { acquireLock, atomicWriteJson } from './storage.js';
+import { closeLedgerSdk, ownLedgerTransport } from './ledger-transport-lifecycle.js';
 import type { SetupWallet, WalletSetupContext } from './wallet-setup-types.js';
 
 export type LedgerActionState = { status: string; output?: unknown; error?: unknown; intermediateValue?: unknown };
@@ -236,30 +237,29 @@ function loadNativeSdk(): LedgerSdk {
   const { nodeHidTransportFactory } = require('@ledgerhq/device-transport-kit-node-hid') as typeof import('@ledgerhq/device-transport-kit-node-hid');
   const { SignerEthBuilder } = require('@ledgerhq/device-signer-kit-ethereum') as typeof import('@ledgerhq/device-signer-kit-ethereum');
   const { ContextModuleBuilder, ContextModuleChainID } = require('@ledgerhq/context-module') as typeof import('@ledgerhq/context-module');
+  // Resolve USB through the transport package so cleanup targets its exact
+  // emitter even if a future installation contains multiple dependency copies.
+  const transportRequire = createRequire(require.resolve('@ledgerhq/device-transport-kit-node-hid'));
+  const { usb } = transportRequire('usb') as typeof import('usb');
   let transport: import('@ledgerhq/device-transport-kit-node-hid').NodeHidTransport | undefined;
-  let exitListeners: ((code: number) => void)[] = [];
-  const dmk = new DeviceManagementKitBuilder().addTransport(args => {
-    const before = new Set(process.listeners('exit'));
-    transport = nodeHidTransportFactory(args) as import('@ledgerhq/device-transport-kit-node-hid').NodeHidTransport;
-    // Node HID 1.0.1 registers an exit callback without removing it in destroy().
-    // Capture only callbacks installed synchronously by this owned transport.
-    exitListeners = process.listeners('exit').filter(listener => !before.has(listener));
+  const builder = new DeviceManagementKitBuilder().addTransport(args => {
+    transport = ownLedgerTransport(() => nodeHidTransportFactory(args) as import('@ledgerhq/device-transport-kit-node-hid').NodeHidTransport,
+      usb, process);
     return transport;
-  }).build(); // No loggers/analytics subscribers.
+  });
+  let dmk: ReturnType<typeof builder.build>;
+  try { dmk = builder.build(); } // No loggers/analytics subscribers.
+  catch (error) {
+    try { transport?.destroy(); } catch { /* Preserve the build failure after owned cleanup. */ }
+    throw error;
+  }
+  let closing: Promise<void> | undefined;
   return {
     manager: {
       listenToAvailableDevices: args => dmk.listenToAvailableDevices(args),
       connect: args => dmk.connect(args as Parameters<typeof dmk.connect>[0]),
       disconnect: args => dmk.disconnect(args),
-      close: async () => {
-        let closing: Promise<void> | undefined;
-        try { closing = Promise.resolve(dmk.close()); }
-        finally {
-          transport?.destroy();
-          for (const listener of exitListeners) process.removeListener('exit', listener);
-        }
-        await closing;
-      },
+      close: () => closing ??= closeLedgerSdk(() => dmk.close(), () => transport?.destroy()),
     },
     signer: sessionId => {
       const context = new ContextModuleBuilder({
@@ -344,34 +344,46 @@ async function acquireLedgerDeviceLock(rootDir: string, signal: AbortSignal): Pr
 }
 
 /** USB presence is only a refresh hint: this never opens a session or checks an account. */
-export function watchLedgerPresence(onChange: (present: boolean) => void,
-  overrides: Pick<LedgerOnboardingDependencies, 'loadSdk'> = {}): () => Promise<void> {
+export function watchLedgerPresence(onChange: (present: boolean, observed: boolean) => void,
+  overrides: Pick<LedgerOnboardingDependencies, 'loadSdk'> = {}, onUnavailable?: () => void): () => Promise<void> {
   let sdk: LedgerSdk | undefined;
   let subscription: Subscription | undefined;
   let stopped = false;
-  let last: boolean | undefined;
+  let last: string | undefined;
+  let seenDevice = false;
   let closing: Promise<void> | undefined;
-  const publish = (present: boolean) => {
-    if (stopped || present === last) return;
-    last = present;
-    try { onChange(present); } catch { /* A refresh-hint consumer cannot authorize or own the transport. */ }
+  const publish = (present: boolean, observed: boolean) => {
+    const key = `${present}:${observed}`;
+    if (stopped || key === last) return;
+    last = key;
+    try { onChange(present, observed); } catch { /* A refresh-hint consumer cannot authorize or own the transport. */ }
   };
   const close = () => {
     stopped = true;
     subscription?.unsubscribe();
     return closing ??= sdk ? closeDevice({ close: async () => { await sdk!.manager.close(); } }) : Promise.resolve();
   };
+  const unavailable = () => {
+    publish(false, false);
+    // The caller can restart discovery after cleanup; failure is never evidence
+    // that the user physically disconnected the device.
+    void close().catch(() => {}).then(() => { try { onUnavailable?.(); } catch {} });
+  };
   try {
     sdk = (overrides.loadSdk ?? loadNativeSdk)();
     subscription = sdk.manager.listenToAvailableDevices({ transport: 'NODE-HID' }).subscribe({
-      next: devices => publish(devices.length === 1),
-      error: () => { publish(false); void close().catch(() => {}); },
-      complete: () => { publish(false); void close().catch(() => {}); },
+      // Node HID starts with a synthetic BehaviorSubject([]). An empty list is
+      // proof of unplug only after this listener has actually seen a device.
+      next: devices => {
+        if (devices.length > 0) seenDevice = true;
+        publish(devices.length === 1, devices.length === 1 || (devices.length === 0 && seenDevice));
+      },
+      error: unavailable,
+      complete: unavailable,
     });
     if (stopped) subscription.unsubscribe();
   } catch {
-    publish(false);
-    void close().catch(() => {});
+    unavailable();
   }
   return close;
 }

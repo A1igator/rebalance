@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Subscription } from 'rxjs';
+import { LedgerDiagnostics, type LedgerDiagnostic } from './ledger-diagnostics.js';
 import { getAddress, hexToBytes, isAddress, parseTransaction, recoverTransactionAddress, serializeTransaction,
   type Address, type Hex } from 'viem';
 import { portfolioRoot } from '../scripts/profile-routing.mjs';
@@ -10,10 +11,10 @@ import type { PreparedTransaction } from './privy.js';
 export type LedgerSigningOutcome = 'rejected' | 'cancelled' | 'timeout' | 'unavailable' |
   'account-mismatch' | 'invalid-transaction' | 'invalid-signature' | 'unsupported';
 const MESSAGES: Record<LedgerSigningOutcome, string> = {
-  rejected: 'Action cancelled on the Ledger. A new request is needed before another signing attempt.',
+  rejected: 'Action cancelled on the Ledger. Reconnect the device or retry explicitly when ready.',
   cancelled: 'Ledger signing was cancelled. No transaction was broadcast.',
-  timeout: 'Ledger signing timed out. Connect and unlock the device, open Ethereum, then request a fresh transaction.',
-  unavailable: 'Ledger signing could not complete. Check the device and Ethereum app, then request a fresh transaction.',
+  timeout: 'Ledger signing timed out. Reconnect and unlock the device, then open Ethereum to retry.',
+  unavailable: 'Ledger signing could not complete. Check the device and Ethereum app, then reconnect or retry explicitly.',
   'account-mismatch': 'The verified Ledger account does not match the selected wallet. No fallback account was used.',
   'invalid-transaction': 'The prepared Ledger transaction is invalid. No transaction was signed.',
   'invalid-signature': 'Ledger returned an invalid signature or one for a different account or transaction. No transaction was broadcast.',
@@ -21,7 +22,11 @@ const MESSAGES: Record<LedgerSigningOutcome, string> = {
 };
 export class LedgerSigningError extends Error {
   override name = 'LedgerSigningError';
-  constructor(readonly outcome: LedgerSigningOutcome) { super(MESSAGES[outcome]); }
+  constructor(readonly outcome: LedgerSigningOutcome, readonly diagnostic?: LedgerDiagnostic) {
+    const context = diagnostic ? [diagnostic.phase, diagnostic.step, diagnostic.interaction, diagnostic.errorTag, diagnostic.deviceCode,
+      diagnostic.httpStatus ? `HTTP ${diagnostic.httpStatus}` : undefined].filter(Boolean).join('; ') : '';
+    super(`${MESSAGES[outcome]}${context ? ` [${context}]` : ''}`);
+  }
 }
 export type LedgerSigningOptions = LedgerOnboardingDependencies & { rootDir?: string; signal?: AbortSignal };
 const MAX_TIMEOUT_MS = 120_000;
@@ -135,6 +140,7 @@ export async function ledgerSigner(wallet: Address, options: LedgerSigningOption
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > MAX_TIMEOUT_MS) throw new LedgerSigningError('invalid-transaction');
   return { address: selected, signTransaction: async (tx: PreparedTransaction): Promise<Hex> => {
     const prepared = preparedLedgerTransaction(tx);
+    const diagnostics = new LedgerDiagnostics();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new LedgerSigningError('timeout')), timeoutMs);
     const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
@@ -142,30 +148,36 @@ export async function ledgerSigner(wallet: Address, options: LedgerSigningOption
       active(signal);
       const result = await withLedgerDevice(rootDir, signal, async device => {
         let account;
+        diagnostics.phase('account-binding');
         try { account = await findLedgerAccount(rootDir, selected); }
         catch { throw new LedgerSigningError('account-mismatch'); }
         active(signal);
         if (!device.signTransaction) throw new LedgerSigningError('unavailable');
-        const anchor = await completedAddress(device.getAddress(ANCHOR_PATH, readOptions), signal);
+        diagnostics.phase('anchor-read');
+        const anchor = await completedAddress(diagnostics.observe(device.getAddress(ANCHOR_PATH, readOptions)), signal);
         if (fingerprint(anchor) !== account.fingerprint) throw new LedgerSigningError('account-mismatch');
-        const derived = await completedAddress(device.getAddress(account.derivationPath, readOptions), signal);
+        diagnostics.phase('account-read');
+        const derived = await completedAddress(diagnostics.observe(device.getAddress(account.derivationPath, readOptions)), signal);
         if (derived.toLowerCase() !== selected.toLowerCase()) throw new LedgerSigningError('account-mismatch');
         active(signal);
-        const signature = await completedSignature(device.signTransaction(account.derivationPath, hexToBytes(serializeTransaction(prepared))), signal);
+        diagnostics.phase('sign');
+        const signature = await completedSignature(diagnostics.observe(device.signTransaction(account.derivationPath, hexToBytes(serializeTransaction(prepared)))), signal);
         active(signal);
-        const finalAnchor = await completedAddress(device.getAddress(ANCHOR_PATH, readOptions), signal);
+        diagnostics.phase('final-anchor-read');
+        const finalAnchor = await completedAddress(diagnostics.observe(device.getAddress(ANCHOR_PATH, readOptions)), signal);
         if (fingerprint(finalAnchor) !== account.fingerprint) throw new LedgerSigningError('account-mismatch');
         active(signal);
+        diagnostics.phase('signature-validation');
         const serialized = await verifiedLedgerTransaction(signature, selected, prepared);
         active(signal);
+        diagnostics.phase('cleanup');
         return serialized;
       }, options);
       active(signal);
       return result;
     } catch (error) {
-      if (signal.aborted) throw abortError(signal);
-      if (error instanceof LedgerSigningError) throw error;
-      throw new LedgerSigningError('unavailable');
+      const result = signal.aborted ? abortError(signal) : error instanceof LedgerSigningError ? error : new LedgerSigningError('unavailable');
+      throw new LedgerSigningError(result.outcome, diagnostics.snapshot(error));
     } finally { clearTimeout(timer); }
   } };
 }

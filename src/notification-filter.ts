@@ -7,9 +7,15 @@ const QUOTE_MESSAGE = 'Rebalance needs attention: A usable swap quote could not 
 export const isRetryableAttention = (event: RebalanceEvent): boolean => event.type === 'rebalance-attention' &&
   event.hash === undefined && (event.message === READ_MESSAGE || event.message === QUOTE_MESSAGE);
 
+const LEGACY_LEDGER_MESSAGE = 'Your Ledger portfolio has drifted beyond its target threshold. Connect and unlock Ledger, open Ethereum, and request a rebalance through your agent. Every transaction needs physical confirmation; this alert does not start signing.';
+
+/** This retired chat gate is now handled directly by the backend and Ledger. Retain its history. */
+const isLegacyLedgerGate = (event: RebalanceEvent): boolean => event.type === 'ledger-rebalance-needed' &&
+  event.hash === undefined && event.message === LEGACY_LEDGER_MESSAGE;
+
 /** These outcomes need no model/human action, regardless of age, recurrence or current status. */
 export const isLocalOnlyNotification = (event: RebalanceEvent): boolean =>
-  isRetryableAttention(event) || event.type === 'rebalance-recovered';
+  isRetryableAttention(event) || event.type === 'rebalance-recovered' || isLegacyLedgerGate(event);
 
 export type NotificationSelection = { events: readonly RebalanceEvent[]; nextAt: null };
 

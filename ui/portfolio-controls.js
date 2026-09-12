@@ -21,8 +21,8 @@
     run.disabled = suspended || busy || !statusFresh || !linked || !["running", "stopped"].includes(state);
     run.title = !linked ? "Open this portfolio through your agent to enable controls."
       : !statusFresh ? "Waiting for current portfolio status."
-      : state === "running" ? (mode === "ledger" ? "Stop monitoring this Ledger portfolio. Submitted transactions still settle." : "Stop this portfolio. Submitted transactions still settle.")
-      : state === "stopped" ? (mode === "ledger" ? "Start monitoring this Ledger wallet. Each rebalance requires a separate request and physical confirmation." : "Start automatic rebalancing for this wallet with its saved targets.")
+      : state === "running" ? (mode === "ledger" ? "Stop this Ledger portfolio and cancel waiting device prompts. Submitted transactions still settle." : "Stop this portfolio. Submitted transactions still settle.")
+      : state === "stopped" ? (mode === "ledger" ? "Start this Ledger wallet. The backend opens device prompts automatically; physically confirm each transaction." : "Start automatic rebalancing for this wallet with its saved targets.")
       : runner?.message || "Waiting for the local runner.";
     run.setAttribute("aria-label", `${run.textContent} portfolio${wallet ? ` ${short(wallet)}` : ""}`);
     // Public navigation follows this chart's wallet, independently of runner/chat controls.

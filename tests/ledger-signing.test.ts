@@ -276,10 +276,10 @@ test('presence watcher emits initial status and changes only without opening a d
   const close = watchLedgerPresence(value => changes.push(value), { loadSdk: () => sdk });
   devices.next([]); devices.next([]); devices.next([{}]); devices.next([{}]);
   devices.next([{}, {}]); devices.next([]); devices.next([{}]);
-  assert.deepEqual(changes, [false, true, false, true]);
+  assert.deepEqual(changes, [false, true, false, false, true]);
   await close(); await close();
   devices.next([]);
-  assert.equal(closes, 1); assert.deepEqual(changes, [false, true, false, true]);
+  assert.equal(closes, 1); assert.deepEqual(changes, [false, true, false, false, true]);
   assert.equal(devices.observed, false);
 });
 
@@ -317,4 +317,76 @@ test('malformed device state fails promptly without an unhandled observable exce
   const signer = await ledgerSigner(account.address, { rootDir: f.rootDir, connect: async () => d.adapter });
   await assert.rejects(signer.signTransaction(tx), outcome('unavailable'));
   assert.equal(d.closes(), 1);
+});
+
+
+test('Ledger diagnostics locate connection and address failures without exposing SDK payloads', async t => {
+  const f = await fixture(t);
+  const secret = 'DO-NOT-LOG-request-body-or-credential';
+  const blocked = await ledgerSigner(account.address, { rootDir: f.rootDir, connect: async () => {
+    throw { _tag: 'SendApduTimeoutError', message: secret, originalError: { request: secret } };
+  } });
+  await assert.rejects(blocked.signTransaction(tx), error => {
+    assert.ok(error instanceof LedgerSigningError);
+    assert.equal(error.diagnostic?.phase, 'connect');
+    assert.equal(error.diagnostic?.errorTag, 'SendApduTimeoutError');
+    assert.ok(!JSON.stringify(error).includes(secret));
+    assert.ok(!error.message.includes(secret));
+    return true;
+  });
+  const d = await device();
+  d.adapter.getAddress = () => ({ observable: of({ status: 'error', error: {
+    _tag: 'EthAppCommandError', errorCode: '6982', message: secret,
+  } }), cancel() {} });
+  const unavailable = await ledgerSigner(account.address, { rootDir: f.rootDir, connect: async () => d.adapter });
+  await assert.rejects(unavailable.signTransaction(tx), error => {
+    assert.ok(error instanceof LedgerSigningError);
+    assert.equal(error.diagnostic?.phase, 'anchor-read');
+    assert.equal(error.diagnostic?.deviceCode, '0x6982');
+    assert.equal(error.diagnostic?.errorTag, 'EthAppCommandError');
+    assert.ok(!error.message.includes(secret));
+    return true;
+  });
+  assert.equal(d.signed.length, 0);
+});
+
+test('Ledger diagnostic metadata steps distinguish pre-prompt failure and never contain signature or HTTP contents', async t => {
+  const f = await fixture(t), d = await device();
+  const secret = 'DO-NOT-LOG-signature-url-response';
+  d.adapter.signTransaction = () => ({ observable: of(
+    { status: 'pending', intermediateValue: { step: 'signer.eth.steps.buildContexts', requiredUserInteraction: 'none', response: secret } },
+    { status: 'error', error: { name: 'DmkNetworkClientError', status: 403, isTimeout: false, url: secret, message: secret } },
+  ), cancel() {} });
+  const signer = await ledgerSigner(account.address, { rootDir: f.rootDir, connect: async () => d.adapter });
+  await assert.rejects(signer.signTransaction(tx), error => {
+    assert.ok(error instanceof LedgerSigningError);
+    assert.equal(error.outcome, 'unavailable');
+    assert.equal(error.diagnostic?.phase, 'sign');
+    assert.equal(error.diagnostic?.step, 'signer.eth.steps.buildContexts');
+    assert.equal(error.diagnostic?.interaction, 'none');
+    assert.equal(error.diagnostic?.httpStatus, 403);
+    assert.equal(error.diagnostic?.networkTimeout, false);
+    assert.ok(Number.isSafeInteger(error.diagnostic?.elapsedMs));
+    assert.ok(!JSON.stringify(error).includes(secret));
+    assert.ok(!error.message.includes(secret));
+    return true;
+  });
+  assert.equal(d.closes(), 1);
+});
+
+test('Ledger diagnostics omit unrecognized provider fields and pending-step strings', async t => {
+  const f = await fixture(t), d = await device();
+  const secret = 'UNRECOGNIZED-PRIVATE-PAYLOAD';
+  d.adapter.signTransaction = () => ({ observable: of(
+    { status: 'pending', intermediateValue: { step: secret, requiredUserInteraction: secret } },
+    { status: 'error', error: { _tag: secret, errorCode: secret, status: secret, message: secret, stack: secret } },
+  ), cancel() {} });
+  const signer = await ledgerSigner(account.address, { rootDir: f.rootDir, connect: async () => d.adapter });
+  await assert.rejects(signer.signTransaction(tx), error => {
+    assert.ok(error instanceof LedgerSigningError);
+    assert.deepEqual(Object.keys(error.diagnostic!).sort(), ['elapsedMs', 'phase', 'status']);
+    assert.ok(!JSON.stringify(error).includes(secret));
+    assert.ok(!error.message.includes(secret));
+    return true;
+  });
 });
