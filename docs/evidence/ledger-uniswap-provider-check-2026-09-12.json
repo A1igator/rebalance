@@ -1,0 +1,329 @@
+{
+  "checkedAt": "2026-09-12T22:29:22.053598+00:00",
+  "scope": "Read-only Ledger Uniswap provider compatibility check; no wallet, hardware, signing or broadcast action.",
+  "source": {
+    "repository": "https://github.com/LedgerHQ/ledger-live",
+    "commit": "a9ce5a0bbcc9d2a94cb6de9936c7ff556ad14127",
+    "developmentPackageVersion": "2.5.0",
+    "npmPublishedLatest": "2.1.0",
+    "npmDevelopmentVersionLookup": "E404"
+  },
+  "tokenCatalog": {
+    "checkedAt": "2026-09-12T22:29:22.053598+00:00",
+    "sourceCommit": "a9ce5a0bbcc9d2a94cb6de9936c7ff556ad14127",
+    "sourcePackageVersion": "2.5.0",
+    "requestHeaders": {
+      "Content-Type": "application/json",
+      "X-Ledger-Client-Version": "wallet-cli/2.5.0"
+    },
+    "checks": [
+      {
+        "symbol": "USDG",
+        "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "network": "robinhood",
+        "url": "https://global.api.prd.ledger.com/cal/v1/tokens?contract_address=0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168&network=robinhood&limit=1&output=id%2Ccontract_address%2Cstandard%2Cdecimals%2Cdelisted%2Cname%2Cticker%2Cunits%2Ctoken_identifier%2Clive_signature",
+        "status": 403,
+        "bodySha256": "2938e9f1284180959e33ab1718d0793a72ff6e4cdb8108c34dcd14e69446de5c",
+        "nonJsonBytes": 17
+      },
+      {
+        "symbol": "AAPL",
+        "address": "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9",
+        "network": "robinhood",
+        "url": "https://global.api.prd.ledger.com/cal/v1/tokens?contract_address=0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9&network=robinhood&limit=1&output=id%2Ccontract_address%2Cstandard%2Cdecimals%2Cdelisted%2Cname%2Cticker%2Cunits%2Ctoken_identifier%2Clive_signature",
+        "status": 403,
+        "bodySha256": "2938e9f1284180959e33ab1718d0793a72ff6e4cdb8108c34dcd14e69446de5c",
+        "nonJsonBytes": 17
+      },
+      {
+        "symbol": "NVDA",
+        "address": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+        "network": "robinhood",
+        "url": "https://global.api.prd.ledger.com/cal/v1/tokens?contract_address=0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC&network=robinhood&limit=1&output=id%2Ccontract_address%2Cstandard%2Cdecimals%2Cdelisted%2Cname%2Cticker%2Cunits%2Ctoken_identifier%2Clive_signature",
+        "status": 403,
+        "bodySha256": "2938e9f1284180959e33ab1718d0793a72ff6e4cdb8108c34dcd14e69446de5c",
+        "nonJsonBytes": 17
+      },
+      {
+        "symbol": "MSFT",
+        "address": "0xe93237C50D904957Cf27E7B1133b510C669c2e74",
+        "network": "robinhood",
+        "url": "https://global.api.prd.ledger.com/cal/v1/tokens?contract_address=0xe93237C50D904957Cf27E7B1133b510C669c2e74&network=robinhood&limit=1&output=id%2Ccontract_address%2Cstandard%2Cdecimals%2Cdelisted%2Cname%2Cticker%2Cunits%2Ctoken_identifier%2Clive_signature",
+        "status": 403,
+        "bodySha256": "2938e9f1284180959e33ab1718d0793a72ff6e4cdb8108c34dcd14e69446de5c",
+        "nonJsonBytes": 17
+      },
+      {
+        "symbol": "AMD",
+        "address": "0x86923f96303D656E4aa86D9d42D1e57ad2023fdC",
+        "network": "robinhood",
+        "url": "https://global.api.prd.ledger.com/cal/v1/tokens?contract_address=0x86923f96303D656E4aa86D9d42D1e57ad2023fdC&network=robinhood&limit=1&output=id%2Ccontract_address%2Cstandard%2Cdecimals%2Cdelisted%2Cname%2Cticker%2Cunits%2Ctoken_identifier%2Clive_signature",
+        "status": 403,
+        "bodySha256": "2938e9f1284180959e33ab1718d0793a72ff6e4cdb8108c34dcd14e69446de5c",
+        "nonJsonBytes": 17
+      }
+    ]
+  },
+  "control": {
+    "checkedAt": "2026-09-12T22:29:58.672419+00:00",
+    "purpose": "Known Ethereum USDT catalog control, not a portfolio or chain change",
+    "url": "https://global.api.prd.ledger.com/cal/v1/tokens?contract_address=0xdAC17F958D2ee523a2206206994597C13D831ec7&network=ethereum&limit=1&output=id%2Ccontract_address%2Cstandard%2Cdecimals%2Cdelisted%2Cname%2Cticker%2Cunits%2Ctoken_identifier%2Clive_signature",
+    "status": 403,
+    "headers": {
+      "Server": "cloudflare",
+      "Content-Type": "text/plain; charset=UTF-8"
+    },
+    "bodySha256": "2938e9f1284180959e33ab1718d0793a72ff6e4cdb8108c34dcd14e69446de5c",
+    "errorText": "error code: 1010\n"
+  },
+  "cliProbe": {
+    "packageVersion": "2.1.0",
+    "executed": true,
+    "authorization": "The user explicitly approved the read-only official CLI check despite built-in Segment analytics. The first invocation was not executed after automatic review rejection; execution proceeded only after that approval.",
+    "isolatedState": true,
+    "cleanEnvironment": true,
+    "commands": [
+      {
+        "checkedAt": "2026-09-12T22:35:14.810103+00:00",
+        "packageVersion": "2.1.0",
+        "command": [
+          "assets",
+          "token",
+          "robinhood",
+          "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+          "--output",
+          "json"
+        ],
+        "isolatedState": true,
+        "scope": "Public token catalog lookup only; no account, hardware or signing command",
+        "exitCode": 0,
+        "stdout": {
+          "status": "success",
+          "command": "assets token",
+          "network": "robinhood",
+          "token": {
+            "id": "robinhood/erc20/global_dollar_0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+            "ticker": "USDG",
+            "name": "Global Dollar",
+            "contractAddress": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+            "parentCurrencyId": "robinhood",
+            "tokenType": "erc20",
+            "decimals": 6,
+            "delisted": false
+          },
+          "timestamp": "2026-09-12T22:35:16.418Z"
+        },
+        "stderr": ""
+      },
+      {
+        "checkedAt": "2026-09-12T22:36:04.372020+00:00",
+        "packageVersion": "2.1.0",
+        "command": [
+          "assets",
+          "token",
+          "robinhood",
+          "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9",
+          "--output",
+          "json"
+        ],
+        "isolatedState": true,
+        "scope": "Public token catalog lookup only; no account, hardware or signing command",
+        "exitCode": 0,
+        "stdout": {
+          "status": "success",
+          "command": "assets token",
+          "network": "robinhood",
+          "token": {
+            "id": "robinhood/erc20/apple_0xaf3d76f1834a1d425780943c99ea8a608f8a93f9",
+            "ticker": "AAPL",
+            "name": "Apple",
+            "contractAddress": "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9",
+            "parentCurrencyId": "robinhood",
+            "tokenType": "erc20",
+            "decimals": 18,
+            "delisted": false
+          },
+          "timestamp": "2026-09-12T22:36:05.859Z"
+        },
+        "stderr": ""
+      },
+      {
+        "checkedAt": "2026-09-12T22:37:47.219801+00:00",
+        "packageVersion": "2.1.0",
+        "command": [
+          "swap",
+          "quote",
+          "--from",
+          "robinhood/erc20/global_dollar_0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+          "--to",
+          "robinhood/erc20/apple_0xaf3d76f1834a1d425780943c99ea8a608f8a93f9",
+          "--amount",
+          "1.1875",
+          "--output",
+          "json"
+        ],
+        "isolatedState": true,
+        "scope": "Read-only quote with real public token IDs and no account/session; no device or signing command",
+        "exitCode": 1,
+        "stdout": "",
+        "stderr": {
+          "ok": false,
+          "error": {
+            "kind": "validation",
+            "name": "BunliValidationError",
+            "tag": "BunliValidationError",
+            "message": "Invalid option 'from-account': Invalid input: expected string, received undefined",
+            "command": "quote",
+            "option": "from-account",
+            "expectedType": "string"
+          }
+        }
+      },
+      {
+        "checkedAt": "2026-09-12T22:40:17.180391+00:00",
+        "packageVersion": "2.1.0",
+        "command": [
+          "swap",
+          "quote",
+          "--from",
+          "robinhood/erc20/global_dollar_0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+          "--to",
+          "robinhood/erc20/apple_0xaf3d76f1834a1d425780943c99ea8a608f8a93f9",
+          "--amount",
+          "1.1875",
+          "--from-account",
+          "unconfigured-readonly-probe",
+          "--to-account",
+          "unconfigured-readonly-probe",
+          "--output",
+          "json"
+        ],
+        "isolatedState": true,
+        "scope": "Read-only quote with real public token IDs and no account/session; no device or signing command",
+        "exitCode": 1,
+        "stdout": {
+          "ok": false,
+          "error": {
+            "command": "swap quote",
+            "message": "Unsupported swap from currency \"robinhood/erc20/global_dollar_0x5fc5360d0400a0fd4f2af552add042d716f1d168\". Wallet CLI supports: bitcoin, ethereum, solana (and tokens on those chains)."
+          }
+        },
+        "stderr": ""
+      }
+    ]
+  },
+  "conclusion": "Official published CLI 2.1.0 resolved real Robinhood USDG and AAPL token IDs; all five exact-address IDs appeared in the independent swap catalog. Its swap quote command then explicitly rejected Robinhood USDG under the supported-network guard, before account resolution. Direct Uniswap quote requests for the four stock pairs returned HTTP 403 Cloudflare HTML, not provider quotes. No swap was built or presented to the device. Token recognition does not establish route or Clear Signing support; the broader EVM execute implementation remains untested.",
+  "deviceValidation": {
+    "attempted": false,
+    "clearSigningVerified": false
+  },
+  "sources": [
+    "https://github.com/LedgerHQ/ledger-live/blob/a9ce5a0bbcc9d2a94cb6de9936c7ff556ad14127/domain/api/currency-token/src/api.ts",
+    "https://github.com/LedgerHQ/ledger-live/blob/a9ce5a0bbcc9d2a94cb6de9936c7ff556ad14127/domain/api/currency-token/src/schema.ts",
+    "https://github.com/LedgerHQ/ledger-live/blob/a9ce5a0bbcc9d2a94cb6de9936c7ff556ad14127/domain/api/swap-quotes/src/api.ts",
+    "https://github.com/LedgerHQ/ledger-live/blob/a9ce5a0bbcc9d2a94cb6de9936c7ff556ad14127/libs/ledger-live-common/src/wallet-api/Exchange/dex/swap-api/uniswap.ts",
+    "https://developers.ledger.com/docs/ai-tools/ledger-cli#swap"
+  ],
+  "providerCatalog": {
+    "endpoint": "https://swap.ledger.com/v5/currencies/all",
+    "parameters": {
+      "providers-whitelist": "uniswap",
+      "additional-coins-flag": "false"
+    },
+    "curlExitCode": 0,
+    "bodyBytes": 848687,
+    "bodySha256": "948bcd075e50dc87046860d187be4881daac9bf7e1e3e79789faf6c440433046",
+    "retrievedAt": "2026-09-12T22:35:22.575380+00:00",
+    "summary": {
+      "from": {
+        "robinhoodCount": 416,
+        "matches": {
+          "USDG": [
+            "robinhood/erc20/global_dollar_0x5fc5360d0400a0fd4f2af552add042d716f1d168"
+          ],
+          "AAPL": [
+            "robinhood/erc20/apple_0xaf3d76f1834a1d425780943c99ea8a608f8a93f9"
+          ],
+          "NVDA": [
+            "robinhood/erc20/nvidia_0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec"
+          ],
+          "MSFT": [
+            "robinhood/erc20/microsoft_0xe93237c50d904957cf27e7b1133b510c669c2e74"
+          ],
+          "AMD": [
+            "robinhood/erc20/amd_0x86923f96303d656e4aa86d9d42d1e57ad2023fdc"
+          ]
+        }
+      },
+      "to": {
+        "robinhoodCount": 416,
+        "matches": {
+          "USDG": [
+            "robinhood/erc20/global_dollar_0x5fc5360d0400a0fd4f2af552add042d716f1d168"
+          ],
+          "AAPL": [
+            "robinhood/erc20/apple_0xaf3d76f1834a1d425780943c99ea8a608f8a93f9"
+          ],
+          "NVDA": [
+            "robinhood/erc20/nvidia_0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec"
+          ],
+          "MSFT": [
+            "robinhood/erc20/microsoft_0xe93237c50d904957cf27e7b1133b510c669c2e74"
+          ],
+          "AMD": [
+            "robinhood/erc20/amd_0x86923f96303d656e4aa86d9d42d1e57ad2023fdc"
+          ]
+        }
+      }
+    },
+    "limit": "Catalog presence is not proof of a working Uniswap quote, route or readable device display."
+  },
+  "providerQuotes": {
+    "checkedAt": "2026-09-12T22:36:57.019338+00:00",
+    "endpoint": "https://swap.ledger.com/v5/quote",
+    "providerFilter": "uniswap",
+    "requestShape": "Current official CLI execute quote parameters, with published client-version header wallet-cli/2.1.0, actual Ledger token IDs, and the selected public wallet as sender/recipient. The wallet address, full query and Cloudflare HTML are omitted.",
+    "checks": [
+      {
+        "symbol": "AAPL",
+        "inputAmount": "1.1875",
+        "fromId": "robinhood/erc20/global_dollar_0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+        "toId": "robinhood/erc20/apple_0xaf3d76f1834a1d425780943c99ea8a608f8a93f9",
+        "curlExitCode": 0,
+        "httpStatus": "403",
+        "bodySha256": "c0c8572e5eac14bd74eb3f2565ac45e96236588e28be888bd71fb90acc3555b0",
+        "responseType": "Cloudflare Attention Required HTML; no provider quote JSON"
+      },
+      {
+        "symbol": "NVDA",
+        "inputAmount": "1.1875",
+        "fromId": "robinhood/erc20/global_dollar_0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+        "toId": "robinhood/erc20/nvidia_0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec",
+        "curlExitCode": 0,
+        "httpStatus": "403",
+        "bodySha256": "a92bd0a741109ea387297276ed0f66c92d1bfdb607f325eaccd0d79562962aa0",
+        "responseType": "Cloudflare Attention Required HTML; no provider quote JSON"
+      },
+      {
+        "symbol": "MSFT",
+        "inputAmount": "1.1875",
+        "fromId": "robinhood/erc20/global_dollar_0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+        "toId": "robinhood/erc20/microsoft_0xe93237c50d904957cf27e7b1133b510c669c2e74",
+        "curlExitCode": 0,
+        "httpStatus": "403",
+        "bodySha256": "2bacf1100c4be78c5a37661ea0a109129c308506044f8f9dcf812607209b0491",
+        "responseType": "Cloudflare Attention Required HTML; no provider quote JSON"
+      },
+      {
+        "symbol": "AMD",
+        "inputAmount": "1.1875",
+        "fromId": "robinhood/erc20/global_dollar_0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+        "toId": "robinhood/erc20/amd_0x86923f96303d656e4aa86d9d42d1e57ad2023fdc",
+        "curlExitCode": 0,
+        "httpStatus": "403",
+        "bodySha256": "8e68fc051023e1ee9844645b2d7d9fd08b9cb2c706557c3f00170c6f380b82e6",
+        "responseType": "Cloudflare Attention Required HTML; no provider quote JSON"
+      }
+    ]
+  }
+}
