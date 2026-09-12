@@ -111,3 +111,7 @@ The project definition is prepared for native loading and user review. Current C
 Tests execute the actual script only against unconfigured temporary storage with network disabled, or use injected fixture operations. They establish selection, deduplication and result handling; they do not establish native Claude dispatch or real-money arming. Trading remains stopped after the folder move until a subsequent user-issued permitted launch.
 
 Sources: [expansion hook](https://code.claude.com/docs/en/hooks#userpromptexpansion), [common prompt identity](https://code.claude.com/docs/en/hooks#common-input-fields), [project-relative exec arguments](https://code.claude.com/docs/en/hooks#reference-scripts-by-path).
+
+## OpenCode native entry — 2026-09-11
+
+OpenCode's project command and plugin reuse this launcher through a Node adapter. `command.execute.before` supplies a one-use marker; `chat.message` resolves the stable native user message ID and verifies a root Build session before dispatch. The request is namespaced by `opencode:<sessionID>`, preserving the existing wallet-route and newer-stop barriers. Plain text, skill loading, scoped requests, Plan/custom agents and child sessions do not dispatch. See [OpenCode integration](OPENCODE.md) for setup, notification controls, companion behavior and native fixture evidence.

@@ -9,7 +9,7 @@ import { acquireLock, atomicWriteJson, readJson } from './storage.js';
 const hex = /^[a-f0-9]{64}$/;
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 export type SetupMode = 'private-key' | 'privy' | 'ledger';
-export type ViewDelivery = { kind: 'codex'; command?: string } | { kind: 'claude' } | null;
+export type ViewDelivery = { kind: 'codex'; command?: string } | { kind: 'claude' } | { kind: 'opencode' } | null;
 export type ViewRecord = { version: 1; sessionId: string; delivery: ViewDelivery; createdAt: string };
 export type ViewSetupResult = { state: 'accepted' | 'pending' | 'uncertain'; requestId: string; message: string };
 type StoredRequest = {
@@ -44,6 +44,7 @@ function session(value: unknown): string {
 function delivery(value: unknown, sessionId: string): ViewDelivery {
   if (value === null) return null;
   if (!object(value)) throw failure();
+  if (value.kind === 'opencode' && keys(value, ['kind']) && /^opencode:ses_[A-Za-z0-9]{1,128}$/.test(sessionId)) return { kind: 'opencode' };
   if (value.kind === 'claude' && keys(value, ['kind']) && sessionId.startsWith('claude:') && sessionId.length > 7) return { kind: 'claude' };
   if (value.kind === 'codex' && keys(value, ['kind', 'command']) && uuid.test(sessionId)) {
     const command = value.command ?? 'codex';
@@ -80,7 +81,7 @@ async function viewByHash(root: string, id: string): Promise<ViewRecord> {
 /** The bearer token stays in the local URL fragment; only its hash is persisted. */
 export async function issueView(root: string, sessionId: string, descriptor?: ViewDelivery): Promise<{ token: string }> {
   sessionId = session(sessionId);
-  const inferred = uuid.test(sessionId) ? { kind: 'codex' } : sessionId.startsWith('claude:') && sessionId.length > 7 ? { kind: 'claude' } : null;
+  const inferred = uuid.test(sessionId) ? { kind: 'codex' } : sessionId.startsWith('claude:') && sessionId.length > 7 ? { kind: 'claude' } : /^opencode:ses_[A-Za-z0-9]{1,128}$/.test(sessionId) ? { kind: 'opencode' } : null;
   const selected = delivery(descriptor === undefined ? inferred : descriptor, sessionId);
   const directory = await safeDirectory(root, 'views');
   const token = randomBytes(32).toString('hex');
@@ -151,6 +152,7 @@ export async function requestWalletSetup(root: string, token: string, mode: Setu
   requestId = requestId.toLowerCase();
   const view = await readView(root, token);
   if (!view.delivery) throw new Error('Open this companion view through a supported agent conversation to request wallet setup.');
+  if (view.delivery.kind === 'opencode') throw new Error('Use the companion wallet setup buttons for OpenCode; setup runs locally without a model queue.');
   const viewHash = tokenHash(token), id = requestIdentity(viewHash, requestId), key = `${root}/${id}`;
   const running = inFlight.get(key);
   if (running) { if (running.mode !== mode) throw new Error('This setup request ID already names another signer choice.'); return running.promise; }
