@@ -859,3 +859,42 @@ test('bounded runner readback fails closed even when the transport or JSON ignor
     assert.equal(page.posts().length, 0);
   }
 });
+
+
+test('only a server-confirmed cancellable Start enables explicit Stop from unavailable', async () => {
+  const page = await browser({ reply: async call => call.method === 'POST' ? ok(result('stopped', { outcome: 'stop-requested' })) : undefined });
+  await page.ready();
+  const pending = { ...runner('unavailable'), canCancelStart: true, message: 'Cancel the earlier unconfirmed Start before trying again.' };
+  await page.runner(pending);
+  assert.equal(page.byId('portfolio-run').textContent, 'Cancel start');
+  assert.equal(page.byId('portfolio-run').disabled, false);
+  assert.match(page.byId('control-message').textContent, /Cancel the earlier/);
+  assert.equal(page.posts().length, 0);
+  await page.click('portfolio-run');
+  assert.deepEqual(page.posts().map(call => call.body), [{ token, wallet, action: 'stop', requestId }]);
+  assert.equal(page.byId('portfolio-run').textContent, 'Start');
+  await page.timersRun();
+  assert.equal(page.posts().length, 1, 'cancelling never automatically starts again');
+  for (const value of [runner('unavailable'), { ...pending, canCancelStart: 'true' }, { ...pending, wallet: otherWallet }]) {
+    await page.runner(value);
+    assert.equal(page.byId('portfolio-run').disabled, true);
+    await page.click('portfolio-run', true);
+  }
+  await page.runner(pending, true);
+  assert.equal(page.byId('portfolio-run').disabled, true);
+  await page.runner(pending);
+  await page.view({ snapshot: { connectedWallet: otherWallet } });
+  assert.equal(page.byId('portfolio-run').disabled, true);
+  assert.equal(page.posts().length, 1);
+});
+
+test('delegation verification remains Starting without implying another authorization', async () => {
+  const page = await browser();
+  await page.ready();
+  await page.status({ ...chart(), mode: 'ledger' });
+  await page.runner({ ...runner('starting'), message: 'Checking existing batching setup before starting.' });
+  assert.equal(page.byId('portfolio-run').textContent, 'Starting…');
+  assert.match(page.byId('portfolio-run').title, /Checking existing/);
+  assert.doesNotMatch(page.byId('portfolio-run').textContent, /7702|Authorize|setup/);
+  assert.equal(page.posts().length, 0);
+});

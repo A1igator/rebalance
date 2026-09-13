@@ -5,21 +5,22 @@ import { fileURLToPath } from 'node:url';
 import { resolveProfile, walletIdentity, type RoutedProfile } from '../scripts/profile-routing.mjs';
 import { requestLedgerRebalance } from './ledger-request.js';
 import { validateConfig } from './config.js';
-import { acquireConfigLock } from './config-lock.js';
+import { acquireConfigLock, ConfigLockBusyError } from './config-lock.js';
 import { readView, viewState } from './view-session.js';
-import { acquireLock, atomicWriteJson, readJson } from './storage.js';
+import { acquireLock, atomicWriteJson, isLiveLockContention, readJson } from './storage.js';
 import { validatePending } from './transactions.js';
 import type { PendingTransaction } from './storage.js';
 import { ensureSelectedCodexNotifications } from './selected-notifications.js';
 
 type BatchingImplementation = 'calibur' | 'simple7702';
 export type CaliburSummary = { implementation?: BatchingImplementation; state: 'needed' | 'ready' | 'unknown' | 'authorizing' | 'signing' | 'confirming'; message?: string };
-export type RunnerSummary = { wallet: string | null; state: 'running' | 'stopped' | 'starting' | 'stopping' | 'setting-up' | 'unavailable' | 'deferred'; message?: string; calibur?: CaliburSummary };
+export type RunnerSummary = { wallet: string | null; state: 'running' | 'stopped' | 'starting' | 'stopping' | 'setting-up' | 'unavailable' | 'deferred'; message?: string; calibur?: CaliburSummary; canCancelStart?: true };
 export type RunnerResult = RunnerSummary & { requestId: string; outcome: string };
 export type RunnerRequest = { token: string; wallet: string; action: 'start' | 'stop'; requestId: string };
 export type LedgerRetryRequest = { token: string; wallet: string; requestId: string; retryOf: string };
 type Outcome = 'prepared' | 'armed' | 'starting' | 'stop-requested' | 'blocked' | 'busy' | 'deferred' | 'uncertain';
 const setupFailures = {
+  'setup-check-unavailable': 'Wallet batching could not be checked. Check the network, then press Start to retry. No setup or runner launch was dispatched.',
   'deployment-needed': 'Simple7702 needs a one-time contract deployment on this network. Complete deployment before pressing Start; ETH is required.',
   'existing-calibur': 'This wallet already uses Calibur. Its delegation and pending receipts were preserved.',
   'simulation-failed': 'Batching setup simulation could not be verified. Check the network, then press Start to retry.',
@@ -110,7 +111,7 @@ const defaults: PortfolioControlDependencies = {
 export class PortfolioControls {
   private readonly deps: PortfolioControlDependencies;
   private readonly active = new Map<string, { action: RunnerRequest['action']; promise: Promise<RunnerResult> }>();
-  private readonly setups = new Map<string, { controller: AbortController; expectedStop: string; implementation?: BatchingImplementation }>();
+  private readonly setups = new Map<string, { controller: AbortController; expectedStop: string; phase: 'checking' | 'setup'; implementation?: BatchingImplementation }>();
   private caliburCache: { at: number; value: CaliburSummary } | undefined;
   private caliburRefresh: Promise<void> | undefined;
   readonly rootDir: string;
@@ -247,6 +248,7 @@ export class PortfolioControls {
     // Only this explicit stopped-wallet Start opts in. Hold the same short
     // execution/configuration boundaries as configure; preserve every field.
     let hasPendingSetup = receiptOnly;
+    let alreadyReady = false;
     const initialConfig = (await this.profile()).config;
     const retained = await readJson<PendingTransaction>(this.path('pending.json'));
     let implementation: BatchingImplementation;
@@ -256,16 +258,33 @@ export class PortfolioControls {
       if (retained && retained.kind !== `${implementation}-setup`) throw new Error('Pending transaction belongs to another execution path');
       if (retained) validatePending(retained, initialConfig);
     } else {
-      const state = await this.currentBatching(profile); await current();
-      if (state.state !== 'needed' && state.state !== 'ready') return undefined;
+      let state: CaliburSummary;
+      try { state = await this.currentBatching(profile); }
+      catch (error) {
+        // This request has only observed public setup status. Unlike a lost
+        // setup/launch reply, a failed check is safe for a new explicit Start.
+        if (error instanceof SetupBlockedError) throw error;
+        throw new SetupBlockedError('setup-check-unavailable');
+      }
+      await current();
+      if (state.state !== 'needed' && state.state !== 'ready') throw new SetupBlockedError('setup-check-unavailable');
       implementation = state.implementation!;
+      alreadyReady = state.state === 'ready' && initialConfig.execution === implementation;
       // An existing Calibur designation is never migrated by Start.
-      if (implementation === 'calibur' && state.state !== 'ready') return undefined;
+      if (implementation === 'calibur' && state.state !== 'ready') throw new SetupBlockedError('setup-check-unavailable');
     }
-    const activeSetup = this.setups.get(key(entry)); if (activeSetup) activeSetup.implementation = implementation;
-    const releaseRun = await acquireLock(this.dataDir, 'run.lock');
+    const activeSetup = this.setups.get(key(entry));
+    if (activeSetup) {
+      activeSetup.implementation = implementation;
+      if (!alreadyReady) activeSetup.phase = 'setup';
+    }
+    const busy = (error: unknown): never => {
+      if (error instanceof ConfigLockBusyError || isLiveLockContention(error)) throw new SetupBusyError('Another operation currently owns this portfolio');
+      throw error;
+    };
+    const releaseRun = await acquireLock(this.dataDir, 'run.lock').catch(busy);
     try {
-      const releaseConfig = await acquireConfigLock(this.dataDir, { signal });
+      const releaseConfig = await acquireConfigLock(this.dataDir, { signal }).catch(busy);
       try {
         await current();
         const { config } = await this.profile();
@@ -276,6 +295,15 @@ export class PortfolioControls {
           throw new Error('Ledger setup requires an idle portfolio without a pending transaction');
         }
         if (receiptOnly && config.execution !== implementation) throw new Error('Setup execution mode changed');
+        if (alreadyReady) {
+          // A fresh delegation/deployment proof can reuse an already configured
+          // wallet. Keep the same Stop/configuration/receipt boundaries as setup.
+          if (pending || JSON.stringify(config) !== JSON.stringify(initialConfig)) {
+            throw new SetupBlockedError('setup-check-unavailable');
+          }
+          await current();
+          return implementation;
+        }
         if (config.execution !== implementation) {
           const raw = await readJson<Record<string, unknown>>(this.path('config.json'));
           const next = { ...raw, execution: implementation }; validateConfig(next);
@@ -329,7 +357,9 @@ export class PortfolioControls {
       const setupFailure = entries.findLast(item => item.action === 'start' && item.expectedStop === generation)?.setupBlocked;
       const setupMessage = setupFailure ? setupFailures[setupFailure] : undefined;
       const setup = [...this.setups.values()].find(item => item.expectedStop === generation && !item.controller.signal.aborted);
-      if (setup) return { wallet, state: 'setting-up', calibur: this.cachedCalibur(profile, setup.implementation) };
+      if (setup) return setup.phase === 'checking'
+        ? { wallet, state: 'starting', message: 'Checking existing wallet batching before starting the portfolio.' }
+        : { wallet, state: 'setting-up', calibur: this.cachedCalibur(profile, setup.implementation) };
       if (stopped !== null && (pending?.action !== 'start' || (run && saved?.armed === true))) {
         return { wallet, state: run || launch || spawning || inFlight ? 'stopping' : 'stopped',
           message: run || launch || spawning || inFlight ? messages['stop-requested'] : setupMessage,
@@ -353,8 +383,12 @@ export class PortfolioControls {
           return { wallet, state: 'stopped', message, calibur: { implementation: config.execution as BatchingImplementation, state: 'confirming', message } };
         }
       }
-      if (pending) return inFlight
-        ? { wallet, state: pending.action === 'start' ? 'starting' : 'stopping', message: messages.prepared } : unavailable(wallet);
+      if (pending) {
+        if (inFlight) return { wallet, state: pending.action === 'start' ? 'starting' : 'stopping', message: messages.prepared };
+        if (pending.action === 'start') return { ...unavailable(wallet), canCancelStart: true,
+          message: 'An earlier Start could not be confirmed. Cancel that request before trying Start again. Any submitted transaction remains tracked.' };
+        return unavailable(wallet);
+      }
       return { wallet, state: 'stopped', ...(setupMessage ? { message: setupMessage } : {}),
         ...(config.mode === 'ledger' ? { calibur: { ...this.cachedCalibur(profile), ...(setupMessage ? { message: setupMessage } : {}) } } : {}) };
     } catch { return unavailable(wallet); }
@@ -440,9 +474,9 @@ export class PortfolioControls {
             throw new SetupBusyError('Another operation currently owns this portfolio');
           }
           const controller = new AbortController();
-          this.setups.set(id, { controller, expectedStop: entry.expectedStop });
-          this.caliburCache = { at: Date.now(), value: { implementation: 'simple7702', state: 'needed', message: 'Preparing batching setup before starting the portfolio.' } };
-          accepted({ wallet: entry.wallet, requestId: entry.requestId, outcome: 'setting-up', state: 'setting-up', calibur: this.caliburCache.value });
+          this.setups.set(id, { controller, expectedStop: entry.expectedStop, phase: 'checking' });
+          accepted({ wallet: entry.wallet, requestId: entry.requestId, outcome: 'starting', state: 'starting',
+            message: 'Checking existing wallet batching before starting the portfolio.' });
           try {
             const implementation = await this.prepareCalibur(profile, entry, controller.signal, receiptOnly);
             if (!implementation) throw new Error('Batching setup remains unresolved');
@@ -497,7 +531,8 @@ export class PortfolioControls {
     if (current) {
       if (current.action !== entry.action) throw new PortfolioControlError(409, 'This request ID already belongs to another control action.');
       return current.promise.then(async result => {
-        if (result.state !== 'setting-up' || this.setups.has(id)) return result;
+        if (!['starting', 'setting-up'].includes(result.state)) return result;
+        if (this.setups.has(id)) return { ...result, ...await this.read() };
         const saved = (await this.entries()).find(item => key(item) === id);
         return { ...await this.read(), requestId: entry.requestId, outcome: saved?.outcome === 'prepared' ? 'starting' : 'already-handled' };
       });

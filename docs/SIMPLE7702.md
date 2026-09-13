@@ -60,3 +60,10 @@ At **08:25:08 and 08:25:24 UTC**, two subsequent Simple7702 self-calls succeeded
 A subsequent owner-started corrective run using the fixed planner completed the intended allocation. Independent receipt/ABI checks verified one successful Simple7702 self-call containing all four exact approvals followed by the Uniswap sales-and-purchases multicall, without a new delegation authorization. Fresh holdings confirmed completion against the targets used by that run. This supersedes the earlier incomplete-rebalance status above; physical device screen count and Clear Signing remain unverified. Session-specific transaction and allocation details are retained in the ignored local audit.
 
 Reproduce the source/deployment proof with `node scripts/verify-simple7702-deployment.mjs`; it reads public sources/RPC and uses disposable compilation state, without signing. Receipt verification itself does not start a runner, sign or submit transactions.
+
+
+## Restarting an already-enabled wallet
+
+Under [prompt 109](prompts/109-ledger-restart-preflight.md), an explicit Ledger Start initially shows ordinary startup while checking the existing public delegation. If fresh proof reports the configured implementation is ready, the controller rechecks the unchanged configuration, Stop generation and absence of pending work under its existing locks, then proceeds to launch without invoking the setup command. Real first-time or retained setup work keeps its separate setup-stage display.
+
+A failed read-only verification before setup/launch dispatch returns a retryable blocked result with an explanation. A potentially dispatched command still retains its uncertainty barrier. If an earlier Start is unknown and no active ownership or setup-receipt continuation is present, the chart offers **Cancel start**. That explicit click uses the existing Stop command to supersede the old request before a separate Start; it neither replays Start nor deletes transaction or control history.

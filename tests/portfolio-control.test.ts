@@ -91,7 +91,8 @@ test('live launch ownership is starting, while corrupt ownership and history rem
   await atomicWriteJson(join(f.root, 'launch.lock'), { pid: 424242 });
   assert.equal((await f.controls.read()).state, 'starting');
   await writeFile(join(f.root, 'launch.lock'), '{');
-  assert.equal((await f.controls.read()).state, 'unavailable');
+  const corrupt = await f.controls.read();
+  assert.equal(corrupt.state, 'unavailable'); assert.equal(corrupt.canCancelStart, undefined);
   await rm(join(f.root, 'launch.lock'));
   await atomicWriteJson(join(f.root, 'runner-requests.json'), [{ invalid: true }]);
   assert.equal((await f.controls.read()).state, 'unavailable');
@@ -200,6 +201,7 @@ test('unknown command outcome and durable prepared request never dispatch a repl
   f.setExecute(async () => { throw new Error('private provider payload'); });
   const failed = await f.controls.command(request);
   assert.equal(failed.outcome, 'uncertain'); assert.equal(failed.state, 'unavailable');
+  assert.equal(failed.canCancelStart, true);
   assert.doesNotMatch(JSON.stringify(failed), /private provider/);
   const saved = await readJson<Record<string, unknown>[]>(join(f.root, 'runner-requests.json'));
   saved![0]!.outcome = 'prepared';
@@ -240,7 +242,8 @@ test('Ledger Start performs setup before monitoring while replay and Stop remain
   await rm(join(f.root, 'run.lock')); f.alive.clear();
   const start = f.request('start');
   const started = await f.controls.command(start);
-  assert.equal(started.state, 'setting-up'); assert.equal(started.outcome, 'setting-up');
+  assert.equal(started.state, 'starting'); assert.equal(started.outcome, 'starting');
+  assert.match(started.message!, /Checking existing wallet batching/);
   await until(async () => (await f.controls.read()).state === 'running');
   await until(async () => (await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json')))?.[0]?.outcome === 'armed');
   assert.equal(f.calls.length, 2); assert.equal(f.calls[0]!.args[0], 'ledger'); assert.equal(f.calls[1]!.args[0], 'launch');
@@ -267,7 +270,7 @@ test('a legacy deferred Ledger request stays handled while a new Start can begin
   assert.equal(replay.outcome, 'already-handled'); assert.equal(replay.state, 'stopped');
   assert.match(replay.message!, /earlier Ledger Start request was deferred/);
   assert.equal(f.calls.length, 0);
-  assert.equal((await restarted.command(f.request('start'))).state, 'setting-up');
+  assert.equal((await restarted.command(f.request('start'))).state, 'starting');
   await until(async () => (await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json')))?.at(-1)?.outcome === 'armed');
   assert.equal(f.calls.length, 2); assert.equal(f.calls[0]!.args[0], 'ledger'); assert.equal(f.calls[1]!.args[0], 'launch');
   const saved = await readJson<{ outcome: string }[]>(join(f.root, 'runner-requests.json'));
@@ -368,7 +371,7 @@ test('stopped Ledger Start durably claims once, preserves settings and waits for
     assert.equal(args[4], digest(oldStop)); return f.run(profile, args, sessionId);
   } });
   const request = f.request('start');
-  const response = await controls.command(request); assert.equal(response.state, 'setting-up');
+  const response = await controls.command(request); assert.equal(response.state, 'starting');
   await until(() => f.calls.length === 1);
   assert.equal((await controls.command(request)).state, 'setting-up');
   assert.equal((await controls.command(f.request('start'))).outcome, 'busy');
@@ -390,7 +393,7 @@ test('Stop cancels a pending Ledger setup without waiting and prevents any later
     }
     return f.run(profile, args);
   } });
-  const request = f.request('start'); assert.equal((await controls.command(request)).state, 'setting-up');
+  const request = f.request('start'); assert.equal((await controls.command(request)).state, 'starting');
   await until(() => Boolean(signal));
   assert.equal((await controls.command(f.request('stop'))).outcome, 'stop-requested');
   assert.equal(signal!.aborted, true);
@@ -480,6 +483,7 @@ test('a fresh Start after an uncertain setup send can only reconcile its retaine
   await until(async () => (await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json')))?.[0]?.outcome === 'uncertain');
   const uncertain = await f.controls.read();
   assert.equal(uncertain.state, 'stopped'); assert.equal(uncertain.calibur?.state, 'confirming');
+  assert.equal(uncertain.canCancelStart, undefined);
   assert.match(uncertain.message!, /Start checks its receipt/);
   assert.notEqual(await readJson(join(f.root, 'pending.json')), null);
   let reads = 0;
@@ -528,7 +532,7 @@ test('an undelegated failed Calibur opt-in migrates to Simple7702 only on the ne
   assert.equal(f.calls[0]!.args[1], 'setup-simple7702');
 });
 
-test('existing Calibur delegation remains on its legacy execution and setup command', async t => {
+test('fresh existing Calibur delegation preserves its configured execution without another setup command', async t => {
   const f = await fixture(t, 'ledger');
   await atomicWriteJson(join(f.root, 'config.json'), { ...configuration(walletA, 'ledger'), execution: 'calibur' });
   const legacy = { ...f.setupOutcome('already-enabled'), operation: 'calibur-setup' };
@@ -542,7 +546,7 @@ test('existing Calibur delegation remains on its legacy execution and setup comm
   await controls.command(f.request('start'));
   await until(async () => (await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json')))?.[0]?.outcome === 'armed');
   assert.equal((await readJson<{execution:string}>(join(f.root, 'config.json')))!.execution, 'calibur');
-  assert.deepEqual(f.calls[0]!.args.slice(0,2), ['ledger','setup-calibur']);
+  assert.deepEqual(f.calls.map(call => call.args[0]), ['launch']);
 });
 
 test('a retained Calibur setup receipt is never reinterpreted or migrated by Simple7702 Start', async t => {
@@ -573,4 +577,150 @@ test('missing Simple7702 deployment blocks before setup or device prompts and re
   assert.match(current.message!,/one-time contract deployment/);assert.equal(current.calibur?.implementation,'simple7702');
   await controls.command(first);assert.equal(f.calls.length,0);
   assert.equal((await readJson<{execution?:string}>(join(f.root,'config.json')))!.execution,undefined);
+});
+
+test('a configured delegated Ledger wallet checks fresh readiness then launches without another setup command', async t => {
+  const f = await fixture(t, 'ledger');
+  const config = { ...configuration(walletA, 'ledger'), execution: 'simple7702', rebalanceFeeTargetUsdE8: '5000000' };
+  const oldStop = { requestId: 'older-stop' }, cycle = { startedAt: 'unchanged-cadence' };
+  await atomicWriteJson(join(f.root, 'config.json'), config);
+  await atomicWriteJson(join(f.root, 'stop.json'), oldStop);
+  await atomicWriteJson(join(f.root, 'cycle.json'), cycle);
+  let release!: () => void;
+  const gate = new Promise<void>(done => { release = done; });
+  const controls = new PortfolioControls(f.root, f.root, { ...f.deps, simple7702Status: async () => {
+    await gate; return f.setupOutcome('already-enabled');
+  } });
+  const request = f.request('start'), accepted = await controls.command(request);
+  assert.equal(accepted.state, 'starting'); assert.match(accepted.message!, /Checking existing wallet batching/);
+  assert.equal(accepted.calibur, undefined);
+  const checking = await controls.read();
+  assert.equal(checking.state, 'starting'); assert.equal(checking.calibur, undefined);
+  assert.equal((await controls.command(request)).state, 'starting');
+  assert.equal(f.calls.length, 0);
+  assert.deepEqual(await readJson(join(f.root, 'stop.json')), oldStop);
+  release();
+  await until(async () => (await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json')))?.[0]?.outcome === 'armed');
+  assert.deepEqual(f.calls.map(call => call.args[0]), ['launch']);
+  assert.equal(f.calls[0]!.args[4], digest(oldStop));
+  assert.equal((await controls.read()).state, 'running');
+  assert.deepEqual(await readJson(join(f.root, 'config.json')), config);
+  assert.deepEqual(await readJson(join(f.root, 'cycle.json')), cycle);
+  assert.equal(await readJson(join(f.root, 'pending.json')), null);
+});
+
+test('failed public batching checks remain retryable without replaying their request or exposing provider errors', async t => {
+  const f = await fixture(t, 'ledger');
+  const config = { ...configuration(walletA, 'ledger'), execution: 'simple7702' }, stop = { requestId: 'older-stop' };
+  await atomicWriteJson(join(f.root, 'config.json'), config); await atomicWriteJson(join(f.root, 'stop.json'), stop);
+  const controls = new PortfolioControls(f.root, f.root, { ...f.deps, simple7702Status: async () => {
+    throw new Error('private RPC endpoint payload');
+  } });
+  const request = f.request('start'); assert.equal((await controls.command(request)).state, 'starting');
+  await until(async () => (await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json')))?.[0]?.outcome === 'blocked');
+  const entries = await readJson<{outcome:string;setupBlocked?:string}[]>(join(f.root, 'runner-requests.json'));
+  assert.equal(entries![0]!.setupBlocked, 'setup-check-unavailable');
+  const blocked = await controls.read();
+  assert.equal(blocked.state, 'stopped'); assert.equal(blocked.canCancelStart, undefined);
+  assert.match(blocked.message!, /Check the network, then press Start/);
+  assert.match(blocked.message!, /No setup or runner launch was dispatched/);
+  assert.doesNotMatch(JSON.stringify(blocked), /private RPC/);
+  assert.equal(f.calls.length, 0);
+  assert.deepEqual(await readJson(join(f.root, 'config.json')), config);
+  assert.deepEqual(await readJson(join(f.root, 'stop.json')), stop);
+  const restarted = new PortfolioControls(f.root, f.root, { ...f.deps, simple7702Status: async () => f.setupOutcome('already-enabled') });
+  assert.equal((await restarted.command(request)).outcome, 'already-handled'); assert.equal(f.calls.length, 0);
+  await restarted.command(f.request('start'));
+  await until(async () => (await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json')))?.at(-1)?.outcome === 'armed');
+  assert.deepEqual(f.calls.map(call => call.args[0]), ['launch']);
+});
+
+test('the ready shortcut preserves intervening Stop, configuration and pending-transaction barriers', async t => {
+  for (const change of ['stop', 'configuration', 'pending']) {
+    const f = await fixture(t, 'ledger');
+    const config = { ...configuration(walletA, 'ledger'), execution: 'simple7702' };
+    await atomicWriteJson(join(f.root, 'config.json'), config);
+    const pending = { kind: 'simple7702-setup', wallet: walletA, chainId: 4663, hash: `0x${'1'.repeat(64)}`, nonce: 0, status: 'unknown' };
+    const stop = { requestId: 'newer-stop' };
+    const controls = new PortfolioControls(f.root, f.root, { ...f.deps, simple7702Status: async () => {
+      if (change === 'stop') await atomicWriteJson(join(f.root, 'stop.json'), stop);
+      if (change === 'configuration') await atomicWriteJson(join(f.root, 'config.json'), { ...config, driftThresholdBps: 600 });
+      if (change === 'pending') await atomicWriteJson(join(f.root, 'pending.json'), pending);
+      return f.setupOutcome('already-enabled');
+    } });
+    await controls.command(f.request('start'));
+    await until(async () => (await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json')))?.[0]?.outcome === 'blocked');
+    assert.equal(f.calls.length, 0, change);
+    assert.deepEqual(await readJson(join(f.root, 'config.json')), change === 'configuration' ? { ...config, driftThresholdBps: 600 } : config);
+    assert.deepEqual(await readJson(join(f.root, 'stop.json')), change === 'stop' ? stop : null);
+    assert.deepEqual(await readJson(join(f.root, 'pending.json')), change === 'pending' ? pending : null);
+  }
+});
+
+test('an unverified public batching result blocks before dispatch and permits a new explicit check', async t => {
+  const f = await fixture(t, 'ledger');
+  await atomicWriteJson(join(f.root, 'config.json'), { ...configuration(walletA, 'ledger'), execution: 'simple7702' });
+  let ready = false;
+  const controls = new PortfolioControls(f.root, f.root, { ...f.deps,
+    simple7702Status: async () => f.setupOutcome(ready ? 'already-enabled' : 'unknown'),
+  });
+  const first = f.request('start'); await controls.command(first);
+  await until(async () => (await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json')))?.[0]?.outcome === 'blocked');
+  const entries = await readJson<{setupBlocked?:string}[]>(join(f.root, 'runner-requests.json'));
+  assert.equal(entries![0]!.setupBlocked, 'setup-check-unavailable');
+  assert.equal((await controls.read()).state, 'stopped'); assert.equal(f.calls.length, 0);
+  ready = true;
+  assert.equal((await controls.command(first)).outcome, 'already-handled'); assert.equal(f.calls.length, 0);
+  await controls.command(f.request('start'));
+  await until(async () => (await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json')))?.at(-1)?.outcome === 'armed');
+  assert.deepEqual(f.calls.map(call => call.args[0]), ['launch']);
+});
+
+test('runner or configuration ownership during the public setup check is busy before any dispatch', async t => {
+  for (const lock of ['run.lock', 'config.lock']) {
+    const f = await fixture(t, 'ledger');
+    const owner = { pid: process.pid, createdAt: new Date().toISOString(), token: randomUUID() };
+    const controls = new PortfolioControls(f.root, f.root, { ...f.deps, simple7702Status: async () => {
+      await atomicWriteJson(join(f.root, lock), owner);
+      return f.setupOutcome('needed');
+    } });
+    await controls.command(f.request('start'));
+    await until(async () => (await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json')))?.[0]?.outcome === 'busy');
+    assert.equal(f.calls.length, 0, lock);
+    assert.deepEqual(await readJson(join(f.root, lock)), owner);
+    assert.equal((await readJson<{execution?:string}>(join(f.root, 'config.json')))!.execution, undefined);
+    if (lock === 'config.lock') assert.equal(await readJson(join(f.root, 'run.lock')), null, 'timed-out configuration wait releases its runner lock');
+  }
+});
+
+test('an unresolved dispatched Start exposes only explicit cancellation and preserves its journal on replay', async t => {
+  const f = await fixture(t, 'ledger');
+  f.setExecute(async () => { throw new Error('unknown setup delivery'); });
+  const first = f.request('start'); await f.controls.command(first);
+  await until(async () => (await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json')))?.[0]?.outcome === 'uncertain');
+  const journal = await readFile(join(f.root, 'runner-requests.json'), 'utf8');
+  const restarted = new PortfolioControls(f.root, f.root, { ...f.deps, simple7702Status: async () => f.setupOutcome('already-enabled') });
+  const unknown = await restarted.read();
+  assert.equal(unknown.state, 'unavailable'); assert.equal(unknown.canCancelStart, true);
+  assert.match(unknown.message!, /Cancel that request before trying Start again/);
+  assert.equal((await restarted.command(first)).outcome, 'already-handled');
+  assert.equal(await readFile(join(f.root, 'runner-requests.json'), 'utf8'), journal);
+  assert.equal(f.calls.length, 1);
+  f.setExecute(f.run);
+  const cancelled = await restarted.command(f.request('stop'));
+  assert.equal(cancelled.outcome, 'stop-requested'); assert.equal(cancelled.state, 'stopped');
+  assert.equal(cancelled.canCancelStart, undefined);
+  const entries = await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json'));
+  assert.deepEqual(entries!.map(entry => entry.outcome), ['uncertain', 'stop-requested']);
+  assert.deepEqual(f.calls.map(call => call.args[0]), ['ledger', 'stop']);
+  const marker = await readFile(join(f.root, 'stop.json'), 'utf8');
+  await restarted.command(first); assert.equal(await readFile(join(f.root, 'stop.json'), 'utf8'), marker);
+  assert.equal(f.calls.length, 2);
+});
+
+test('an unknown Stop does not expose the unresolved-Start cancellation affordance', async t => {
+  const f = await fixture(t);
+  f.setExecute(async () => { throw new Error('unknown stop delivery'); });
+  const result = await f.controls.command(f.request('stop'));
+  assert.equal(result.state, 'unavailable'); assert.equal(result.canCancelStart, undefined);
 });

@@ -70,21 +70,23 @@
   function render() {
     reconcileTransition();
     const state = runnerFresh && same(wallet, runner?.wallet) ? runner.state : "unavailable";
+    const canCancelStart = runnerFresh && same(wallet, runner?.wallet) && state === "unavailable" && runner.canCancelStart === true;
     // Setup can finish after the accepted Start reply. Surface the current
     // stopped summary on streamed/read-back updates and on a fresh page load.
     // An uncorrelated status read cannot resolve a control with an unknown reply.
-    const setupFailure = !suspended && !busy && statusFresh && mode === "ledger" && state === "stopped" &&
-      runner?.calibur && typeof runner.message === "string" && !uncertainControls.has(wallet.toLowerCase())
+    const setupFailure = !suspended && !busy && statusFresh && typeof runner?.message === "string" &&
+      (canCancelStart || (mode === "ledger" && state === "stopped" && runner?.calibur && !uncertainControls.has(wallet.toLowerCase())))
       ? runner.message.trim().slice(0, 400) : "";
     if (setupFailure) tell(setupFailure, "runner");
     else if (messageSource === "runner") tell("");
     run.textContent = busy && run.dataset.action === "stop" ? "Stopping…" : state === "setting-up" ? setupLabel()
-      : busy ? "Starting…" : ({ running: "Stop", stopped: "Start", starting: "Starting…", stopping: "Stopping…", deferred: "Start", unavailable: "Unavailable" })[state];
+      : busy ? "Starting…" : canCancelStart ? "Cancel start" : ({ running: "Stop", stopped: "Start", starting: "Starting…", stopping: "Stopping…", deferred: "Start", unavailable: "Unavailable" })[state];
     run.dataset.state = state;
     const linked = Boolean(window.rebalanceView?.token) && viewReady && same(wallet, attached);
-    run.disabled = suspended || busy || !statusFresh || !linked || !["running", "stopped"].includes(state);
+    run.disabled = suspended || busy || !statusFresh || !linked || (!canCancelStart && !["running", "stopped"].includes(state));
     run.title = !linked ? "Open this portfolio through your agent to enable controls."
       : !statusFresh ? "Waiting for current portfolio status."
+      : canCancelStart ? "Cancel the unconfirmed Start before trying again. Any submitted transaction remains tracked."
       : state === "running" ? (mode === "ledger" ? "Stop this Ledger portfolio and cancel waiting device prompts. Submitted transactions still settle." : "Stop this portfolio. Submitted transactions still settle.")
       : state === "stopped" ? (mode === "ledger" ? runner?.calibur?.state === "ready"
         ? "Start this Ledger wallet. The backend opens device prompts automatically; physically confirm each transaction."
@@ -188,7 +190,7 @@
   }
   run.addEventListener("click", async () => {
     if (run.disabled || busy || !same(wallet, runner?.wallet)) return;
-    const action = runner.state === "running" ? "stop" : "start";
+    const action = runner.state === "running" || (runner.state === "unavailable" && runner.canCancelStart === true) ? "stop" : "start";
     const targetWallet = wallet, requestId = crypto.randomUUID(), revision = runnerRevision;
     uncertainControls.delete(targetWallet.toLowerCase());
     busy = true; run.dataset.action = action; tell(""); render();

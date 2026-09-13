@@ -243,3 +243,8 @@ Keep portfolio navigation on the page's validated loopback hostname and release 
 ## Matching nested Clear Signing contexts — September 13
 
 [Prompt108](docs/prompts/108-matching-clear-signing-context.md) investigates per-call indexed contexts with firmware-enforced array-count guards in isolated Speculos. Preserve every original call field and production behavior; validate complete ordered displays and rejection of extra/missing calls. Fixed-count test-signed variants are development evidence, not production metadata enrollment or actual delegated-account resolution. Universal Router/v4 work in this prompt is read-only feasibility and liquidity research, not a runtime migration.
+
+
+## Ledger restart preflight — September 13
+
+[Prompt 109](docs/prompts/109-ledger-restart-preflight.md) separates read-only delegation checking from setup. Reuse fresh verified existing delegation without another setup command, make predispatch check failures retryable, and retain postdispatch uncertainty. An explicit Cancel start action supersedes an unknown old Start through the existing Stop path. Preserve wallet, configuration, pending receipt and replay boundaries; validate with isolated controller/UI tests before reloading only the chart.
