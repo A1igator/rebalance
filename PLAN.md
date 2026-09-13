@@ -230,3 +230,7 @@ Keep portfolio navigation on the page's validated loopback hostname and release 
 ## First-attempt Sharpe access and score units — September 13
 
 [Prompt 104](docs/prompts/104-first-attempt-sharpe-and-score-units.md) moves known network permission needs ahead of the first fresh-history preset invocation, preserving selected-wallet scope and host approval review. Compact results explicitly label their observation-period Sharpe and constant-weight convention. Independently verify the saved ratio and discrete-grid maximum without changing live allocation. Frozen-policy calculations remain local; target selection, scoring and automatic execution are unchanged.
+
+## Ledger Clear Signing investigation — September 13
+
+[Prompt 105](docs/prompts/105-ledger-clear-signing.md) records the production enrollment gate and the separate ERC-7730/Speculos development path. Production implementation is deferred at the owner's direction because partner access is unavailable. Preserve working Simple7702/Uniswap execution and distinguish metadata-format tests, emulator test certificates and verified retail-device Clear Signing.
