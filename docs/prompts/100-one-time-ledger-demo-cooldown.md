@@ -1,0 +1,7 @@
+# One-time stopped-Ledger demo cooldown adjustment
+
+Date: 2026-09-13. The owner requested a temporary corrective demo rebalance without permanently changing recurring timing, and personally stopped the old runner before the adjustment. Session-specific wallet observations, timing and before/after records are retained only in the ignored local audit.
+
+A temporary operator helper outside the product requires the exact registered Ledger wallet, full cycle/configuration fingerprints, disabled running preference, valid Stop and absent pending/recovery files. It holds exclusive launch/recovery/run/config/control locks, persists immutable before/intended-after evidence before writing, and verifies the exact result. Only the completed cycle's nextEligibleAt changes. Targets, configured interval, Stop, delegation and transaction records remain intact. The next new cycle keeps the interval measured from its new start; replay never modifies another cycle.
+
+All 21 focused tests passed through the isolated npm launcher, including changed identities, live owner, pending/corrupt state, historical setup display, immutable replay and stopped-only mutation. Non-signing checks validate preparation separately from financial execution. The owner performs Start and physical Ledger approval; no product button or recurring bypass was added. Local audit records preserve the operation evidence without publishing wallet-linked session details.
