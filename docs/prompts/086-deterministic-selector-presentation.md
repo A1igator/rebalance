@@ -12,3 +12,7 @@ Implementation plan:
 - Update the skill to open the returned selector immediately and quietly. On proven local permission denial, retry only read-only view preparation through the host approval mechanism. Do not repeat launch, restoration, Start or recovery.
 - Keep saved running/Stop preferences, request deduplication, portfolio selection, and trading behavior unchanged. Inspect native hook state only through a read-only API; do not change trust or execute a funded hook while developing.
 - Test error propagation, nonempty registries in setup-only entry, presentation handoff and no duplicate/spurious financial actions using isolated fixtures. Verify the live linked selector using read-only preparation and the native Browser tool, then commit and push to main.
+
+## Routine notification narration follow-up
+
+The user referenced a later successful selector task and asked “why the notification mention?” Its final response unnecessarily reported unconfigured notifications. The skill still had a conflicting instruction to report separate notification status on launch. Remove routine delivery-status narration from the opening reply; unconfigured, deliberately paused, unchecked and healthy notification states are not app startup blockers. Preserve explicit notification questions and actionable failures of enabled delivery. This changes reporting guidance only, not notification settings, transports or event delivery.

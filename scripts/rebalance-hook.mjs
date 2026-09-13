@@ -141,7 +141,7 @@ export function hookReply(result) {
       additionalContext: 'The deterministic Rebalance command handler already handled this invocation. '
         + presentation
         + (sharedImport ? 'This was a read-only shared-strategy preview. Present the parsed strategy and computed changes below without recalculating or rewriting its code. If selection is required, invite choosing a portfolio; no comparison has been performed yet. Never apply targets or settings merely because a code was pasted. ' : '')
-        + (appEntry ? 'Restoration results are not wallet inventory; an empty results array never establishes an empty registry. Briefly describe readiness in natural language, invite choosing a portfolio when the view is ready, and include actual blockers; ' : 'Report the public result below; ')
+        + (appEntry ? 'Restoration results are not wallet inventory; an empty results array never establishes an empty registry. Briefly describe readiness in natural language, invite choosing a portfolio when the view is ready, and include actual blockers. Omit routine notification status: unconfigured or intentionally paused delivery is not a startup blocker; ' : 'Report the public result below; ')
         + 'do not repeat launch or start, or repeat recovery or restoration. An outcome is not a trade receipt.\n'
         + JSON.stringify(result),
     },
