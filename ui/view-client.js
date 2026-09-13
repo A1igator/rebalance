@@ -4,10 +4,30 @@
   const fragment = token ? `#view=${token}` : "";
   const subscribers = new Set(), controlHolds = new Set();
   let latest = null, controller = null, retryTimer = null, suspended = document.visibilityState === "hidden", generation = 0;
-  let pageHidden = false, returningToSelector = false;
+  let pageHidden = false, returningToSelector = false, navigating = false;
+  let navigationReleases = [];
+  function releaseNavigation() {
+    const releases = navigationReleases; navigationReleases = [];
+    for (const release of releases.reverse()) release();
+    navigating = false;
+  }
+  function navigate(url) {
+    if (navigating || pageHidden) return;
+    navigating = true;
+    try {
+      navigationReleases.push(suspendForControl());
+      const releaseStatus = window.rebalanceStatus?.suspendForControl?.();
+      if (typeof releaseStatus === "function") navigationReleases.push(releaseStatus);
+      window.location.assign(url);
+    } catch (error) {
+      releaseNavigation(); throw error;
+    }
+  }
   function openSelector() {
     if (returningToSelector || pageHidden) return;
-    returningToSelector = true; window.location.assign(`/${fragment}`);
+    returningToSelector = true;
+    try { navigate(`/${fragment}`); }
+    catch (error) { returningToSelector = false; throw error; }
   }
   function chartUrl(value) {
     try {
@@ -15,6 +35,10 @@
       if (!["http:", "https:"].includes(url.protocol) || url.protocol !== window.location.protocol ||
           !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) || url.username || url.password ||
           url.pathname !== "/chart" || url.search || url.hash) return null;
+      // Keep the browser on its current loopback host instead of crossing
+      // into a different connection pool when the registry uses 127.0.0.1.
+      if (!["127.0.0.1", "localhost", "[::1]"].includes(window.location.hostname)) return null;
+      url.hostname = window.location.hostname;
       return `${url.href}${fragment}`;
     } catch { return null; }
   }
@@ -26,7 +50,7 @@
     const changed = latest !== null && latest.connectedWallet?.toLowerCase() !== value.connectedWallet?.toLowerCase();
     latest = value; emit({ snapshot: value });
     if (value.connectedWallet === null && window.location.pathname === "/chart") openSelector();
-    else if (changed && value.connectedWallet && value.chartUrl) window.location.assign(chartUrl(value.chartUrl));
+    else if (changed && value.connectedWallet && value.chartUrl) navigate(chartUrl(value.chartUrl));
   }
   async function connect() {
     if (!token || suspended || controlHolds.size || controller) return;
@@ -49,6 +73,7 @@
         pending += decoder.decode(part.value, { stream: true });
         if (pending.length > 1024 * 1024) throw new Error("View update unavailable.");
         for (let boundary; (boundary = /\r?\n\r?\n/.exec(pending));) {
+          if (suspended || currentGeneration !== generation) break;
           const frame = pending.slice(0, boundary.index);
           pending = pending.slice(boundary.index + boundary[0].length);
           let event = "message";
@@ -102,7 +127,14 @@
     suspended = false; void connect();
   }
   window.addEventListener("pagehide", () => { pageHidden = true; suspend(); });
-  window.addEventListener("pageshow", () => { pageHidden = false; returningToSelector = false; resume(); });
+  window.addEventListener("pageshow", () => {
+    const restored = pageHidden;
+    pageHidden = false;
+    // Release while both modules are still lifecycle-suspended; the status
+    // module's later pageshow handler will resume its own connection once.
+    if (restored) { returningToSelector = false; releaseNavigation(); }
+    resume();
+  });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") suspend(); else resume();
   });

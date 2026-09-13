@@ -24,7 +24,7 @@ type DisplayNode = { tag: string; textContent: string; attrs: Record<string, str
 type Response = { ok: boolean; json: () => Promise<unknown> };
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
-async function browser(options: { trackControls?: boolean; hidden?: boolean; status?: () => Promise<Response>; stockLinks?: boolean; hash?: string; disconnect?: () => Promise<Response> } = {}) {
+async function browser(options: { view?: { suspendForControl: () => () => void }; trackControls?: boolean; hidden?: boolean; status?: () => Promise<Response>; stockLinks?: boolean; hash?: string; disconnect?: () => Promise<Response> } = {}) {
   const [ringScript, script, html] = await Promise.all(['allocation-ring.js', 'app.js', 'index.html']
     .map(file => readFile(new URL(`../ui/${file}`, import.meta.url), 'utf8')));
   const htmlIds = new Set([...html!.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]));
@@ -88,7 +88,7 @@ async function browser(options: { trackControls?: boolean; hidden?: boolean; sta
       assert.equal(url, '/api/status', 'the chart has no independent gas quote requests');
       return getStatus();
     },
-    window: { rebalanceControls: options.trackControls ? {
+    window: { rebalanceView: options.view, rebalanceControls: options.trackControls ? {
       updateStatus: (value: unknown, disconnected?: boolean) => statusUpdates.push([value, disconnected]),
       updateRunner: (value: unknown, disconnected?: boolean) => runnerUpdates.push([value, disconnected]),
       refreshRunner: async () => {},
@@ -1175,5 +1175,63 @@ test('control holds cancel fallback reads and ignore late results after reconnec
   assert.equal(page.renders, renders);
   assert.match(page.element('c-val').textContent, /^\$7 · as of /);
   assert.equal(page.timers.size, 0);
+  page.hide();
+});
+
+
+test('Back keeps both stream slots free through navigation and coalesces clicks until pagehide', async () => {
+  let holds = 0, releases = 0;
+  const page = await browser({ hash: `#view=${'a'.repeat(64)}`, view: { suspendForControl() {
+    holds++; return () => { releases++; };
+  } }, disconnect: async () => {
+    assert.equal(holds, 1); assert.equal(releases, 0);
+    assert.equal(page.source.closed, true, 'status stream closes before detach POST');
+    return { ok: true, json: async () => ({ connectedWallet: null, tradingChanged: false }) };
+  } });
+  const back = page.element('portfolios-back');
+  back.listeners.get('click')!(); await flush();
+  assert.equal(page.navigations.length, 1); assert.equal(releases, 0);
+  assert.equal(back.attrs['aria-busy'], 'true');
+  back.listeners.get('click')!(); await flush();
+  assert.equal(page.calls.filter(call => call.url === '/api/disconnect').length, 1);
+  assert.equal(holds, 1, 'duplicate click cannot overwrite the held navigation leases');
+  page.show(); assert.equal(releases, 0, 'initial pageshow cannot interrupt queued navigation');
+  assert.equal(page.sources.length, 1);
+  page.hide(); assert.equal(releases, 0, 'pagehide does not reconnect another module before its own suspension');
+  page.show(); assert.equal(releases, 1); assert.equal(page.sources.length, 2);
+  page.show(); assert.equal(releases, 1); assert.equal(page.sources.length, 2);
+  page.hide();
+});
+
+test('Back bounds both an ignored HTTP abort and a stalled JSON body without repeating detach', async () => {
+  for (const stalledBody of [false, true]) {
+    let finish!: (value: any) => void, releases = 0;
+    const waiting = new Promise<any>(resolve => { finish = resolve; });
+    const page = await browser({ hash: `#view=${'a'.repeat(64)}`, view: { suspendForControl: () => () => { releases++; } },
+      disconnect: () => stalledBody ? Promise.resolve({ ok: true, json: () => waiting }) : waiting });
+    page.element('portfolios-back').listeners.get('click')!(); await flush();
+    await page.advance(5000);
+    assert.equal(page.calls.filter(call => call.url === '/api/disconnect').length, 1);
+    assert.equal(page.calls.find(call => call.url === '/api/disconnect')!.signal.aborted, true);
+    assert.match(page.element('control-message').textContent, /Could not confirm leaving/);
+    assert.equal(releases, 1); assert.equal(page.sources.length, 2);
+    finish(stalledBody ? { connectedWallet: null, tradingChanged: false }
+      : { ok: true, json: async () => ({ connectedWallet: null, tradingChanged: false }) });
+    await flush();
+    assert.equal(page.navigations.length, 0, 'late response cannot turn a timeout into navigation');
+    assert.equal(releases, 1);
+    page.hide();
+  }
+});
+
+test('Back replies from before pagehide cannot navigate a restored chart', async () => {
+  let finish!: (value: Response) => void;
+  const page = await browser({ hash: `#view=${'a'.repeat(64)}`, disconnect: () => new Promise(resolve => { finish = resolve; }) });
+  page.element('portfolios-back').listeners.get('click')!(); await flush();
+  page.hide(); page.show(); await flush();
+  finish({ ok: true, json: async () => ({ connectedWallet: null, tradingChanged: false }) }); await flush();
+  assert.equal(page.navigations.length, 0);
+  assert.equal(page.element('portfolios-back').attrs['aria-busy'], undefined);
+  assert.equal(page.calls.filter(call => call.url === '/api/disconnect').length, 1);
   page.hide();
 });

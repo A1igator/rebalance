@@ -31,6 +31,10 @@
       if (!["http:", "https:"].includes(url.protocol) || url.protocol !== window.location.protocol ||
           !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) || url.username || url.password ||
           url.pathname !== "/chart" || url.search || url.hash) return null;
+      // Keep the browser on its current loopback host instead of crossing
+      // into a different connection pool when the registry uses 127.0.0.1.
+      if (!["127.0.0.1", "localhost", "[::1]"].includes(window.location.hostname)) return null;
+      url.hostname = window.location.hostname;
       return `${url.href}${fragment}`;
     } catch { return null; }
   }

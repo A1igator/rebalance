@@ -200,3 +200,8 @@ Prompt091 follows the public audit of seven phase-batched transactions, includin
 ### Selector connection feedback (prompt 092)
 
 Bound the selector's explicit connection wait, release its live stream through navigation, verify the actual saved attachment and prevent an abandoned chart-preparation request from overwriting a later selection. Preserve non-trading selection, existing notification semantics and stale-response guards.
+
+
+### Loopback navigation (prompt 093)
+
+Keep portfolio navigation on the page's validated loopback hostname and release its live streams before all page transitions, including Back and agent-driven wallet changes. Preserve per-wallet destination ports, view capability fragments, existing deselection checks and the independent trading runner.

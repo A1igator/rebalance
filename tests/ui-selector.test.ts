@@ -30,7 +30,7 @@ class Node {
   close() { this.open = false; for (const fn of this.handlers.get('close') || []) fn(); }
 }
 function content(node: Node): string { return [node.textContent, ...node.children.map(content)].filter(Boolean).join(' '); }
-async function browser(options: { hidden?: boolean; hash?: string; pathname?: string; client?: boolean; selector?: boolean; registry?: typeof portfolios; reply?: (call: Call) => Promise<Reply | undefined> } = {}) {
+async function browser(options: { origin?: string; onNavigate?: (url: string) => void; onStatusHold?: (event: 'hold' | 'release') => void; hidden?: boolean; hash?: string; pathname?: string; client?: boolean; selector?: boolean; registry?: typeof portfolios; reply?: (call: Call) => Promise<Reply | undefined> } = {}) {
   const elements = new Map<string, Node>(), lifecycle = new Map<string, (() => void)[]>(), timers = new Map<number, () => void>();
   const calls: Call[] = [], navigations: string[] = [], streams: ReadableStreamDefaultController<Uint8Array>[] = [], setupStreams: ReadableStreamDefaultController<Uint8Array>[] = [];
   let timerId = 0, uuidCalls = 0, selectedWallet: string | null = walletA;
@@ -39,8 +39,14 @@ async function browser(options: { hidden?: boolean; hash?: string; pathname?: st
     if (!elements.has(id)) { const node = new Node('div'); node.id = id; elements.set(id, node); }
     return elements.get(id)!;
   };
-  const location = { hash: options.hash ?? fragment, pathname: options.pathname ?? (options.selector === false ? '/chart' : '/'), origin: 'http://127.0.0.1:4663', hostname: '127.0.0.1', protocol: 'http:', assign: (url: string) => navigations.push(url) };
-  const window = { location, addEventListener: (name: string, fn: () => void) => lifecycle.set(name, [...lifecycle.get(name) || [], fn]) };
+  const origin = new URL(options.origin ?? 'http://127.0.0.1:4663');
+  const location = { hash: options.hash ?? fragment, pathname: options.pathname ?? (options.selector === false ? '/chart' : '/'), origin: origin.origin, hostname: origin.hostname, protocol: origin.protocol, assign: (url: string) => { options.onNavigate?.(url); navigations.push(url); } };
+  const window = { location,
+    rebalanceStatus: options.onStatusHold ? { suspendForControl: () => {
+      options.onStatusHold!('hold'); let released = false;
+      return () => { if (!released) { released = true; options.onStatusHold!('release'); } };
+    } } : undefined,
+    addEventListener: (name: string, fn: () => void) => lifecycle.set(name, [...lifecycle.get(name) || [], fn]) };
   const visibility = new Map<string, (() => void)[]>();
   const document = { visibilityState: options.hidden ? "hidden" : "visible", addEventListener: (name: string, fn: () => void) => visibility.set(name, [...visibility.get(name) || [], fn]),
     getElementById: byId, createElement: (tag: string) => new Node(tag), createElementNS: (_namespace: string, tag: string) => new Node(tag) };
@@ -77,6 +83,7 @@ async function browser(options: { hidden?: boolean; hash?: string; pathname?: st
   await flush();
   return {
     hold: () => (window as typeof window & { rebalanceView: { suspendForControl: () => () => void } }).rebalanceView.suspendForControl(),
+    async openSelector() { (window as typeof window & { rebalanceView: { openSelector: () => void } }).rebalanceView.openSelector(); await flush(); },
     byId, calls, navigations, timers, streams, setupStreams, get uuidCalls() { return uuidCalls; },
     select: (value: string | null) => { selectedWallet = value; },
     async expire(delay: number) {
@@ -606,9 +613,10 @@ test('background companion tabs release all view streams and only the visible ta
   const active = pages[0]!;
   await active.visible(true); await active.show(); await active.visible(true);
   assert.equal(active.calls.length, 2, 'visibility and pageshow cannot create duplicate streams');
+  assert.equal(pages.flatMap(page => page.calls).filter(call => !call.signal!.aborted).length, 1);
   await active.send(snapshot(walletB));
   assert.deepEqual(active.navigations, [`http://127.0.0.1:4664/chart${fragment}`]);
-  assert.equal(pages.flatMap(page => page.calls).filter(call => !call.signal!.aborted).length, 1);
+  assert.equal(pages.flatMap(page => page.calls).filter(call => !call.signal!.aborted).length, 0, 'navigation retains its free connection slot');
   for (const page of pages) await page.hide();
 });
 
@@ -721,7 +729,7 @@ test('a chart returns to the selector when its chat is detached, including the f
     const page=await browser({selector:false});
     if(!initial) await page.send(snapshot(walletA));
     await page.send(snapshot(null));
-    await page.send(snapshot(null));
+    await page.openSelector();
     assert.deepEqual(page.navigations,[`/${fragment}`],'stream and Back response share one navigation');
     assert.equal(page.calls.filter(call=>call.url==='/api/disconnect').length,0,'observing deselection never writes it again');
     await page.hide();
@@ -938,5 +946,147 @@ test('an uncertain connection error survives resumed snapshots until a new expli
   assert.ok(page.cards().slice(0, -1).every(card => !card.disabled));
   assert.equal(page.calls.filter(call => call.url === '/api/connect').length, 2);
   assert.equal(page.navigations.length, 0);
+  await page.hide();
+});
+
+
+test('card navigation keeps the current loopback hostname for same-port and cross-port portfolios', async () => {
+  for (const linked of [true, false]) {
+    for (const [origin, index] of [['http://localhost:4663', 0], ['http://localhost:4666', 1]] as const) {
+      const page = await browser({ origin, hash: linked ? fragment : '' });
+      await page.click(page.cards()[index]!);
+      const chart = new URL(portfolios[index]!.chartUrl); chart.hostname = 'localhost';
+      assert.deepEqual(page.navigations, [`${chart.href}${linked ? fragment : ''}`]);
+      assert.equal(page.calls.filter(call => call.url === '/api/connect').length, linked ? 1 : 0);
+      assert.ok(page.calls.every(call => !call.url.includes(token)));
+      await page.hide();
+    }
+  }
+});
+
+test('a timed out card connection keeps localhost when confirmed readback uses the safe saved chart destination', async () => {
+  const page = await browser({ origin: 'http://localhost:4666', reply: async call => call.url === '/api/connect' ? new Promise<Reply>(() => {}) : undefined });
+  await page.click(page.cards()[1]!); page.select(walletB); await page.expire(15000);
+  assert.deepEqual(page.navigations, [`http://localhost:4664/chart${fragment}`]);
+  assert.equal(page.calls.filter(call => call.url === '/api/connect').length, 1);
+  await page.hide();
+});
+
+test('streamed agent wallet changes preserve localhost on both a selector and an open chart', async () => {
+  for (const selector of [true, false]) {
+    const page = await browser({ origin: 'http://localhost:4666', selector });
+    await page.send(snapshot(walletA)); await page.send(snapshot(walletB));
+    assert.deepEqual(page.navigations, [`http://localhost:4664/chart${fragment}`]);
+    assert.equal(page.calls.filter(call => call.url === '/api/connect').length, 0, 'observed selection is never written back');
+    await page.hide();
+  }
+});
+
+test('ready and explicitly reused Privy setup retain localhost when opening their verified portfolio', async () => {
+  for (const reused of [false, true]) {
+    const page = await browser({ origin: 'http://localhost:4666', registry: noPrivyPortfolios });
+    await page.click(page.cards().at(-1)!); await page.click(page.byId('setup-privy'));
+    await page.sendSetup(setupResult('privy', 'ready', { wallet: walletB, chartUrl: portfolios[1]!.chartUrl, reused }));
+    if (reused) {
+      assert.equal(page.navigations.length, 0);
+      await page.click(page.byId('open-existing-portfolio'));
+    }
+    assert.deepEqual(page.navigations, [`http://localhost:4664/chart${fragment}`]);
+    assert.deepEqual(page.calls.filter(call => call.url === '/api/connect').map(call => call.body), [{ token, wallet: walletB }]);
+    await page.hide();
+  }
+});
+
+test('hostname preservation never sanitizes unsafe server destinations into acceptable localhost URLs', async () => {
+  for (const chartUrl of ['http://example.com/chart', 'http://user:password@127.0.0.1:4664/chart',
+    'https://127.0.0.1:4664/chart', 'http://127.0.0.1:4664/chart?other=1', 'http://127.0.0.1:4664/chart#other',
+    'http://127.0.0.1:4664/other']) {
+    const page = await browser({ origin: 'http://localhost:4666', reply: async call => call.url === '/api/connect'
+      ? ok({ wallet: walletB, chartUrl, tradingChanged: false }) : undefined });
+    await page.click(page.cards()[1]!);
+    assert.equal(page.navigations.length, 0, chartUrl);
+    assert.equal(page.cards()[1]!.disabled, false);
+    assert.match(page.byId('portfolio-status').textContent, /could not be verified/);
+    await page.hide();
+    const chart = await browser({ origin: 'http://localhost:4666', selector: false });
+    await chart.send(snapshot(walletA)); await chart.send({ ...snapshot(walletB), chartUrl });
+    assert.equal(chart.navigations.length, 0, chartUrl);
+    await chart.hide();
+  }
+});
+
+test('the current page hostname must itself be loopback before retaining it in a navigation', async () => {
+  for (const selector of [true, false]) {
+    const page = await browser({ origin: 'http://example.com:4666', selector });
+    if (selector) {
+      await page.click(page.cards()[1]!);
+      assert.equal(page.calls.filter(call => call.url === '/api/connect').length, 0);
+    } else {
+      await page.send(snapshot(walletB));
+    }
+    assert.equal(page.navigations.length, 0);
+    await page.hide();
+  }
+});
+
+
+test('companion navigation frees view and chart streams before assign and holds them until real page restoration', async () => {
+  for (const destination of ['selector', 'wallet']) {
+    const holds: string[] = [], streams: AbortSignal[] = [];
+    let statusHeld = false;
+    const page = await browser({ origin: 'http://localhost:4666', selector: false,
+      onStatusHold: event => { holds.push(event); statusHeld = event === 'hold'; },
+      onNavigate: () => {
+        assert.equal(statusHeld, true, 'the chart status stream has relinquished its connection');
+        assert.ok(streams.length > 0 && streams.every(signal => signal.aborted), 'the view stream closes before HTML navigation');
+      }, reply: async call => { if (call.url === '/api/view/events') streams.push(call.signal!); return undefined; },
+    });
+    await page.send(snapshot(walletA));
+    if (destination === 'selector') await page.openSelector(); else await page.send(snapshot(walletB));
+    assert.deepEqual(page.navigations, [destination === 'selector' ? `/${fragment}` : `http://localhost:4664/chart${fragment}`]);
+    await page.openSelector();
+    assert.equal(page.navigations.length, 1, 'duplicate navigation intents coalesce');
+    await page.show();
+    assert.deepEqual(holds, ['hold'], 'an initial pageshow does not release a pending navigation');
+    assert.equal(streams.length, 1);
+    await page.hide();
+    assert.deepEqual(holds, ['hold'], 'pagehide keeps both transports closed');
+    assert.equal(streams.length, 1);
+    await page.show();
+    assert.deepEqual(holds, ['hold', 'release']);
+    assert.equal(streams.length, 2, 'a restored page establishes exactly one new view stream');
+    assert.equal(streams[1]!.aborted, false);
+    assert.equal(page.calls.some(call => call.url === '/api/connect'), false);
+    await page.hide();
+  }
+});
+
+test('a rejected browser navigation releases its transport holds immediately', async () => {
+  const holds: string[] = [];
+  const page = await browser({ selector: false, onStatusHold: event => holds.push(event),
+    onNavigate: () => { throw new Error('Fixture navigation blocked'); } });
+  await page.send(snapshot(walletA));
+  try { await page.openSelector(); } catch (error) { assert.match(String(error), /Fixture navigation blocked/); }
+  await flush();
+  assert.deepEqual(holds, ['hold', 'release']);
+  assert.equal(page.navigations.length, 0);
+  const requests = page.calls.filter(call => call.url === '/api/view/events');
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0]!.signal!.aborted, true);
+  assert.equal(requests[1]!.signal!.aborted, false);
+  assert.equal(page.calls.some(call => call.url === '/api/connect'), false);
+  await page.hide();
+});
+
+
+test('navigation ignores later selection frames already buffered in the same aborted stream chunk', async () => {
+  const page = await browser({ origin: 'http://localhost:4666' });
+  await page.send(snapshot(walletA));
+  const frames = [snapshot(walletB), snapshot(walletC)].map(value => `event: view\ndata: ${JSON.stringify(value)}\n\n`).join('');
+  page.streams.at(-1)!.enqueue(new TextEncoder().encode(frames)); await flush();
+  assert.deepEqual(page.navigations, [`http://localhost:4664/chart${fragment}`]);
+  assert.match(content(page.cards()[1]!), /This chat/, 'the later buffered frame cannot overwrite the snapshot that initiated navigation');
+  assert.ok(page.calls.filter(call => call.url === '/api/view/events').every(call => call.signal!.aborted));
+  assert.equal(page.calls.some(call => call.url === '/api/connect'), false);
   await page.hide();
 });

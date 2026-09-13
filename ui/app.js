@@ -10,7 +10,8 @@
   // One palette for the whole app: the selector tiles and this chart must never
   // disagree about what colour an asset is.
   const { assetOrder, color } = window.rebalanceRing;
-  let lastSnapshot = null, leavingPortfolio = false;
+  let lastSnapshot = null, leavingPortfolio = false, backAttempt = 0, backController = null;
+  let backNavigationReleases = [];
   byId("portfolios-back")?.addEventListener("click", async event => {
     if (!viewToken || event?.metaKey || event?.ctrlKey || event?.shiftKey || event?.altKey || event?.button > 0) return;
     event?.preventDefault();
@@ -21,25 +22,48 @@
       notice.textContent = "Waiting for portfolio details. Try Portfolios again."; notice.hidden = false; return;
     }
     leavingPortfolio = true;
+    const attempt = ++backAttempt;
     const back = byId("portfolios-back"), request = new AbortController();
+    backController = request;
+    const releases = [];
+    let timeout, cancel, navigating = false;
     back.setAttribute("aria-busy", "true");
-    const timeout = setTimeout(() => request.abort(), 5000);
     try {
-      const response = await fetch("/api/disconnect", { method: "POST", cache: "no-store",
-        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: viewToken, wallet }), signal: request.signal });
-      const result = await response.json();
-      if (!response.ok || result?.connectedWallet !== null || result?.tradingChanged !== false) throw new Error();
-      if (!pageHidden) {
+      for (const transport of [window.rebalanceView, window.rebalanceStatus]) {
+        const release = transport?.suspendForControl?.();
+        if (typeof release === "function") releases.push(release);
+      }
+      const result = await Promise.race([
+        (async () => {
+          const response = await fetch("/api/disconnect", { method: "POST", cache: "no-store",
+            headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: viewToken, wallet }), signal: request.signal });
+          const value = await response.json();
+          if (!response.ok) throw new Error();
+          return value;
+        })(),
+        new Promise((_, reject) => {
+          cancel = () => reject(new Error("Portfolio connection check interrupted"));
+          request.signal.addEventListener("abort", cancel, { once: true });
+          timeout = setTimeout(() => request.abort(), 5000);
+        }),
+      ]);
+      if (result?.connectedWallet !== null || result?.tradingChanged !== false) throw new Error();
+      if (!pageHidden && attempt === backAttempt) {
         if (window.rebalanceView?.openSelector) window.rebalanceView.openSelector();
         else window.location.assign(`/#view=${viewToken}`);
+        navigating = true;
+        backNavigationReleases = releases;
       }
     } catch {
-      if (!pageHidden) {
+      if (!pageHidden && attempt === backAttempt) {
         notice.textContent = "Could not confirm leaving this portfolio. Try Portfolios again; trading is unchanged.";
         notice.hidden = false;
       }
     } finally {
-      clearTimeout(timeout); leavingPortfolio = false; back.removeAttribute("aria-busy");
+      clearTimeout(timeout); request.signal.removeEventListener("abort", cancel); request.abort();
+      if (backController === request) backController = null;
+      if (!navigating) for (const release of releases.reverse()) release();
+      if (!navigating && attempt === backAttempt) { leavingPortfolio = false; back.removeAttribute("aria-busy"); }
     }
   });
   function positive(value) {
@@ -616,8 +640,20 @@
     if (!suspended || pageHidden || document.visibilityState === "hidden") return;
     suspended = false; lastRendered = null; connect();
   }
-  window.addEventListener("pagehide", () => { pageHidden = true; suspend(); });
-  window.addEventListener("pageshow", () => { pageHidden = false; resume(); });
+  window.addEventListener("pagehide", () => {
+    pageHidden = true; backAttempt++; backController?.abort(); backController = null;
+    leavingPortfolio = false; byId("portfolios-back")?.removeAttribute("aria-busy");
+    suspend();
+  });
+  window.addEventListener("pageshow", () => {
+    const restored = pageHidden;
+    pageHidden = false;
+    if (restored) {
+      const releases = backNavigationReleases; backNavigationReleases = [];
+      for (const release of releases.reverse()) release();
+    }
+    resume();
+  });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") suspend(); else resume();
   });
