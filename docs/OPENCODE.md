@@ -35,7 +35,7 @@ The launcher returns public structured state before the model chooses tools. The
 
 The plugin supplies `REBALANCE_SESSION_ID=opencode:<native-session-id>` and the portfolio root to each native shell invocation, clearing inherited foreign profile and Codex/Claude selectors. Ordinary CLI calls resolve that conversation's current connection on every invocation; no global selected wallet is introduced. Explicit `--profile` still scopes a single operation.
 
-Linked view records carry an OpenCode delivery kind bound to that namespace. Selector clicks and deterministic new-wallet setup update the same connection record. The plugin refreshes public selection context before model work and watches local connection changes to attach relevant event streams. It also retains the immutable launch route, covering a sole-profile default and a wallet change during startup. Earlier event streams remain tied to their originating wallet even when the chart selects another one.
+Linked view records carry an OpenCode delivery kind bound to that namespace. Selector clicks and deterministic new-wallet setup update the same connection record. The plugin refreshes public selection context before model work and watches local connection changes. It retains only the currently attached wallet in its notification preference and closes the earlier stream when selection changes. Remembered runner restoration and sole-wallet CLI fallback do not subscribe an unattached chat. The selected stream remains dormant while its matching public runner is stopped and rechecks attachment/running state before each native send.
 
 In an existing cmux terminal, the launch wrapper opens/reuses the same [companion browser helper](COMPANION_VIEW.md). Otherwise it returns the complete local URL, including its conversation fragment, for the available browser. This implementation does not establish a built-in OpenCode side pane or a phone connection.
 
@@ -48,10 +48,12 @@ These native commands are handled without a model tool decision:
 | Command | Effect |
 | --- | --- |
 | `/rebalance notifications pause` | Close this conversation's event streams and persist the paused preference. Trading is unchanged. |
-| `/rebalance notifications resume` | Reopen streams for this conversation's bound/selected portfolios. Trading is unchanged. |
+| `/rebalance notifications resume` | Reopen the selected portfolio stream; delivery waits for its verified running state. Trading is unchanged. |
 | `/rebalance notifications status` | Report the enabled/paused preference. This is not proof of transport or phone delivery. |
 
 A bare `/rebalance` first connects events, but preserves an existing paused preference. On host restart, enabled bindings reconnect on the next native message or command in that conversation. OpenCode must be running for chat delivery; local runners are independent and events remain retained while it is closed. The plugin does not discover or resume unrelated sessions.
+
+A fresh selection epoch snapshots existing event IDs so opening or returning to a portfolio does not replay historical alerts. Inactive-state events stay in local history without acknowledgement. Same-selection continuation retains the baseline and accepted/uncertain journal.
 
 Each send freezes the native session, native instance directory, repository root and originating wallet. A durable journal records an ordered native message ID before dispatch. The retained event is checked again immediately before sending, so acknowledgement or local filtering can veto it. Native acceptance does not acknowledge the application event. The notification supplies exact wallet-scoped `events`, `status` and acknowledgement commands for the reporting turn.
 

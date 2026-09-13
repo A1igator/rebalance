@@ -69,3 +69,8 @@ Start/Stop requires the existing agent-linked local view and must match both the
 The project plugin supplies the native `opencode:<sessionID>` identity to each shell command, and `view` issues a linked companion capability for that conversation. Card clicks, Back and deterministic wallet onboarding use the same public connection records as the CLI. OpenCode does not use Codex queueing or Claude's MCP channel for setup or events.
 
 A bare native `/rebalance` reuses the cmux helper above when OpenCode was started inside an existing cmux terminal. Otherwise the returned complete local URL can be opened in an available browser; a built-in persistent OpenCode Browser pane is not established by this integration. Keep the fragment when opening the view. See [OpenCode setup](OPENCODE.md).
+
+
+## Selected notification scope
+
+Card selection and agent wallet connection remain non-trading operations. For Codex, an attached running wallet now prepares event delivery automatically; opening the selector with no attachment does not select or subscribe any wallet. The current view session is passed through UI Start to the notification setup step. A stopped/deselected wallet is quiet, explicit notification Pause stays off, and ordinary view opening cannot transfer another chat's destination. See [selected-running notifications](NOTIFICATIONS.md#selected-running-portfolio).

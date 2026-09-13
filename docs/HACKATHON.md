@@ -87,3 +87,8 @@ The event permits at most **three partner selections**, with multiple tracks fro
 - [ ] Save the submission URL/confirmation and final commit SHA. Do not claim submission until confirmed.
 
 Judging assesses technicality, originality, practicality, usability and wow factor. Partner judging is asynchronous. If selected as a finalist, prepare a four-minute presentation and three minutes of questions. See the [submission page](https://ethglobal.com/events/ethonline2026/info/details) for authoritative details.
+
+
+### Selected portfolio notifications
+
+[Prompt 089](prompts/089-selected-running-notifications.md) narrows automatic chat delivery to the selected running portfolio. Codex selection/view/Start setup and OpenCode selection now use deterministic local scope checks, preserve Pause and delivery uncertainty, and exclude historical event IDs when a new selection is established. This improves the demo opening without an all-wallet subscription or a periodic model task. Physical signing, trading state and phone-delivery claims remain separate.
