@@ -19,7 +19,7 @@ const configuration = (wallet: string, mode = 'private-key') => ({ version: 1, w
   driftThresholdBps: 500, slippageBps: 50, deadlineSeconds: 120, pollSeconds: 30, rebalanceIntervalSeconds: 3600 });
 const digest = (value: unknown) => value === null ? 'none' : createHash('sha256').update(JSON.stringify(value)).digest('hex');
 async function until(condition: () => boolean | Promise<boolean>) {
-  for (let i = 0; i < 300; i++) { if (await condition()) return; await delay(5); }
+  for (let i = 0; i < 2_000; i++) { if (await condition()) return; await delay(5); }
   assert.fail('Fixture did not settle');
 }
 async function fixture(t: TestContext, mode = 'private-key') {
@@ -36,6 +36,7 @@ async function fixture(t: TestContext, mode = 'private-key') {
   const { token } = await issueView(root, session);
   const calls: { profile: Parameters<PortfolioControlDependencies['execute']>[0]; args: readonly string[] }[] = [];
   const alive = new Set<number>();
+  const setupOutcome = (outcome = 'already-enabled') => ({ app: 'Rebalance', operation: 'calibur-setup', wallet: walletA, chainId: 4663, outcome });
   const outcome = (state: string) => ({ ok: state !== 'blocked', value: { app: 'Rebalance', outcome: state,
     status: { chain: { id: 4663 }, wallet: walletA } } });
   const run: PortfolioControlDependencies['execute'] = async (profile, args) => {
@@ -49,15 +50,21 @@ async function fixture(t: TestContext, mode = 'private-key') {
       await atomicWriteJson(join(root, 'status.json'), { wallet: walletA, armed: true });
       return outcome('armed');
     }
+    if (args[0] === 'ledger') {
+      assert.deepEqual(args, ['ledger', 'setup-calibur', '--expected-stop', digest(await readJson(join(root, 'stop.json')))]);
+      return { ok: true, value: setupOutcome() };
+    }
     assert.deepEqual(args, ['stop']);
     await atomicWriteJson(join(root, 'stop.json'), { requestId: randomUUID() });
     return { ok: true, value: { status: 'stop-requested' } };
   };
   let execute = run;
   const deps: Partial<PortfolioControlDependencies> = { alive: pid => alive.has(pid),
+    caliburStatus: async () => setupOutcome(), wait: async (_milliseconds, signal) => { signal.throwIfAborted(); },
+    selectedNotifications: async () => undefined,
     execute: async (profile, args) => { calls.push({ profile, args }); return execute(profile, args); } };
   const controls = new PortfolioControls(root, root, deps);
-  return { root, other, token, calls, alive, controls, deps, run, outcome,
+  return { root, other, token, calls, alive, controls, deps, run, outcome, setupOutcome,
     request: (action: RunnerRequest['action'], requestId = randomUUID()): RunnerRequest => ({ token, wallet: walletA, action, requestId }),
     setExecute: (value: typeof execute) => { execute = value; },
     connect: (wallet: string) => atomicWriteJson(connectionPath(root, session), { version: 1, chainId: 4663, wallet }),
@@ -223,7 +230,7 @@ test('record-write failure cannot dispatch and an after-dispatch save failure re
   assert.equal(g.calls.length, 1);
 });
 
-test('Ledger controls launch public monitoring and stop it without creating signing requests', async t => {
+test('Ledger Start performs setup before monitoring while replay and Stop remain scoped', async t => {
   const f = await fixture(t, 'ledger');
   assert.equal((await f.controls.read()).state, 'stopped');
   f.alive.add(424242); await atomicWriteJson(join(f.root, 'run.lock'), { pid: 424242 });
@@ -232,14 +239,16 @@ test('Ledger controls launch public monitoring and stop it without creating sign
   await rm(join(f.root, 'run.lock')); f.alive.clear();
   const start = f.request('start');
   const started = await f.controls.command(start);
-  assert.equal(started.state, 'running'); assert.equal(started.outcome, 'armed');
-  assert.equal(f.calls.length, 1); assert.equal(f.calls[0]!.args[0], 'launch');
+  assert.equal(started.state, 'setting-up'); assert.equal(started.outcome, 'setting-up');
+  await until(async () => (await f.controls.read()).state === 'running');
+  await until(async () => (await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json')))?.[0]?.outcome === 'armed');
+  assert.equal(f.calls.length, 2); assert.equal(f.calls[0]!.args[0], 'ledger'); assert.equal(f.calls[1]!.args[0], 'launch');
   assert.match((await f.controls.read()).message!, /backend opens device prompts automatically; physical confirmation/);
   assert.equal((await f.controls.command(start)).outcome, 'already-handled');
-  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls.length, 2);
   assert.equal((await f.controls.command(f.request('stop'))).state, 'stopping');
   f.alive.clear(); assert.equal((await f.controls.read()).state, 'stopped');
-  assert.deepEqual(f.calls.map(call => call.args[0]), ['launch', 'stop']);
+  assert.deepEqual(f.calls.map(call => call.args[0]), ['ledger', 'launch', 'stop']);
   assert.equal(await readJson(join(f.other, 'run.lock')), null);
 });
 
@@ -247,6 +256,7 @@ test('a legacy deferred Ledger request stays handled while a new Start can begin
   const f = await fixture(t, 'ledger');
   const request = f.request('start');
   await f.controls.command(request);
+  await until(async () => (await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json')))?.[0]?.outcome === 'armed');
   const entries = await readJson<{ outcome: string }[]>(join(f.root, 'runner-requests.json'));
   entries![0]!.outcome = 'deferred';
   await atomicWriteJson(join(f.root, 'runner-requests.json'), entries);
@@ -256,8 +266,9 @@ test('a legacy deferred Ledger request stays handled while a new Start can begin
   assert.equal(replay.outcome, 'already-handled'); assert.equal(replay.state, 'stopped');
   assert.match(replay.message!, /earlier Ledger Start request was deferred/);
   assert.equal(f.calls.length, 0);
-  assert.equal((await restarted.command(f.request('start'))).state, 'running');
-  assert.equal(f.calls.length, 1); assert.equal(f.calls[0]!.args[0], 'launch');
+  assert.equal((await restarted.command(f.request('start'))).state, 'setting-up');
+  await until(async () => (await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json')))?.at(-1)?.outcome === 'armed');
+  assert.equal(f.calls.length, 2); assert.equal(f.calls[0]!.args[0], 'ledger'); assert.equal(f.calls[1]!.args[0], 'launch');
   const saved = await readJson<{ outcome: string }[]>(join(f.root, 'runner-requests.json'));
   assert.deepEqual(saved!.map(entry => entry.outcome), ['deferred', 'armed']);
 });
@@ -326,4 +337,179 @@ test('an unsupported outcome may retry fresh support checks after user action wi
   assert.equal((await f.controls.retry(input)).outcome, 'requested');
   assert.equal((await readLedgerRequest(f.options))?.id, input.requestId);
   assert.equal(f.calls.length, 0, 'the retry only queues intent, with no launch or signing here');
+});
+
+
+test('stopped Ledger Start durably claims once, preserves settings and waits for verified setup receipts', async t => {
+  const f = await fixture(t, 'ledger');
+  const oldStop = { requestId: 'older-stop' }; await atomicWriteJson(join(f.root, 'stop.json'), oldStop);
+  const original = { ...configuration(walletA, 'ledger'), rebalanceFeeTargetUsdE8: '5000000' };
+  await atomicWriteJson(join(f.root, 'config.json'), original);
+  const cadence = { startedAt: 'unchanged-cadence' }; await atomicWriteJson(join(f.root, 'cycle.json'), cadence);
+  let release!: () => void;
+  const gate = new Promise<void>(done => { release = done; });
+  let statusReads = 0;
+  const controls = new PortfolioControls(f.root, f.root, { ...f.deps, caliburStatus: async () => {
+    statusReads++; return f.setupOutcome(statusReads < 2 ? 'pending' : 'confirmed');
+  }, execute: async (profile, args, sessionId, options) => {
+    f.calls.push({ profile, args });
+    if (args[0] === 'ledger') {
+      assert.equal(options?.timeoutMs, 270_000); assert.ok(options?.signal);
+      const journal = await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json'));
+      assert.equal(journal?.[0]?.outcome, 'prepared');
+      assert.deepEqual(await readJson(join(f.root, 'config.json')), { ...original, execution: 'calibur' });
+      assert.equal(args[3], digest(oldStop)); await gate;
+      return { ok: true, value: f.setupOutcome('pending') };
+    }
+    assert.equal(args[0], 'launch'); assert.ok(statusReads >= 2);
+    assert.equal(args[4], digest(oldStop)); return f.run(profile, args, sessionId);
+  } });
+  const request = f.request('start');
+  const response = await controls.command(request); assert.equal(response.state, 'setting-up');
+  await until(() => f.calls.length === 1);
+  assert.equal((await controls.command(request)).state, 'setting-up');
+  assert.equal((await controls.command(f.request('start'))).outcome, 'busy');
+  assert.equal(f.calls.length, 1); assert.deepEqual(await readJson(join(f.root, 'stop.json')), oldStop);
+  release();
+  await until(async () => (await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json')))?.[0]?.outcome === 'armed');
+  assert.equal((await controls.read()).state, 'running'); assert.equal(f.calls.length, 2);
+  assert.deepEqual(await readJson(join(f.root, 'cycle.json')), cadence);
+  assert.equal(await readJson(join(f.other, 'run.lock')), null);
+});
+
+test('Stop cancels a pending Ledger setup without waiting and prevents any later launch', async t => {
+  const f = await fixture(t, 'ledger'); let signal: AbortSignal | undefined;
+  const controls = new PortfolioControls(f.root, f.root, { ...f.deps, execute: async (profile, args, _sessionId, options) => {
+    f.calls.push({ profile, args });
+    if (args[0] === 'ledger') {
+      signal = options?.signal;
+      return new Promise((_done, fail) => signal!.addEventListener('abort', () => fail(signal!.reason), { once: true }));
+    }
+    return f.run(profile, args);
+  } });
+  const request = f.request('start'); assert.equal((await controls.command(request)).state, 'setting-up');
+  await until(() => Boolean(signal));
+  assert.equal((await controls.command(f.request('stop'))).outcome, 'stop-requested');
+  assert.equal(signal!.aborted, true);
+  await until(async () => (await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json')))?.[0]?.outcome !== 'prepared');
+  assert.equal((await controls.read()).state, 'stopped');
+  assert.deepEqual(f.calls.map(call => call.args[0]), ['ledger', 'stop']);
+  const marker = await readJson(join(f.root, 'stop.json'));
+  await controls.command(request);
+  assert.deepEqual(await readJson(join(f.root, 'stop.json')), marker);
+  assert.equal(f.calls.length, 2);
+});
+
+test('unknown Ledger setup result is never signed again by replay or a fresh Start', async t => {
+  const f = await fixture(t, 'ledger');
+  f.setExecute(async () => { throw new Error('unknown delivery'); });
+  const request = f.request('start'); await f.controls.command(request);
+  await until(async () => (await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json')))?.[0]?.outcome === 'uncertain');
+  assert.equal((await f.controls.read()).state, 'unavailable');
+  const restarted = new PortfolioControls(f.root, f.root, f.deps);
+  await restarted.command(request); await restarted.command(f.request('start'));
+  assert.equal(f.calls.length, 1); assert.equal(f.calls[0]!.args[0], 'ledger');
+});
+
+test('foreign or unverified setup results cannot launch and pending state blocks execution opt-in', async t => {
+  for (const failure of ['wrong-wallet', 'unknown', 'pending-record']) {
+    const f = await fixture(t, 'ledger');
+    const before = await readFile(join(f.root, 'config.json'), 'utf8');
+    if (failure === 'pending-record') await atomicWriteJson(join(f.root, 'pending.json'), { retained: true });
+    f.setExecute(async () => ({ ok: true, value: { ...f.setupOutcome(failure === 'unknown' ? 'unknown' : 'confirmed'),
+      ...(failure === 'wrong-wallet' ? { wallet: walletB } : {}) } }));
+    await f.controls.command(f.request('start'));
+    await until(async () => (await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json')))?.[0]?.outcome === 'uncertain');
+    assert.equal(f.calls.filter(call => call.args[0] === 'launch').length, 0);
+    if (failure === 'pending-record') {
+      assert.equal(f.calls.length, 0); assert.equal(await readFile(join(f.root, 'config.json'), 'utf8'), before);
+      assert.deepEqual(await readJson(join(f.root, 'pending.json')), { retained: true });
+    }
+  }
+});
+
+test('already running Ledger Start preserves direct execution and never installs Calibur', async t => {
+  const f = await fixture(t, 'ledger'); f.alive.add(424242);
+  await atomicWriteJson(join(f.root, 'run.lock'), { pid: 424242 });
+  await atomicWriteJson(join(f.root, 'launch-processes.json'), { runner: 424242 });
+  await atomicWriteJson(join(f.root, 'status.json'), { wallet: walletA, armed: true });
+  const before = await readFile(join(f.root, 'config.json'), 'utf8');
+  assert.equal((await f.controls.command(f.request('start'))).state, 'running');
+  assert.deepEqual(f.calls.map(call => call.args[0]), ['launch']);
+  assert.equal(await readFile(join(f.root, 'config.json'), 'utf8'), before);
+});
+
+test('Calibur public status reads coalesce and expose device stages without dispatching setup', async t => {
+  const f = await fixture(t, 'ledger'); let reads = 0, release!: () => void;
+  const gate = new Promise<void>(done => { release = done; });
+  const controls = new PortfolioControls(f.root, f.root, { ...f.deps, caliburStatus: async () => {
+    reads++; await gate; return f.setupOutcome('needed');
+  } });
+  await controls.read(); await controls.read(); await controls.read();
+  assert.equal(reads, 1); assert.equal(f.calls.length, 0); release();
+  await until(async () => (await controls.read()).calibur?.state === 'needed');
+  await controls.read(); assert.equal(reads, 1);
+});
+
+
+test('typed pre-broadcast Ledger rejection stays actionable and permits only a new explicit Start', async t => {
+  const f = await fixture(t, 'ledger');
+  f.setExecute(async () => ({ ok: true, value: { ...f.setupOutcome('blocked'), blockedReason: 'rejected' } }));
+  const first = f.request('start'); await f.controls.command(first);
+  await until(async () => (await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json')))?.[0]?.outcome === 'blocked');
+  const state = await f.controls.read(); assert.equal(state.state, 'stopped');
+  assert.match(state.message!, /cancelled on the Ledger/); assert.match(state.calibur!.message!, /Press Start/);
+  const restarted = new PortfolioControls(f.root, f.root, f.deps);
+  assert.match((await restarted.read()).message!, /cancelled on the Ledger/);
+  await restarted.command(first); assert.equal(f.calls.length, 1);
+  f.setExecute(f.run); await restarted.command(f.request('start'));
+  await until(async () => (await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json')))?.at(-1)?.outcome === 'armed');
+  assert.deepEqual(f.calls.map(call => call.args[0]), ['ledger', 'ledger', 'launch']);
+});
+
+test('a fresh Start after an uncertain setup send can only reconcile its retained receipt', async t => {
+  const f = await fixture(t, 'ledger');
+  f.setExecute(async () => {
+    await atomicWriteJson(join(f.root, 'pending.json'), { kind: 'calibur-setup', wallet: walletA, chainId: 4663, hash: `0x${'1'.repeat(64)}`, nonce: 0, status: 'unknown' });
+    return { ok: true, value: f.setupOutcome('unresolved') };
+  });
+  const first = f.request('start'); await f.controls.command(first);
+  await until(async () => (await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json')))?.[0]?.outcome === 'uncertain');
+  const uncertain = await f.controls.read();
+  assert.equal(uncertain.state, 'stopped'); assert.equal(uncertain.calibur?.state, 'confirming');
+  assert.match(uncertain.message!, /Start checks its receipt/);
+  assert.notEqual(await readJson(join(f.root, 'pending.json')), null);
+  let reads = 0;
+  const restarted = new PortfolioControls(f.root, f.root, { ...f.deps, caliburStatus: async () => {
+    reads++; await rm(join(f.root, 'pending.json'), { force: true }); return f.setupOutcome('confirmed');
+  } });
+  f.setExecute(f.run); await restarted.command(first); assert.equal(f.calls.length, 1);
+  await restarted.command(f.request('start'));
+  await until(async () => (await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json')))?.at(-1)?.outcome === 'armed');
+  assert.ok(reads >= 1); assert.deepEqual(f.calls.map(call => call.args[0]), ['ledger', 'launch']);
+});
+
+test('a later CLI Stop during receipt confirmation prevents runner launch without another setup call', async t => {
+  const f = await fixture(t, 'ledger');
+  f.setExecute(async () => ({ ok: true, value: f.setupOutcome('pending') }));
+  const marker = { requestId: 'new-cli-stop' };
+  const controls = new PortfolioControls(f.root, f.root, { ...f.deps, wait: async () => {
+    await atomicWriteJson(join(f.root, 'stop.json'), marker);
+  } });
+  await controls.command(f.request('start'));
+  await until(async () => (await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json')))?.[0]?.outcome === 'blocked');
+  assert.deepEqual(f.calls.map(call => call.args[0]), ['ledger']);
+  assert.deepEqual(await readJson(join(f.root, 'stop.json')), marker);
+});
+
+
+test('a public-status or unrelated run-lock owner cannot bypass Calibur setup and launch direct', async t => {
+  const f = await fixture(t, 'ledger'); f.alive.add(424242);
+  await atomicWriteJson(join(f.root, 'run.lock'), { pid: 424242 });
+  await atomicWriteJson(join(f.root, 'status.json'), { wallet: walletA, armed: true });
+  await atomicWriteJson(join(f.root, 'launch-processes.json'), { runner: 999999 });
+  const before = await readFile(join(f.root, 'config.json'), 'utf8');
+  const result = await f.controls.command(f.request('start'));
+  assert.equal(result.outcome, 'busy'); assert.equal(f.calls.length, 0);
+  assert.equal(await readFile(join(f.root, 'config.json'), 'utf8'), before);
 });

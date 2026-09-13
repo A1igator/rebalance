@@ -5,18 +5,41 @@ import { fileURLToPath } from 'node:url';
 import { resolveProfile, walletIdentity, type RoutedProfile } from '../scripts/profile-routing.mjs';
 import { requestLedgerRebalance } from './ledger-request.js';
 import { validateConfig } from './config.js';
+import { acquireConfigLock } from './config-lock.js';
 import { readView, viewState } from './view-session.js';
 import { acquireLock, atomicWriteJson, readJson } from './storage.js';
+import { validatePending } from './transactions.js';
+import type { PendingTransaction } from './storage.js';
 import { ensureSelectedCodexNotifications } from './selected-notifications.js';
 
-export type RunnerSummary = { wallet: string | null; state: 'running' | 'stopped' | 'starting' | 'stopping' | 'unavailable' | 'deferred'; message?: string };
+export type CaliburSummary = { state: 'needed' | 'ready' | 'unknown' | 'authorizing' | 'signing' | 'confirming'; message?: string };
+export type RunnerSummary = { wallet: string | null; state: 'running' | 'stopped' | 'starting' | 'stopping' | 'setting-up' | 'unavailable' | 'deferred'; message?: string; calibur?: CaliburSummary };
 export type RunnerResult = RunnerSummary & { requestId: string; outcome: string };
 export type RunnerRequest = { token: string; wallet: string; action: 'start' | 'stop'; requestId: string };
 export type LedgerRetryRequest = { token: string; wallet: string; requestId: string; retryOf: string };
 type Outcome = 'prepared' | 'armed' | 'starting' | 'stop-requested' | 'blocked' | 'busy' | 'deferred' | 'uncertain';
-type Entry = { version: 1; sessionId: string; requestId: string; wallet: string; action: 'start' | 'stop'; expectedStop: string; receivedAt: string; outcome: Outcome };
+const setupFailures = {
+  'simulation-failed': 'Calibur setup simulation could not be verified. Check the network, then press Start to retry.',
+  'insufficient-eth': 'Calibur setup needs more ETH for gas. Fund this wallet, then press Start.',
+  'fee-above-target': 'Calibur setup exceeds the fee target. Wait for lower fees or update the target, then press Start.',
+  'fee-unavailable': 'A fresh Calibur setup fee estimate is unavailable. Check the network, then press Start to retry.',
+  rejected: 'Calibur setup was cancelled on the Ledger. Press Start when ready to try again.',
+  cancelled: 'Calibur setup was cancelled before broadcast. Press Start when ready to try again.',
+  timeout: 'Ledger setup timed out. Unlock the device, open Ethereum, then press Start.',
+  unavailable: 'Open Ethereum on the connected Ledger, then press Start to retry setup.',
+  'account-mismatch': 'The Ledger account does not match this portfolio. Select the correct account before pressing Start.',
+  'invalid-transaction': 'Calibur setup could not be prepared. Review the setup configuration before retrying.',
+  'invalid-signature': 'The Ledger signature could not be verified. Check the selected device before retrying.',
+  unsupported: 'The Ledger cannot sign this setup. Review device signing support before retrying.',
+} as const;
+type SetupFailure = keyof typeof setupFailures;
+class SetupBusyError extends Error {}
+class SetupBlockedError extends Error { constructor(readonly reason: SetupFailure) { super(setupFailures[reason]); } }
+type Entry = { version: 1; sessionId: string; requestId: string; wallet: string; action: 'start' | 'stop'; expectedStop: string; receivedAt: string; outcome: Outcome; setupBlocked?: SetupFailure };
 export type PortfolioControlDependencies = {
-  execute: (profile: RoutedProfile, args: readonly string[], sessionId?: string) => Promise<{ ok: boolean; value: unknown }>;
+  execute: (profile: RoutedProfile, args: readonly string[], sessionId?: string, options?: { timeoutMs?: number; signal?: AbortSignal }) => Promise<{ ok: boolean; value: unknown }>;
+  caliburStatus: (profile: RoutedProfile) => Promise<unknown>;
+  wait: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   selectedNotifications: (profile: RoutedProfile, sessionId: string, starting: boolean) => Promise<unknown>;
   alive: (pid: number) => boolean;
   persist: typeof atomicWriteJson;
@@ -42,9 +65,9 @@ const hash = (value: string) => createHash('sha256').update(value).digest('hex')
 const key = (entry: Pick<Entry, 'sessionId' | 'requestId'>) => hash(`${entry.sessionId}\0${entry.requestId}`);
 const pid = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) > 0 && Number(value) <= 2_147_483_647;
 const defaults: PortfolioControlDependencies = {
-  execute: (profile, args, sessionId) => new Promise((done, fail) => {
+  execute: (profile, args, sessionId, options) => new Promise((done, fail) => {
     execFile(process.execPath, ['--import', 'tsx', resolve(repository, 'src/cli.ts'), ...args], {
-      cwd: repository, timeout: 120_000, maxBuffer: 1_048_576, killSignal: 'SIGKILL',
+      cwd: repository, timeout: options?.timeoutMs ?? 120_000, signal: options?.signal, maxBuffer: 1_048_576, killSignal: 'SIGTERM',
       env: { ...process.env, REBALANCE_ROOT_DIR: profile.rootDir, REBALANCE_DATA_DIR: profile.dataDir,
         REBALANCE_SESSION_ID: sessionId ?? '', CODEX_THREAD_ID: '', CLAUDE_CODE_SESSION_ID: '',
         REBALANCE_PROFILE_PINNED: '1', REBALANCE_PROFILE_WALLET: profile.wallet ?? '', REBALANCE_CHART_PORT: String(profile.chartPort) },
@@ -52,6 +75,17 @@ const defaults: PortfolioControlDependencies = {
       try { done({ ok: !error, value: JSON.parse(stdout) }); }
       catch { fail(new Error('The local control command could not be verified.')); }
     });
+  }),
+  caliburStatus: async profile => {
+    const result = await defaults.execute(profile, ['ledger', 'calibur-status'], undefined, { timeoutMs: 10_000 });
+    if (!result.ok) throw new Error('Calibur status is unavailable');
+    return result.value;
+  },
+  wait: (milliseconds, signal) => new Promise((done, fail) => {
+    signal.throwIfAborted();
+    const abort = () => { clearTimeout(timer); fail(signal.reason); };
+    const timer = setTimeout(() => { signal.removeEventListener('abort', abort); done(); }, milliseconds);
+    signal.addEventListener('abort', abort, { once: true });
   }),
   selectedNotifications: (profile, sessionId, starting) => ensureSelectedCodexNotifications(profile.rootDir, sessionId,
     { dataDir: profile.dataDir, starting, explicitSelection: true }),
@@ -67,10 +101,18 @@ const defaults: PortfolioControlDependencies = {
 export class PortfolioControls {
   private readonly deps: PortfolioControlDependencies;
   private readonly active = new Map<string, { action: RunnerRequest['action']; promise: Promise<RunnerResult> }>();
+  private readonly setups = new Map<string, { controller: AbortController; expectedStop: string }>();
+  private caliburCache: { at: number; value: CaliburSummary } | undefined;
+  private caliburRefresh: Promise<void> | undefined;
   readonly rootDir: string;
   readonly dataDir: string;
   constructor(rootDir: string, dataDir: string, overrides: Partial<PortfolioControlDependencies> = {}) {
     this.rootDir = resolve(rootDir); this.dataDir = resolve(dataDir); this.deps = { ...defaults, ...overrides };
+    if (overrides.execute && !overrides.caliburStatus) this.deps.caliburStatus = async profile => {
+      const result = await overrides.execute!(profile, ['ledger', 'calibur-status'], undefined, { timeoutMs: 10_000 });
+      if (!result.ok) throw new Error('Calibur status is unavailable');
+      return result.value;
+    };
   }
   private path(name: string) { return resolve(this.dataDir, name); }
   private async profile() {
@@ -88,7 +130,8 @@ export class PortfolioControls {
     if (!Array.isArray(entries) || entries.length > 10_000) throw new Error('Invalid runner request records');
     const seen = new Set<string>();
     for (const entry of entries) {
-      if (!entry || typeof entry !== 'object' || Object.keys(entry).some(name => !['version','sessionId','requestId','wallet','action','expectedStop','receivedAt','outcome'].includes(name)) ||
+      if (!entry || typeof entry !== 'object' || Object.keys(entry).some(name => !['version','sessionId','requestId','wallet','action','expectedStop','receivedAt','outcome','setupBlocked'].includes(name)) ||
+          (entry.setupBlocked !== undefined && (typeof entry.setupBlocked !== 'string' || !Object.hasOwn(setupFailures, entry.setupBlocked))) ||
           entry.version !== 1 || typeof entry.sessionId !== 'string' || !entry.sessionId || entry.sessionId.length > 2048 || /[\x00-\x1f\x7f]/.test(entry.sessionId) ||
           typeof entry.requestId !== 'string' || !uuid.test(entry.requestId) || entry.requestId !== entry.requestId.toLowerCase() ||
           typeof entry.wallet !== 'string' || !/^0x[0-9a-f]{40}$/.test(entry.wallet) || !['start','stop'].includes(entry.action) ||
@@ -124,10 +167,108 @@ export class PortfolioControls {
     if (!pid(value.pid)) throw new Error('Invalid runner ownership record');
     return this.deps.alive(value.pid);
   }
+  private async ownsRunningPortfolio(wallet: string) {
+    const [run, processes, saved, stopped] = await Promise.all([
+      readJson<{pid?:number}>(this.path('run.lock')), readJson<{runner?:number}>(this.path('launch-processes.json')),
+      readJson<{wallet?:string;armed?:boolean}>(this.path('status.json')), readJson(this.path('stop.json')),
+    ]);
+    return run !== null && pid(run.pid) && this.deps.alive(run.pid) && processes?.runner === run.pid && stopped === null &&
+      saved?.wallet?.toLowerCase() === wallet && saved.armed === true;
+  }
+  private async spawnedRunner() {
+    const saved = await readJson<{runner?:number}>(this.path('launch-processes.json'));
+    if (saved?.runner === undefined) return false;
+    if (!pid(saved.runner)) throw new Error('Invalid launch process record');
+    return this.deps.alive(saved.runner);
+  }
+  private setupState(value: unknown, wallet: string): CaliburSummary {
+    const result = value as { app?: string; operation?: string; wallet?: string; chainId?: number; outcome?: string; blockedReason?: string } | null;
+    if (result?.app !== 'Rebalance' || result.operation !== 'calibur-setup' || result.chainId !== 4663 ||
+        result.wallet?.toLowerCase() !== wallet.toLowerCase()) throw new Error('Calibur setup identity could not be verified');
+    if (result.outcome === 'blocked' && result.blockedReason && Object.hasOwn(setupFailures, result.blockedReason)) {
+      throw new SetupBlockedError(result.blockedReason as SetupFailure);
+    }
+    const state: CaliburSummary['state'] = ['already-enabled', 'confirmed'].includes(result.outcome ?? '') ? 'ready'
+      : result.outcome === 'needed' ? 'needed' : result.outcome === 'authorizing' ? 'authorizing'
+      : result.outcome === 'signing' ? 'signing' : ['confirming', 'pending'].includes(result.outcome ?? '') ? 'confirming' : 'unknown';
+    const messages: Record<CaliburSummary['state'], string> = {
+      needed: 'Start enables one-signature rebalances. Initial Ledger setup requires authorization and transaction confirmation.',
+      ready: 'Calibur is enabled. Rebalances require one Ledger transaction confirmation.',
+      unknown: 'Calibur setup could not be verified. No automatic signing retry will occur.',
+      authorizing: 'Confirm Calibur delegation on your Ledger.', signing: 'Confirm the Calibur setup transaction on your Ledger.',
+      confirming: 'Waiting for the Calibur setup receipt before starting the portfolio.',
+    };
+    const summary = { state, message: messages[state] };
+    this.caliburCache = { at: Date.now(), value: summary };
+    return summary;
+  }
+  private cachedCalibur(profile: RoutedProfile): CaliburSummary {
+    if ((!this.caliburCache || Date.now() - this.caliburCache.at >= 2_000) && !this.caliburRefresh) {
+      this.caliburRefresh = this.deps.caliburStatus(profile).then(value => { this.setupState(value, profile.wallet!); })
+        .catch(() => { this.caliburCache = { at: Date.now(), value: { state: 'unknown', message: 'Calibur setup status is unavailable.' } }; })
+        .finally(() => { this.caliburRefresh = undefined; });
+    }
+    return this.caliburCache?.value ?? { state: 'unknown', message: 'Checking Calibur setup.' };
+  }
+  private async prepareCalibur(profile: RoutedProfile, entry: Entry, signal: AbortSignal, receiptOnly = false): Promise<boolean> {
+    const current = async () => {
+      signal.throwIfAborted();
+      if (await this.stopToken() !== entry.expectedStop) throw new Error('A newer Stop superseded this Start');
+    };
+    await current();
+    // Only this explicit stopped-wallet Start opts in. Hold the same short
+    // execution/configuration boundaries as configure; preserve every field.
+    let hasPendingSetup = receiptOnly;
+    const releaseRun = await acquireLock(this.dataDir, 'run.lock');
+    try {
+      const releaseConfig = await acquireConfigLock(this.dataDir, { signal });
+      try {
+        await current();
+        const { config } = await this.profile();
+        const pending = await readJson<{ kind?: string }>(this.path('pending.json'));
+        hasPendingSetup ||= pending?.kind === 'calibur-setup';
+        if (config.mode !== 'ledger' || walletIdentity(config.wallet) !== entry.wallet ||
+            (pending && (pending.kind !== 'calibur-setup' || config.execution !== 'calibur'))) {
+          throw new Error('Ledger setup requires an idle portfolio without a pending transaction');
+        }
+        if (receiptOnly && config.execution !== 'calibur') throw new Error('Setup execution mode changed');
+        if (config.execution !== 'calibur') {
+          const raw = await readJson<Record<string, unknown>>(this.path('config.json'));
+          const next = { ...raw, execution: 'calibur' }; validateConfig(next);
+          await this.deps.persist(this.path('config.json'), next);
+        }
+        await current();
+      } finally { await releaseConfig(); }
+    } finally { await releaseRun(); }
+    await current();
+    const result = hasPendingSetup ? { ok: true, value: await this.deps.caliburStatus(profile) }
+      : await this.deps.execute(profile, ['ledger', 'setup-calibur', '--expected-stop', entry.expectedStop], entry.sessionId,
+        { timeoutMs: 270_000, signal });
+    await current();
+    const initial = this.setupState(result.value, entry.wallet);
+    if (!result.ok) return false;
+    if (initial.state === 'ready') return true;
+    if (initial.state !== 'confirming') return false;
+    // Receipt-only checks never call setup a second time, even after uncertainty.
+    const deadline = Date.now() + 60_000;
+    for (let attempt = 0; attempt < 30 && Date.now() < deadline; attempt++) {
+      await this.deps.wait(Math.min(2_000, deadline - Date.now()), signal); await current();
+      const remaining = deadline - Date.now(); if (remaining <= 0) return false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const observed = await Promise.race([this.deps.caliburStatus(profile), new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('Calibur receipt confirmation timed out')), remaining);
+      })]).finally(() => { clearTimeout(timer); });
+      const state = this.setupState(observed, entry.wallet);
+      await current();
+      if (state.state === 'ready') return true;
+      if (state.state !== 'confirming') return false;
+    }
+    return false;
+  }
   async read(): Promise<RunnerSummary> {
     let wallet: string | null = null;
     try {
-      const { config } = await this.profile(); wallet = walletIdentity(config.wallet);
+      const { config, profile } = await this.profile(); wallet = walletIdentity(config.wallet);
       const [run, launch, stopped, processes, saved, entries] = await Promise.all([
         this.liveLock('run.lock'), this.liveLock('launch.lock'), readJson(this.path('stop.json')),
         readJson<{ runner?: number }>(this.path('launch-processes.json')),
@@ -141,19 +282,37 @@ export class PortfolioControls {
       const pending = entries.findLast(item => ['prepared','uncertain','starting'].includes(item.outcome) &&
         (item.action === 'stop' || item.expectedStop === generation));
       const inFlight = pending?.outcome === 'prepared' && this.active.has(key(pending));
+      const setupFailure = entries.findLast(item => item.action === 'start' && item.expectedStop === generation)?.setupBlocked;
+      const setupMessage = setupFailure ? setupFailures[setupFailure] : undefined;
+      const setup = [...this.setups.values()].find(item => item.expectedStop === generation && !item.controller.signal.aborted);
+      if (setup) return { wallet, state: 'setting-up', calibur: this.cachedCalibur(profile) };
       if (stopped !== null && (pending?.action !== 'start' || (run && saved?.armed === true))) {
         return { wallet, state: run || launch || spawning || inFlight ? 'stopping' : 'stopped',
-          message: run || launch || spawning || inFlight ? messages['stop-requested'] : undefined };
+          message: run || launch || spawning || inFlight ? messages['stop-requested'] : setupMessage,
+          ...(config.mode === 'ledger' ? { calibur: { ...this.cachedCalibur(profile), ...(setupMessage ? { message: setupMessage } : {}) } } : {}) };
       }
       if (run) {
+        const calibur = config.mode === 'ledger' ? this.cachedCalibur(profile) : undefined;
         const running = saved?.wallet?.toLowerCase() === wallet && saved.armed === true;
+        if (!running && calibur && ['authorizing', 'signing', 'confirming'].includes(calibur.state)) return { wallet, state: 'setting-up', calibur };
         return { wallet, state: running ? 'running' : 'starting',
           ...(config.mode === 'ledger' && running ? { message: 'Ledger monitoring is active. The backend opens device prompts automatically; physical confirmation is required for every transaction.' } : {}) };
       }
       if (launch || spawning) return { wallet, state: 'starting', message: messages.starting };
+      if (pending && !inFlight && config.mode === 'ledger' && config.execution === 'calibur') {
+        const transaction = await readJson<PendingTransaction>(this.path('pending.json'));
+        if (transaction?.kind === 'calibur-setup') {
+          validatePending(transaction, config);
+          // Keep this barrier intact until a fresh explicit Start requests a
+          // receipt-only continuation; passive UI reads must not consume it.
+          const message = 'Setup outcome unconfirmed. Start checks its receipt before continuing.';
+          return { wallet, state: 'stopped', message, calibur: { state: 'confirming', message } };
+        }
+      }
       if (pending) return inFlight
         ? { wallet, state: pending.action === 'start' ? 'starting' : 'stopping', message: messages.prepared } : unavailable(wallet);
-      return { wallet, state: 'stopped' };
+      return { wallet, state: 'stopped', ...(setupMessage ? { message: setupMessage } : {}),
+        ...(config.mode === 'ledger' ? { calibur: { ...this.cachedCalibur(profile), ...(setupMessage ? { message: setupMessage } : {}) } } : {}) };
     } catch { return unavailable(wallet); }
   }
   /** An explicit retry belongs to one finished request on this already-running wallet. */
@@ -197,8 +356,11 @@ export class PortfolioControls {
     const entry: Entry = { version: 1, sessionId, requestId: input.requestId.toLowerCase(), wallet: walletIdentity(config.wallet),
       action: input.action, expectedStop, receivedAt: new Date().toISOString(), outcome: 'prepared' };
     const id = key(entry);
+    let accepted!: (result: RunnerResult) => void;
+    const ready = new Promise<RunnerResult>(done => { accepted = done; });
     const operation = async (): Promise<RunnerResult> => {
       let dispatch = false;
+      let receiptOnly = false;
       let replay = false;
       const prepared = await this.controlled(async () => {
         const entries = await this.entries();
@@ -212,7 +374,10 @@ export class PortfolioControls {
         const sinceStop = entries.slice(entries.findLastIndex(item => item.outcome === 'stop-requested') + 1)
           .filter(item => item.action === 'stop' || item.expectedStop === entry.expectedStop);
         if (entry.action === 'start' && sinceStop.some(item => ['prepared','uncertain','starting'].includes(item.outcome))) {
-          entry.outcome = sinceStop.some(item => item.outcome === 'prepared' && this.active.has(key(item))) ? 'busy' : 'uncertain';
+          const activeStart = sinceStop.some(item => item.outcome === 'prepared' && this.active.has(key(item)));
+          const pending = await readJson<{kind?:string}>(this.path('pending.json'));
+          if (!activeStart && config.mode === 'ledger' && config.execution === 'calibur' && pending?.kind === 'calibur-setup') receiptOnly = true;
+          else entry.outcome = activeStart ? 'busy' : 'uncertain';
         }
         entries.push(entry);
         await this.deps.persist(this.path(LOG), entries);
@@ -223,6 +388,28 @@ export class PortfolioControls {
         message: messages[prepared.outcome === 'prepared' ? 'uncertain' : prepared.outcome] };
       let outcome: Outcome = 'uncertain';
       try {
+        if (entry.action === 'stop') {
+          // Stop is never queued behind a hardware prompt or receipt wait.
+          for (const setup of this.setups.values()) setup.controller.abort(new Error('Stop requested'));
+        } else if (config.mode === 'ledger' && !await this.ownsRunningPortfolio(entry.wallet)) {
+          if (await this.liveLock('run.lock') || await this.liveLock('launch.lock') || await this.spawnedRunner()) {
+            throw new SetupBusyError('Another operation currently owns this portfolio');
+          }
+          const controller = new AbortController();
+          this.setups.set(id, { controller, expectedStop: entry.expectedStop });
+          this.caliburCache = { at: Date.now(), value: { state: 'needed', message: 'Preparing Calibur setup before starting the portfolio.' } };
+          accepted({ wallet: entry.wallet, requestId: entry.requestId, outcome: 'setting-up', state: 'setting-up', calibur: this.caliburCache.value });
+          try {
+            if (!await this.prepareCalibur(profile, entry, controller.signal, receiptOnly)) throw new Error('Calibur setup remains unresolved');
+            controller.signal.throwIfAborted();
+            if (await this.stopToken() !== entry.expectedStop) throw new Error('A newer Stop superseded this Start');
+            const latest = (await this.profile()).config;
+            if (latest.mode !== 'ledger' || latest.execution !== 'calibur' || walletIdentity(latest.wallet) !== entry.wallet) {
+              throw new Error('The selected Calibur execution configuration changed');
+            }
+          } finally { this.setups.delete(id); }
+        }
+
         const result = await this.deps.execute(profile, entry.action === 'start'
           ? ['launch', '--request-id', `chart:${id}`, '--expected-stop', entry.expectedStop] : ['stop'], entry.sessionId);
         const value = result.value as { app?: string; outcome?: string; status?: unknown } | null;
@@ -236,12 +423,18 @@ export class PortfolioControls {
           else if (value.outcome === 'busy') outcome = 'busy';
           else if (['blocked','needs-input','already-handled'].includes(value.outcome ?? '')) outcome = 'blocked';
         }
-      } catch { /* A potentially dispatched request never becomes a safe retry. */ }
+      } catch (error) {
+        if (error instanceof SetupBusyError) outcome = 'busy';
+        if (error instanceof SetupBlockedError) { outcome = 'blocked'; entry.setupBlocked = error.reason; }
+        if (entry.action === 'start' && await this.stopToken().catch(() => entry.expectedStop) !== entry.expectedStop) outcome = 'blocked';
+        // Any other potentially dispatched setup/launch remains an uncertainty barrier.
+      }
       await this.controlled(async () => {
         const entries = await this.entries();
         const saved = entries.find(item => key(item) === id);
         if (!saved || saved.outcome !== 'prepared') throw new Error('Runner request result could not be persisted');
         saved.outcome = outcome;
+        if (entry.setupBlocked) saved.setupBlocked = entry.setupBlocked;
         await this.deps.persist(this.path(LOG), entries);
       });
       if (entry.action === 'start' && (outcome === 'armed' || outcome === 'starting')) {
@@ -258,9 +451,18 @@ export class PortfolioControls {
     const current = this.active.get(id);
     if (current) {
       if (current.action !== entry.action) throw new PortfolioControlError(409, 'This request ID already belongs to another control action.');
-      return current.promise;
+      return current.promise.then(async result => {
+        if (result.state !== 'setting-up' || this.setups.has(id)) return result;
+        const saved = (await this.entries()).find(item => key(item) === id);
+        return { ...await this.read(), requestId: entry.requestId, outcome: saved?.outcome === 'prepared' ? 'starting' : 'already-handled' };
+      });
     }
-    const running = operation(); this.active.set(id, { action: entry.action, promise: running });
-    try { return await running; } finally { if (this.active.get(id)?.promise === running) this.active.delete(id); }
+    const running = operation();
+    const response = Promise.race([running, ready]);
+    this.active.set(id, { action: entry.action, promise: response });
+    void running.catch(() => { /* Durable prepared entry retains uncertain background failures. */ }).finally(() => {
+      if (this.active.get(id)?.promise === response) this.active.delete(id);
+    });
+    return response;
   }
 }

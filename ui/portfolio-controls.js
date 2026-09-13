@@ -4,18 +4,19 @@
   const run = byId("portfolio-run"), explorer = byId("wallet-explorer"), explorerLabel = byId("wallet-explorer-label");
   const message = byId("control-message"), retry = byId("ledger-retry");
   const uuid = (value) => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
-  const states = new Set(["running", "stopped", "starting", "stopping", "unavailable", "deferred"]);
+  const states = new Set(["running", "stopped", "starting", "stopping", "setting-up", "unavailable", "deferred"]);
   const validWallet = (value) => typeof value === "string" && /^0x[0-9a-f]{40}$/i.test(value);
   const same = (a, b) => validWallet(a) && validWallet(b) && a.toLowerCase() === b.toLowerCase();
   const short = (wallet) => `${wallet.slice(0, 6)}…${wallet.slice(-4)}`;
   let wallet = null, mode = null, runner = null, attached = null, viewReady = false;
   let statusFresh = false, runnerFresh = false, busy = false, suspended = false;
   let readGeneration = 0, runnerRevision = 0;
-  let transitionTimer = null, transitionKey = null, transitionReads = 0, transitionReading = false;
+  let transitionTimer = null, transitionKey = null, transitionReads = 0, transitionReading = false, transitionDeadline = null;
   let retrySource = null, ledgerConnected = false, retryUnsupported = false, retryBusy = false;
-  const attemptedRetries = new Set();
+  const attemptedRetries = new Set(), uncertainControls = new Set();
+  let messageSource = null;
 
-  function tell(text) { message.textContent = text; message.hidden = !text; }
+  function tell(text, source = "control") { message.textContent = text; message.hidden = !text; messageSource = text ? source : null; }
   function suspendControlStreams() {
     const releases = [];
     const release = () => { while (releases.length) releases.pop()(); };
@@ -31,41 +32,63 @@
   function reconcileTransition() {
     const key = !suspended && !busy && statusFresh && runnerFresh && viewReady &&
       Boolean(window.rebalanceView?.token) && same(wallet, attached) && same(wallet, runner?.wallet) &&
-      ["starting", "stopping"].includes(runner.state) ? `${wallet.toLowerCase()}:${runner.state}` : null;
+      ["starting", "stopping", "setting-up"].includes(runner.state) ? `${wallet.toLowerCase()}:${runner.state}` : null;
     if (key !== transitionKey) {
       clearTimeout(transitionTimer); transitionTimer = null;
       transitionKey = key; transitionReads = 0;
+      transitionDeadline = key && runner.state === "setting-up" ? Date.now() + 300_000 : null;
     }
     if (!key || transitionReading || transitionTimer !== null) return;
     // Process exit need not replace a file after the last Stopping event. Read
     // only during that transition, serially and with a finite retry budget.
-    if (transitionReads >= 30) {
-      runner = { wallet, state: "unavailable", message: "Runner state has not settled. Refresh the page to check it." };
+    const setup = runner.state === "setting-up";
+    if (transitionReads >= (setup ? 300 : 30) || (transitionDeadline !== null && Date.now() >= transitionDeadline)) {
+      runner = { wallet, state: "unavailable", message: setup
+        ? "Calibur setup status has not settled. It may still finish; refresh the page to check before trying again."
+        : "Runner state has not settled. Refresh the page to check it." };
       return;
     }
     const expectedWallet = wallet;
     transitionTimer = setTimeout(async () => {
       transitionTimer = null;
       if (key !== transitionKey) return;
+      if (transitionDeadline !== null && Date.now() >= transitionDeadline) { render(); return; }
       transitionReads++; transitionReading = true;
       let releaseStreams = () => {};
       try { releaseStreams = suspendControlStreams(); await refreshRunner(expectedWallet); }
       finally { releaseStreams(); transitionReading = false; render(); }
     }, 1000);
   }
+  function setupLabel() {
+    return ({ authorizing: "Authorize Calibur…", signing: "Confirm setup…", confirming: "Waiting for setup receipt…" })[runner?.calibur?.state] || "Setting up Calibur…";
+  }
+  const setupExplanation = "Calibur is Uniswap wallet code that batches token approvals and swaps. First setup needs two Ledger signatures and one transaction paid in ETH; later rebalances need one transaction signature.";
   function render() {
     reconcileTransition();
     const state = runnerFresh && same(wallet, runner?.wallet) ? runner.state : "unavailable";
-    run.textContent = busy ? (run.dataset.action === "stop" ? "Stopping…" : "Starting…")
-      : ({ running: "Stop", stopped: "Start", starting: "Starting…", stopping: "Stopping…", deferred: "Start", unavailable: "Unavailable" })[state];
+    // Setup can finish after the accepted Start reply. Surface the current
+    // stopped summary on streamed/read-back updates and on a fresh page load.
+    // An uncorrelated status read cannot resolve a control with an unknown reply.
+    const setupFailure = !suspended && !busy && statusFresh && mode === "ledger" && state === "stopped" &&
+      runner?.calibur && typeof runner.message === "string" && !uncertainControls.has(wallet.toLowerCase())
+      ? runner.message.trim().slice(0, 400) : "";
+    if (setupFailure) tell(setupFailure, "runner");
+    else if (messageSource === "runner") tell("");
+    run.textContent = busy && run.dataset.action === "stop" ? "Stopping…" : state === "setting-up" ? setupLabel()
+      : busy ? "Starting…" : ({ running: "Stop", stopped: "Start", starting: "Starting…", stopping: "Stopping…", deferred: "Start", unavailable: "Unavailable" })[state];
     run.dataset.state = state;
     const linked = Boolean(window.rebalanceView?.token) && viewReady && same(wallet, attached);
     run.disabled = suspended || busy || !statusFresh || !linked || !["running", "stopped"].includes(state);
     run.title = !linked ? "Open this portfolio through your agent to enable controls."
       : !statusFresh ? "Waiting for current portfolio status."
       : state === "running" ? (mode === "ledger" ? "Stop this Ledger portfolio and cancel waiting device prompts. Submitted transactions still settle." : "Stop this portfolio. Submitted transactions still settle.")
-      : state === "stopped" ? (mode === "ledger" ? "Start this Ledger wallet. The backend opens device prompts automatically; physically confirm each transaction." : "Start automatic rebalancing for this wallet with its saved targets.")
+      : state === "stopped" ? (mode === "ledger" ? runner?.calibur?.state === "ready"
+        ? "Start this Ledger wallet. The backend opens device prompts automatically; physically confirm each transaction."
+        : `Start this Ledger wallet. ${setupExplanation} Start checks setup before running.`
+        : "Start automatic rebalancing for this wallet with its saved targets.")
+      : state === "setting-up" ? `${setupLabel()} ${setupExplanation}`
       : runner?.message || "Waiting for the local runner.";
+    run.setAttribute("aria-busy", String(busy || ["starting", "stopping", "setting-up"].includes(state)));
     run.setAttribute("aria-label", `${run.textContent} portfolio${wallet ? ` ${short(wallet)}` : ""}`);
     retry.hidden = mode !== "ledger" || !retrySource;
     retry.disabled = suspended || busy || retryBusy || !statusFresh || !linked || state !== "running" || !ledgerConnected ||
@@ -153,6 +176,7 @@
     if (run.disabled || busy || !same(wallet, runner?.wallet)) return;
     const action = runner.state === "running" ? "stop" : "start";
     const targetWallet = wallet, requestId = crypto.randomUUID(), revision = runnerRevision;
+    uncertainControls.delete(targetWallet.toLowerCase());
     busy = true; run.dataset.action = action; tell(""); render();
     let releaseStreams = () => {};
     try {
@@ -160,12 +184,14 @@
       releaseStreams = suspendControlStreams();
       const result = await requestRunnerChange({ token: window.rebalanceView.token, wallet: targetWallet, action, requestId });
       if (!same(result.wallet, targetWallet) || result.requestId !== requestId || !states.has(result.state) || typeof result.outcome !== "string") throw new Error("Control result unavailable");
+      if (result.outcome === "uncertain") uncertainControls.add(targetWallet.toLowerCase());
       if (!suspended && same(wallet, targetWallet)) {
         if (revision === runnerRevision) updateRunner(result);
         const needsAttention = ["blocked", "busy", "deferred", "uncertain"].includes(result.outcome) || ["unavailable", "deferred"].includes(result.state);
         tell(needsAttention && typeof result.message === "string" ? result.message.slice(0, 400) : "");
       }
     } catch {
+      uncertainControls.add(targetWallet.toLowerCase());
       if (!suspended && same(wallet, targetWallet)) {
         updateRunner(null, true);
         tell("Could not confirm this request. Its outcome is unknown and it may still finish. Check the runner state before trying again; this request will not be repeated automatically.");

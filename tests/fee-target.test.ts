@@ -161,3 +161,26 @@ test('invalid batch coverage cannot omit required swap gas or issue a fee-price 
     { remainingApprovals: -1 }, { remainingApprovals: 17 }, { remainingApprovals: 0.5 },
   ]) await assert.rejects(checkRebalanceFee({ ...input, ...patch }, { ...dependencies, fetch }), /batch fee counts/);
 });
+
+
+test('standalone Calibur setup prices only its buffered gas, with no projected trades', async () => {
+  const setup = await checkRebalanceFee({ ...input, kind: 'calibur-setup', swaps: 0 }, dependencies);
+  assert.equal(setup.estimatedUsdE8, '27000000');
+  const explicit = await checkRebalanceFee({ ...input, kind: 'calibur-setup', swaps: 0,
+    swapsInCurrentTransaction: 0, remainingApprovals: 0 }, dependencies);
+  assert.deepEqual(explicit, setup);
+});
+
+test('standalone setup rejects asset calls and other transaction kinds still require swaps', async () => {
+  for (const invalid of [
+    { kind: 'calibur-setup', swaps: 1 },
+    { kind: 'calibur-setup', swaps: 0, swapsInCurrentTransaction: 1 },
+    { kind: 'calibur-setup', swaps: 0, remainingApprovals: 1 },
+    { kind: 'swap', swaps: 0 }, { kind: 'approval', swaps: 0 },
+  ] as Partial<FeeTargetInput>[]) {
+    let fetched = false;
+    await assert.rejects(checkRebalanceFee({ ...input, ...invalid }, { ...dependencies,
+      fetch: async () => { fetched = true; return response(); } }));
+    assert.equal(fetched, false);
+  }
+});

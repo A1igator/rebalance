@@ -6,6 +6,7 @@ import { keccak256, TransactionReceiptNotFoundError, type Hex, type SignedAuthor
 import { createChain, type ChainTransaction } from './chain.js';
 import { recoverAuthorizationAddress } from 'viem/utils';
 import { CALIBUR_ADDRESS } from './calibur.js';
+import { verifyCaliburSetupReceipt } from './calibur-setup-proof.js';
 import { estimateCaliburGas, readCaliburState, validateCaliburTransaction, type CaliburState } from './calibur-execution.js';
 import type { PreparedTransaction } from './privy.js';
 import { noteSuccessfulSwap } from './cadence.js';
@@ -91,7 +92,7 @@ export function validatePending(p: PendingTransaction, config: Config): void {
   if (!p || typeof p !== 'object' || p.chainId !== 4663 || typeof p.wallet !== 'string' ||
       p.wallet.toLowerCase() !== config.wallet.toLowerCase() || typeof p.hash !== 'string' ||
       !/^0x[0-9a-fA-F]{64}$/.test(p.hash) || !Number.isSafeInteger(p.nonce) || p.nonce < 0 ||
-      !['prepared', 'broadcast', 'unknown'].includes(p.status) || !['approval', 'swap', 'wrap'].includes(p.kind) ||
+      !['prepared', 'broadcast', 'unknown'].includes(p.status) || !['approval', 'swap', 'wrap', 'calibur-setup'].includes(p.kind) ||
       (p.gas !== undefined && !validQuantity(p.gas)) || (p.gasPrice !== undefined && !validQuantity(p.gasPrice)) ||
       (p.sendFailure !== undefined && (typeof p.sendFailure !== 'string' || !Object.hasOwn(SEND_FAILURE_MESSAGES, p.sendFailure)))) {
     throw new Error('Pending transaction does not match the configured wallet/network or is invalid');
@@ -133,6 +134,7 @@ export async function reconcile(config: Config, chain: Chain): Promise<{ blocked
   if (block.hash !== receipt.blockHash || head < receipt.blockNumber + 1n) {
     return { blocked: true, operation: { status: 'confirming', hash: pending.hash, kind: pending.kind, message: 'Waiting for two observed confirmations.' } };
   }
+  if (pending.kind === 'calibur-setup') await verifyCaliburSetupReceipt(config, chain, pending, receipt);
   const operation: Operation = { status: 'confirmed', hash: pending.hash, kind: pending.kind,
     wallet: config.wallet, chainId: config.chainId,
     blockNumber: receipt.blockNumber.toString(), message: `${pending.kind} confirmed on Robinhood mainnet` };

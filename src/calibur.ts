@@ -47,3 +47,11 @@ export function buildCaliburSelfTransaction(wallet: Address, calls: readonly Cal
   if (!address(wallet) || wallet.toLowerCase() === CALIBUR_ADDRESS.toLowerCase()) throw new Error('Calibur requires the portfolio wallet as its execution target');
   return { to: getAddress(wallet), value: 0n, data: encodeCaliburBatch(calls) };
 }
+
+/** Standalone delegation setup has no token/router calls. The setup dispatcher
+ * supplies the authorization and validates the stopped wallet independently. */
+export function buildCaliburSetupTransaction(wallet: Address): { to: Address; value: 0n; data: Hex } {
+  if (!address(wallet) || wallet.toLowerCase() === CALIBUR_ADDRESS.toLowerCase()) throw new Error('Calibur requires the portfolio wallet as its execution target');
+  return { to: getAddress(wallet), value: 0n, data: encodeFunctionData({ abi: CALIBUR_ABI, functionName: 'execute',
+    args: [{ calls: [], revertOnFailure: true }] }) };
+}

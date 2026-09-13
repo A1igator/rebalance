@@ -17,9 +17,9 @@ export type FeeCheck = {
 };
 export type FeeTargetInput = {
   targetUsdE8: string;
-  /** Remaining planner swaps, including the swap associated with this transaction. */
+  /** Remaining planner swaps; zero only for the standalone Calibur setup. */
   swaps: number;
-  kind: 'swap' | 'approval';
+  kind: 'swap' | 'approval' | 'calibur-setup';
   /** Inner swaps already covered by this transaction's actual gas estimate. */
   swapsInCurrentTransaction?: number;
   /** Required future approval transactions, excluding this transaction. */
@@ -54,17 +54,20 @@ function ethUsdPrice(value: unknown): bigint {
 }
 function validate(input: FeeTargetInput): bigint {
   if (!input || typeof input.targetUsdE8 !== 'string' || !/^(?:0|[1-9]\d{0,77})$/.test(input.targetUsdE8) ||
-      !Number.isInteger(input.swaps) || input.swaps < 1 || input.swaps > 16 ||
-      !['swap', 'approval'].includes(input.kind) || typeof input.gas !== 'bigint' || input.gas <= 0n || input.gas > MAX_UINT256 ||
+      !Number.isInteger(input.swaps) || input.swaps < (input.kind === 'calibur-setup' ? 0 : 1) || input.swaps > 16 ||
+      !['swap', 'approval', 'calibur-setup'].includes(input.kind) || typeof input.gas !== 'bigint' || input.gas <= 0n || input.gas > MAX_UINT256 ||
       typeof input.gasPrice !== 'bigint' || input.gasPrice <= 0n || input.gasPrice > MAX_UINT256) {
     throw new Error('Invalid rebalance fee-target inputs');
   }
   const included = input.swapsInCurrentTransaction ?? (input.kind === 'swap' ? 1 : 0);
-  const approvals = input.remainingApprovals ?? input.swaps - 1;
+  const approvals = input.remainingApprovals ?? (input.kind === 'calibur-setup' ? 0 : input.swaps - 1);
   if (!Number.isInteger(included) || included < 0 || included > input.swaps ||
-      (input.kind === 'approval' ? included !== 0 : included < 1) ||
+      (input.kind === 'swap' ? included < 1 : included !== 0) ||
       !Number.isInteger(approvals) || approvals < 0 || approvals > 16) {
     throw new Error('Invalid rebalance batch fee counts');
+  }
+  if (input.kind === 'calibur-setup' && (input.swaps !== 0 || included !== 0 || approvals !== 0)) {
+    throw new Error('Calibur setup fees cannot include portfolio trades');
   }
   const target = BigInt(input.targetUsdE8);
   if (target > MAX_UINT256) throw new Error('Invalid rebalance fee-target inputs');
@@ -116,7 +119,7 @@ export async function checkRebalanceFee(input: FeeTargetInput, overrides: Partia
   const check: FeeCheck = { targetUsdE8: input.targetUsdE8, estimatedUsdE8: null, gasPriceWei: input.gasPrice.toString(),
     ethUsdE8: null, observedAt: null, state: 'unavailable' };
   const remainingSwaps = BigInt(input.swaps - (input.swapsInCurrentTransaction ?? (input.kind === 'swap' ? 1 : 0)));
-  const remainingApprovals = BigInt(input.remainingApprovals ?? input.swaps - 1);
+  const remainingApprovals = BigInt(input.remainingApprovals ?? (input.kind === 'calibur-setup' ? 0 : input.swaps - 1));
   const bufferedSwapGas = (BigInt(GAS_REFERENCE.swapGas) * 120n + 99n) / 100n;
   const bufferedApprovalGas = (BigInt(GAS_REFERENCE.approvalGas) * 120n + 99n) / 100n;
   const estimatedWei = (input.gas + remainingSwaps * bufferedSwapGas + remainingApprovals * bufferedApprovalGas) * input.gasPrice;

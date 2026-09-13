@@ -1,5 +1,7 @@
 # Rebalance — MVP plan
 
+[Prompt 096](docs/prompts/096-standalone-calibur-setup.md) adds an explicit idle-wallet Calibur setup transaction before filming, independent of drift/cadence. It has no token calls; activation requires a receipt and exact onchain delegation evidence. An explicit stopped-Ledger Start click performs that setup first, with button stages and hover explanation, then launches only after verification. The standalone setup CLI never starts trading.
+
 Current addition under [prompt 095](docs/prompts/095-calibur-batching-and-quiet-chat.md): explicit Ledger-only Calibur batching combines exact approvals and swaps on the same wallet. The direct path remains the default; physical authorization/live execution validation is separate from implementation tests. Native ETH remains required. Portfolio chat notifications are paused project-wide; the daemon retains results and the chat reads fresh state on demand.
 
 

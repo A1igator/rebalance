@@ -59,6 +59,8 @@ const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
   fees target <USD>                    Set this wallet's estimated rebalance network-fee target
   fees clear                           Remove this wallet's fee target
   fees status                          Read the saved fee target; estimates are not guarantees
+  ledger setup-calibur                  Install Calibur with an empty self-call; no rebalance or runner start
+  ledger calibur-status                 Read Calibur delegation/setup progress; never sign
   ledger status                        Read the latest Ledger rebalance request
   ledger rebalance [--request-id UUID]   Request one device-confirmed rebalance on a running Ledger monitor
   check                                Fresh read/plan/quote; never sign
@@ -286,7 +288,7 @@ async function main() {
   if (values['request-id'] !== undefined && !['launch', 'recover', 'ledger'].includes(command)) throw new Error('--request-id applies only to launch, recover or ledger rebalance');
   if (values.cancel && command !== 'recover') throw new Error('--cancel applies only to recover');
   if ((values.apply || values.settings) && command !== 'share') throw new Error('--apply and --settings apply only to share import');
-  if (values['expected-stop'] !== undefined && (!['start', 'launch', 'recover'].includes(command) || values['resume-start'] ||
+  if (values['expected-stop'] !== undefined && (!(['start', 'launch', 'recover'].includes(command) || (command === 'ledger' && args[1] === 'setup-calibur')) || values['resume-start'] ||
       !/^(none|[a-f0-9]{64})$/.test(values['expected-stop']))) throw new Error('Invalid conditional-start token');
   if (values['expected-runner-generation'] !== undefined && (!['start', 'launch'].includes(command) ||
       !RUNNER_GENERATION.test(values['expected-runner-generation']) || values['setup-only'])) throw new Error('Invalid conditional runner preference generation');
@@ -319,13 +321,25 @@ async function main() {
       print(wallet); return;
     }
     case 'ledger': {
-      if (args.length !== 2 || !['status', 'rebalance'].includes(args[1]!)) throw new Error('Use ledger status or ledger rebalance [--request-id UUID]');
-      for (const [name, value] of Object.entries(values)) {
-        if (name !== 'request-id' && value !== undefined && value !== false) throw new Error(`--${name} does not apply to Ledger commands`);
+      const action = args[1];
+      if (args.length !== 2 || !['status', 'rebalance', 'setup-calibur', 'calibur-status'].includes(action!)) {
+        throw new Error('Use ledger status, ledger rebalance, ledger setup-calibur or ledger calibur-status');
       }
-      if (args[1] === 'status' && values['request-id']) throw new Error('--request-id applies only to ledger rebalance');
+      const allowed = action === 'rebalance' ? 'request-id' : action === 'setup-calibur' ? 'expected-stop' : undefined;
+      for (const [name, value] of Object.entries(values)) {
+        if (name !== allowed && value !== undefined && value !== false) throw new Error(`--${name} does not apply to ledger ${action}`);
+      }
+      if (action === 'setup-calibur' || action === 'calibur-status') {
+        const { setupCalibur, caliburSetupStatus } = await import('./calibur-setup.js');
+        if (action === 'calibur-status') { print(await caliburSetupStatus()); return; }
+        const abort = new AbortController(), stop = () => abort.abort();
+        process.once('SIGINT', stop); process.once('SIGTERM', stop);
+        try { print(await setupCalibur({ signal: abort.signal, expectedStop: values['expected-stop'] })); }
+        finally { process.off('SIGINT', stop); process.off('SIGTERM', stop); }
+        return;
+      }
       const { requestLedgerRebalance, readLedgerRequest } = await import('./ledger-request.js');
-      print(args[1] === 'rebalance' ? await requestLedgerRebalance(values['request-id']) : await readLedgerRequest()); return;
+      print(action === 'rebalance' ? await requestLedgerRebalance(values['request-id']) : await readLedgerRequest()); return;
     }
     case 'status': print(await status()); return;
     case 'launch': {
@@ -512,6 +526,13 @@ async function main() {
         if (await chain.publicClient.getChainId() !== 4663) throw new Error('Wrong RPC chain');
         const receipt = await chain.publicClient.getTransactionReceipt({ hash: pending.hash as Hex });
         if (receipt.status !== 'reverted' || receipt.from.toLowerCase() !== config.wallet.toLowerCase()) throw new Error('Only a mined reverted transaction can be acknowledged');
+        if (pending.kind === 'calibur-setup') {
+          const [head, block] = await Promise.all([chain.publicClient.getBlockNumber({ cacheTime: 0 }),
+            chain.publicClient.getBlock({ blockNumber: receipt.blockNumber })]);
+          if (head < receipt.blockNumber + 1n || block.hash !== receipt.blockHash) throw new Error('Calibur setup needs two canonical receipt confirmations');
+          const { verifyCaliburSetupReceipt } = await import('./calibur-setup-proof.js');
+          await verifyCaliburSetupReceipt(config, chain, pending, receipt);
+        }
         await rm(PENDING_PATH);
         print({ status: 'revert-acknowledged', hash: pending.hash });
       }); return;

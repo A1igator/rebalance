@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 import { decodeFunctionData, encodeFunctionData, getAddress, keccak256, parseAbi, type Abi, type Address, type Hex } from 'viem';
-import { assertCaliburDeployment, buildCaliburSelfTransaction, CALIBUR_ABI, CALIBUR_ADDRESS, CALIBUR_DELEGATION_CODE,
+import { assertCaliburDeployment, buildCaliburSelfTransaction, buildCaliburSetupTransaction, CALIBUR_ABI, CALIBUR_ADDRESS, CALIBUR_DELEGATION_CODE,
   CALIBUR_RUNTIME_CODE_HASH, CALIBUR_RUNTIME_CODE_SIZE, encodeCaliburBatch, inspectCaliburAccountCode, type CaliburCall } from '../src/calibur.js';
 
 const evidence = JSON.parse(await readFile(new URL('../docs/evidence/calibur-deployment.json', import.meta.url), 'utf8'));
@@ -62,6 +62,19 @@ test('root self-call preserves exact calls and enforces atomic failure behavior'
   assert.throws(() => buildCaliburSelfTransaction(CALIBUR_ADDRESS, calls), /portfolio wallet/);
 });
 
+test('standalone setup is an empty atomic self-call without relaxing rebalance bounds', () => {
+  const setup = buildCaliburSetupTransaction(wallet);
+  assert.equal(setup.to, getAddress(wallet)); assert.equal(setup.value, 0n);
+  const decoded = decodeFunctionData({ abi: evidence.abi, data: setup.data });
+  assert.equal(decoded.functionName, 'execute');
+  assert.deepEqual(decoded.args, [{ calls: [], revertOnFailure: true }]);
+  assert.throws(() => encodeCaliburBatch([]), /one to five/);
+  assert.throws(() => buildCaliburSelfTransaction(wallet, []), /one to five/);
+  for (const invalid of [CALIBUR_ADDRESS, `0x${'0'.repeat(40)}`, '0x123', undefined]) {
+    assert.throws(() => buildCaliburSetupTransaction(invalid as Address), /portfolio wallet/);
+  }
+});
+
 test('batch encoding rejects unbounded calls, native value and malformed calldata', () => {
   assert.throws(() => encodeCaliburBatch([]), /one to five/);
   assert.throws(() => encodeCaliburBatch(Array.from({ length: 6 }, () => approval(stockA, 1n))), /one to five/);
@@ -75,12 +88,12 @@ test('batch encoding rejects unbounded calls, native value and malformed calldat
 });
 
 const anvilAvailable = spawnSync('anvil', ['--version'], { env: { PATH: process.env.PATH }, encoding: 'utf8' }).status === 0;
-test('canonical Calibur EVM self-call rolls back exact approvals and earlier swaps after a late purchase fails',
+test('canonical Calibur EVM setup is empty and an atomic rebalance rolls back after a late purchase fails',
   { timeout: 30_000, skip: !anvilAvailable && 'Install Foundry Anvil to run the isolated EVM proof' }, async t => {
     const root = await mkdtemp(join(tmpdir(), 'calibur-evm-'));
     const ipc = join(root, 'node.ipc');
     // No generated keys, fork URL, inherited wallet/Foundry settings or real app paths.
-    const child = spawn('anvil', ['--accounts', '0', '--chain-id', '4663', '--hardfork', 'prague', '--port', '0', '--host', '127.0.0.1', '--ipc', ipc, '--silent'],
+    const child = spawn('anvil', ['--accounts', '0', '--chain-id', '4663', '--hardfork', 'prague', '--steps-tracing', '--port', '0', '--host', '127.0.0.1', '--ipc', ipc, '--silent'],
       { cwd: root, env: { PATH: process.env.PATH, TMPDIR: root }, stdio: 'ignore' });
     let spawnError: Error | undefined;
     child.once('error', error => { spawnError = error; });
@@ -139,6 +152,20 @@ test('canonical Calibur EVM self-call rolls back exact approvals and earlier swa
       return result;
     };
     const initial = await capture();
+    const setup = buildCaliburSetupTransaction(wallet);
+    const setupResult = await send(wallet, setup.to, setup.data);
+    assert.equal(setupResult.receipt.status, '0x1');
+    assert.deepEqual(setupResult.receipt.logs, []);
+    assert.deepEqual(await capture(), initial, 'empty setup changes no token balance, allowance or router state');
+    const setupTrace = await rpc<{ structLogs: { op: string }[] }>('debug_traceTransaction', [setupResult.hash, {
+      disableMemory: true, disableStack: true, disableStorage: true,
+    }]);
+    assert.ok(setupTrace.structLogs.length > 0, 'canonical account code was executed');
+    assert.ok(!setupTrace.structLogs.some(step => ['SSTORE', 'TSTORE', 'CALL', 'CALLCODE', 'DELEGATECALL', 'CREATE', 'CREATE2', 'SELFDESTRUCT'].includes(step.op)),
+      'empty canonical setup executes no storage writes, external calls or contract creation');
+    assert.equal(await rpc('eth_getCode', [wallet, 'latest']), CALIBUR_DELEGATION_CODE);
+    // This proves the empty execution only. Installing a type-4 authorization
+    // and paying its native gas are handled by the distinct setup dispatcher.
     const legs = [[stockA, usdg, 100n], [usdg, stockB, 40n], [usdg, stockC, 60n]] as const;
     const routerData = data(routerAbi, 'multicall', [2n ** 64n, legs.map(([tokenIn, tokenOut, amountIn]) => data(routerAbi, 'exactInputSingle', [{
       tokenIn, tokenOut, fee: 3000, recipient: wallet, amountIn, amountOutMinimum: amountIn, sqrtPriceLimitX96: 0n,

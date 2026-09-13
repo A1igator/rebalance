@@ -453,3 +453,21 @@ test('CLI project notification pause works without a selected wallet and preserv
   assert.equal(JSON.parse((await command(['notifications', 'resume-all'])).stdout).paused, false);
   for (const file of ['run.lock', 'private-key', 'unexpected-network', 'start.log', 'config.json']) assert.equal(existsSync(join(directory, file)), false);
 });
+
+
+test('standalone Calibur CLI is explicit and rejects unrelated flags before any device or network work', async t => {
+  const { directory, command } = await fixture(t);
+  for (const args of [
+    ['ledger', 'setup-calibur', '--targets', 'USDG=100'],
+    ['ledger', 'setup-calibur', '--request-id', 'fixture'],
+    ['ledger', 'setup-calibur', '--expected-stop', 'invalid'],
+    ['ledger', 'calibur-status', '--expected-stop', 'none'],
+    ['ledger', 'calibur-status', '--background'],
+    ['ledger', 'rebalance', '--expected-stop', 'none'],
+  ]) await assert.rejects(command(args));
+  await assert.rejects(command(['ledger', 'setup-calibur', '--expected-stop', 'none']), /saved Ledger Calibur configuration/);
+  for (const file of ['run.lock', 'pending.json', 'private-key', 'unexpected-network', 'start.log']) {
+    assert.equal(existsSync(join(directory, file)), false);
+  }
+  assert.deepEqual(await readJson(join(directory, 'config.json')), config);
+});

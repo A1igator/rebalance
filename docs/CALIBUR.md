@@ -8,15 +8,23 @@ On first use, Ledger must approve a Robinhood-specific EIP-7702 authorization an
 
 EIP-7702 delegation is persistent account code. An execution revert does not undo a delegation installed by that transaction, and switching the application back to direct mode does not revoke it. The implementation accepts only empty account code or the exact 23-byte `ef0100` designator for the pinned Calibur address. It refuses another delegate or ordinary contract code. Read the [EIP](https://eips.ethereum.org/EIPS/eip-7702) for the authorization processing order and persistent-code semantics.
 
-## Selecting the execution mode
+## Start-button setup
 
-For the intended, already configured Ledger portfolio, after it is stopped and its pending operation is reconciled:
+Under [prompt 096](prompts/096-standalone-calibur-setup.md), an explicit **Start** click on a stopped Ledger portfolio prepares Calibur first, even when no rebalance is due. Hover text explains Calibur and its first-use confirmations. The button shows setup, authorization, transaction signing and receipt progress. The backend starts the runner only after it verifies the exact current delegation and the setup receipt. A wallet already delegated to the pinned implementation skips signing setup. Running portfolios are not restarted by this change; raw-key and Privy starts keep their existing behavior.
+
+The one-time transaction is a zero-value self-call to `execute({ calls: [], revertOnFailure: true })`. It contains no token approvals or swaps. It needs **two Ledger signatures for one onchain setup transaction**, followed by one transaction signature per later rebalance batch. Setup preserves targets, cadence and any older Stop until the same Start request has verified activation. A newer Stop invalidates that request. Rejection or uncertain broadcast cannot silently repeat signing; pending receipts remain barriers. Native ETH pays the setup fee, subject to this wallet's configured fee target when present.
+
+For explicit standalone setup without starting the runner, the typed commands are:
 
 ```sh
 npm run cli -- --profile <public-address> configure --execution calibur
+npm run cli -- --profile <public-address> ledger setup-calibur
+npm run cli -- --profile <public-address> ledger calibur-status
 ```
 
-The command changes only that portfolio's public execution setting. A subsequent explicit Start loads the new runner and retains the saved targets and settings. First use requests **two signatures for one onchain transaction**: authorization, then the atomic batch. Later batches use one transaction signature. Verify the resulting receipt and fresh daemon holdings before calling the live test complete. The current implementation has not enabled this option on a live portfolio.
+Configuration requires an idle wallet without pending work. `setup-calibur` holds the runner lock; `calibur-status` only reads public progress/code or reconciles a receipt and never loads a signer. A distinct `calibur-setup` pending record is written before broadcast. The common reconciliation and explicit recovery paths verify the mined empty self-call, chain, nonce, authorization tuple and pinned delegation before clearing it. Setup is never counted as a swap or completed rebalance. Signing the authorization alone does not install it.
+
+This implementation is verified with isolated fixtures. Live activation still requires the owner's Start click and physical Ledger confirmations; no live Calibur receipt is claimed here.
 
 The first type-4 transaction contains an already-signed delegation authorization before the outer signature exists. Its raw bytes are therefore excluded from external Ledger transaction-check/metadata requests; only public call metadata is forwarded. The device still receives the full transaction. This does not add Clear Signing support or silently enable a fallback.
 
@@ -69,9 +77,9 @@ Fresh complete-call simulation covers the approvals together with the router mul
 
 ## Verification results and limits
 
-`npm test -- tests/calibur.test.ts` passed **5/5** on September 13, including the optional real EVM proof with installed **Anvil 1.7.1** (`4072e48705af9d93e3c0f6e29e93b5e9a40caed8`). The local Anvil uses a disposable IPC endpoint, zero generated accounts, public impersonated fixture addresses, no fork and no inherited wallet/Foundry configuration. The pinned full canonical CaliburEntry runtime executes through the wallet's real EIP-7702 delegation designator on the Prague EVM.
+`npm test -- tests/calibur.test.ts` passed **6/6** on September 13, including the optional real EVM proof with installed **Anvil 1.7.1** (`4072e48705af9d93e3c0f6e29e93b5e9a40caed8`). The local Anvil uses a disposable IPC endpoint, zero generated accounts, public impersonated fixture addresses, no fork and no inherited wallet/Foundry configuration. The pinned full canonical CaliburEntry runtime executes through the wallet's real EIP-7702 delegation designator on the Prague EVM.
 
-The EVM proof makes two exact token approvals followed by a router multicall with one sale and two purchases. A call trace confirms that the first purchase and an approval executed successfully before the final purchase failed. The reverted receipt leaves **all** token balances, allowances and router state unchanged. A foreign caller cannot use the root overload. Removing the fixture failure allows the same batch to complete in one self-call, with exact inputs spent and the delegation retained. The source and reproducible bytecode for the deliberately minimal ERC20/router fixtures live under `tests/fixtures/CaliburMocks.sol` and `tests/fixtures/calibur-mocks.json`; these are local rollback checks, not a Uniswap price/liquidity or Robinhood mainnet execution claim. Without Anvil installed, the test explicitly skips this EVM case; the pure tests still run.
+A separate empty-call EVM proof succeeds with no logs, balance/allowance/router changes, storage writes or external calls in its execution trace. The rebalance EVM proof makes two exact token approvals followed by a router multicall with one sale and two purchases. A call trace confirms that the first purchase and an approval executed successfully before the final purchase failed. The reverted receipt leaves **all** token balances, allowances and router state unchanged. A foreign caller cannot use the root overload. Removing the fixture failure allows the same batch to complete in one self-call, with exact inputs spent and the delegation retained. The source and reproducible bytecode for the deliberately minimal ERC20/router fixtures live under `tests/fixtures/CaliburMocks.sol` and `tests/fixtures/calibur-mocks.json`; these are local rollback checks, not a Uniswap price/liquidity or Robinhood mainnet execution claim. Without Anvil installed, the test explicitly skips this EVM case; the pure tests still run.
 
 A separate **public read-only Robinhood simulation** at `2026-09-13T06:01:40.653Z` used the unrelated deterministic public fixture address `0xda0a4fb97a4916fd0d89d8e3b7288165ddc85e8f`. Its actual code was empty. Temporarily overriding only that fixture's code to the canonical delegation and funding its simulated gas balance allowed a self-call containing `USDG.approve(canonicalRouter,0)` to return `0x`; `eth_estimateGas` returned **45,819** (`0xb2fb`). No authorization was produced and no transaction was submitted. This establishes support for the pre-authorization state-override estimate path; it does not establish the cost of a rebalance or install any delegation. [Robinhood's account-abstraction documentation](https://docs.robinhood.com/chain/account-abstraction/) also explicitly documents EIP-7702 support.
 

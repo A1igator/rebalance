@@ -1,3 +1,4 @@
+import { verifyCaliburSetupReceipt } from './calibur-setup-proof.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
@@ -85,6 +86,9 @@ function recoveryCore(config: Config, rpc: Rpc, original: PendingTransaction, re
         tx.value !== 0n || tx.input !== '0x' || found.status !== 'success')) throw new RecoveryError('Cancellation is not a successful zero-value empty-input self-transfer.');
     const [block, head] = await Promise.all([rpc.getBlock({ blockNumber: found.blockNumber }), rpc.getBlockNumber({ cacheTime: 0 })]);
     if (block.hash !== found.blockHash || head < found.blockNumber + 1n) return { confirmed: false as const };
+    if (!cancellation && original.kind === 'calibur-setup') {
+      await verifyCaliburSetupReceipt(config, { publicClient: rpc } as ReturnType<typeof createChain>, original, found);
+    }
     return { confirmed: true as const, operation: { status: cancellation ? 'cancelled' : found.status === 'success' ? 'confirmed' : 'reverted',
       hash, kind: cancellation ? 'cancellation' : original.kind, wallet: config.wallet, chainId: 4663 as const,
       blockNumber: found.blockNumber.toString(), message: cancellation ? 'Original nonce cancelled by a confirmed zero-value self-transfer.' : 'Original transaction mined before cancellation.' } };

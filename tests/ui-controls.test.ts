@@ -34,7 +34,7 @@ async function browser(options: { token?: string | null; reply?: (call: Call) =>
   const timers = new Map<number, () => void>(), calls: Call[] = [];
   const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
   const ids = new Set([...html.matchAll(/id="([^"]+)"/g)].map(match => match[1]));
-  let uuidCalls = 0, timerId = 0;
+  let uuidCalls = 0, timerId = 0, now = 1_000_000;
   const byId = (id: string) => {
     assert.ok(ids.has(id), `Control references missing markup: ${id}`);
     if (!nodes.has(id)) { const node = new Node(); node.hidden = id === 'control-message'; nodes.set(id, node); }
@@ -52,7 +52,7 @@ async function browser(options: { token?: string | null; reply?: (call: Call) =>
     addEventListener: (name, handler) => events.set(name, [...events.get(name) || [], handler]),
   };
   runInNewContext(await readFile(new URL('../ui/portfolio-controls.js', import.meta.url), 'utf8'), {
-    window, document: { getElementById: byId }, AbortController, URL,
+    window, document: { getElementById: byId }, AbortController, URL, Date: { now: () => now },
     crypto: { randomUUID: () => `00000000-0000-4000-8000-${String(++uuidCalls).padStart(12, '0')}` },
     setTimeout: (callback: () => void) => { timers.set(++timerId, callback); return timerId; },
     clearTimeout: (id: number) => timers.delete(id),
@@ -67,7 +67,7 @@ async function browser(options: { token?: string | null; reply?: (call: Call) =>
   await flush();
   const controls = window.rebalanceControls!;
   assert.ok(controls, 'the chart controls expose their input boundary');
-  return { byId, calls, timers, get uuidCalls() { return uuidCalls; },
+  return { byId, calls, timers, advance: (milliseconds: number) => { now += milliseconds; }, get uuidCalls() { return uuidCalls; },
     posts: () => calls.filter(call => call.method === 'POST'),
     async status(value: unknown = chart(), disconnected = false) { controls.updateStatus(value, disconnected); await flush(); },
     async runner(value: unknown = runner(), disconnected = false) { controls.updateRunner(value, disconnected); await flush(); },
@@ -96,7 +96,7 @@ test('runner controls require matching fresh chart, runner and chat attachment i
 test('running enables Stop, while transition, deferred and unavailable states cannot dispatch', async () => {
   const page = await browser(); await page.ready('running');
   assert.equal(page.byId('portfolio-run').disabled, false); assert.match(page.byId('portfolio-run').textContent, /Stop/i);
-  for (const state of ['starting', 'stopping', 'deferred', 'unavailable', 'not-a-state']) {
+  for (const state of ['starting', 'stopping', 'setting-up', 'deferred', 'unavailable', 'not-a-state']) {
     await page.runner(runner(state));
     assert.equal(page.byId('portfolio-run').disabled, true, state);
     await page.click('portfolio-run', true);
@@ -146,7 +146,8 @@ test('Ledger Start describes monitoring and uses only the ordinary runner contro
   await page.ready(); await page.status({ ...chart(), mode: 'ledger' });
   assert.equal(page.byId('portfolio-run').disabled, false);
   assert.match(page.byId('portfolio-run').title, /Start this Ledger wallet/);
-  assert.match(page.byId('portfolio-run').title, /backend opens device prompts automatically; physically confirm each transaction/);
+  assert.match(page.byId('portfolio-run').title, /Calibur is Uniswap wallet code/);
+  assert.match(page.byId('portfolio-run').title, /two Ledger signatures and one transaction paid in ETH/);
   await page.click('portfolio-run');
   assert.deepEqual(page.posts().map(call => ({ url: call.url, body: call.body })), [
     { url: '/api/runner', body: { token, wallet, action: 'start', requestId } },
@@ -614,4 +615,195 @@ test('the later stopping transition read frees stream slots again after the cont
   await page.timersRun();
   assert.equal(reads, 2, 'a stable state resumes streams without healthy polling');
   assert.equal(page.posts().length, 1); assert.equal(page.uuidCalls, 1);
+});
+
+const caliburRunner = (stage = 'needed', state = 'stopped', address = wallet) => ({ ...runner(state, address), calibur: { state: stage } });
+
+test('Ledger Start explains first Calibur setup only when readiness is absent, needed or unknown', async () => {
+  const page = await browser(); await page.ready(); await page.status({ ...chart(), mode: 'ledger' });
+  for (const summary of [runner(), caliburRunner('needed'), caliburRunner('unknown')]) {
+    await page.runner(summary);
+    assert.equal(page.byId('portfolio-run').textContent, 'Start'); assert.equal(page.byId('portfolio-run').disabled, false);
+    assert.match(page.byId('portfolio-run').title, /Uniswap wallet code that batches token approvals and swaps/);
+    assert.match(page.byId('portfolio-run').title, /two Ledger signatures and one transaction paid in ETH/);
+    assert.match(page.byId('portfolio-run').title, /later rebalances need one transaction signature/);
+  }
+  await page.runner(caliburRunner('ready'));
+  assert.match(page.byId('portfolio-run').title, /backend opens device prompts automatically/);
+  assert.doesNotMatch(page.byId('portfolio-run').title, /First setup/);
+  for (const mode of ['privy', 'private-key']) {
+    await page.status({ ...chart(), mode }); await page.runner(caliburRunner('needed'));
+    assert.match(page.byId('portfolio-run').title, /Start automatic rebalancing/);
+    assert.doesNotMatch(page.byId('portfolio-run').title, /Calibur/);
+  }
+  assert.equal(page.posts().length, 0);
+});
+
+test('setup stage labels require the current wallet and never dispatch another Start', async () => {
+  const page = await browser(); await page.ready(); await page.status({ ...chart(), mode: 'ledger' });
+  for (const [stage, label] of [['authorizing', 'Authorize Calibur…'], ['signing', 'Confirm setup…'],
+    ['confirming', 'Waiting for setup receipt…'], ['unknown', 'Setting up Calibur…'], ['unexpected-stage', 'Setting up Calibur…']]) {
+    await page.runner(caliburRunner(stage, 'setting-up'));
+    assert.equal(page.byId('portfolio-run').textContent, label);
+    assert.equal(page.byId('portfolio-run').dataset.state, 'setting-up');
+    assert.equal(page.byId('portfolio-run').disabled, true);
+    assert.equal(page.byId('portfolio-run').attrs['aria-busy'], 'true');
+    assert.match(page.byId('portfolio-run').title, /First setup needs two Ledger signatures/);
+    await page.click('portfolio-run', true);
+  }
+  await page.runner(caliburRunner('authorizing', 'setting-up', otherWallet));
+  assert.equal(page.byId('portfolio-run').textContent, 'Unavailable');
+  await page.click('portfolio-run', true);
+  assert.equal(page.posts().length, 0); assert.equal(page.uuidCalls, 0);
+});
+
+test('one Start can enter setup, advance stage and become running without another POST', async () => {
+  let stage = 'authorizing', state = 'setting-up';
+  const page = await browser({ reply: async call => call.method === 'POST'
+    ? ok({ ...caliburRunner(stage, state), requestId, outcome: 'setting-up' }) : ok(caliburRunner(stage, state)) });
+  await page.ready(); await page.status({ ...chart(), mode: 'ledger' }); await page.runner(caliburRunner());
+  await page.click('portfolio-run');
+  assert.equal(page.byId('portfolio-run').textContent, 'Authorize Calibur…');
+  assert.equal(page.byId('control-message').hidden, true);
+  assert.deepEqual(page.posts().map(call => ({ url: call.url, body: call.body })), [
+    { url: '/api/runner', body: { token, wallet, action: 'start', requestId } },
+  ]);
+  stage = 'signing'; await page.timersRun();
+  assert.equal(page.byId('portfolio-run').textContent, 'Confirm setup…');
+  stage = 'confirming'; await page.runner(caliburRunner(stage, state)); await page.timersRun();
+  assert.equal(page.byId('portfolio-run').textContent, 'Waiting for setup receipt…');
+  stage = 'ready'; state = 'running'; await page.timersRun();
+  assert.equal(page.byId('portfolio-run').textContent, 'Stop'); assert.equal(page.byId('portfolio-run').disabled, false);
+  assert.equal(page.byId('portfolio-run').attrs['aria-busy'], 'false');
+  await page.timersRun(); assert.equal(page.timers.size, 0);
+  assert.equal(page.posts().length, 1); assert.equal(page.uuidCalls, 1);
+});
+
+test('setup refresh lasts beyond ordinary transitions but stops at five minutes across stage changes', async () => {
+  let stage = 'authorizing';
+  const page = await browser({ reply: async () => ok(caliburRunner(stage, 'setting-up')) });
+  await page.ready(); await page.status({ ...chart(), mode: 'ledger' }); await page.runner(caliburRunner(stage, 'setting-up'));
+  for (let i = 0; i < 31; i++) await page.timersRun();
+  assert.equal(page.byId('portfolio-run').textContent, 'Authorize Calibur…');
+  assert.equal(page.calls.length, 31, 'setup is not exhausted by the ordinary 30-read budget');
+  page.advance(299_000); stage = 'signing'; await page.runner(caliburRunner(stage, 'setting-up')); await page.timersRun();
+  assert.equal(page.byId('portfolio-run').textContent, 'Confirm setup…');
+  const reads = page.calls.length;
+  page.advance(1000); stage = 'confirming'; await page.timersRun();
+  assert.equal(page.calls.length, reads, 'no read starts after the five-minute deadline');
+  assert.equal(page.byId('portfolio-run').textContent, 'Unavailable'); assert.equal(page.byId('portfolio-run').disabled, true);
+  assert.match(page.byId('portfolio-run').title, /may still finish; refresh the page/);
+  await page.timersRun(); assert.equal(page.timers.size, 0); assert.equal(page.posts().length, 0);
+});
+
+test('setup also has a finite read count and never extends ordinary Start or Stop transitions', async () => {
+  for (const state of ['setting-up', 'starting', 'stopping']) {
+    const page = await browser({ reply: async () => ok(caliburRunner('confirming', state)) });
+    await page.ready(); await page.status({ ...chart(), mode: 'ledger' }); await page.runner(caliburRunner('confirming', state));
+    for (let i = 0; i < 305; i++) await page.timersRun();
+    assert.equal(page.calls.length, state === 'setting-up' ? 300 : 30);
+    assert.equal(page.byId('portfolio-run').textContent, 'Unavailable');
+    assert.equal(page.timers.size, 0); assert.equal(page.posts().length, 0);
+  }
+});
+
+test('setup status does not loosen control uncertainty, stale response or selection barriers', async () => {
+  const post = deferred<Reply>(), read = deferred<Reply>();
+  const page = await browser({ reply: async call => call.method === 'POST' ? post.promise : read.promise });
+  await page.ready(); await page.status({ ...chart(), mode: 'ledger' }); await page.click('portfolio-run');
+  await page.runner(caliburRunner('authorizing', 'setting-up'));
+  assert.equal(page.byId('portfolio-run').textContent, 'Authorize Calibur…', 'a fresh setup event can be displayed during a pending POST');
+  await page.timersRun(); // Existing HTTP deadline still applies; do not resend.
+  assert.match(page.byId('control-message').textContent, /outcome is unknown/);
+  await page.runner(caliburRunner('signing', 'setting-up'));
+  read.resolve(ok(caliburRunner('authorizing', 'setting-up'))); await flush();
+  assert.equal(page.byId('portfolio-run').textContent, 'Confirm setup…', 'the older read cannot rewind the device stage');
+  post.resolve(ok({ ...caliburRunner('authorizing', 'setting-up'), requestId, outcome: 'setting-up' })); await flush();
+  assert.equal(page.byId('portfolio-run').textContent, 'Confirm setup…');
+  assert.match(page.byId('control-message').textContent, /outcome is unknown/);
+  await page.view({ snapshot: { connectedWallet: otherWallet } }); await page.timersRun();
+  await page.click('portfolio-run', true);
+  assert.equal(page.byId('portfolio-run').disabled, true);
+  assert.equal(page.timers.size, 0); assert.equal(page.posts().length, 1); assert.equal(page.uuidCalls, 1);
+});
+
+
+const setupRejected = (address = wallet) => ({ ...caliburRunner('needed', 'stopped', address),
+  message: 'Calibur setup was cancelled on the Ledger. Press Start when ready to try again.' });
+
+test('an accepted Start surfaces a later setup rejection from GET or SSE without another control request', async () => {
+  for (const delivery of ['GET', 'SSE']) {
+    let rejected = false;
+    const page = await browser({ reply: async call => call.method === 'POST'
+      ? ok({ ...caliburRunner('authorizing', 'setting-up'), requestId: call.body!.requestId, outcome: 'starting' })
+      : ok(rejected ? setupRejected() : caliburRunner('authorizing', 'setting-up')) });
+    await page.ready(); await page.status({ ...chart(), mode: 'ledger' }); await page.click('portfolio-run');
+    assert.equal(page.byId('control-message').hidden, true);
+    rejected = true;
+    if (delivery === 'GET') await page.timersRun();
+    else await page.runner(setupRejected());
+    assert.equal(page.byId('control-message').textContent, setupRejected().message, delivery);
+    assert.equal(page.byId('control-message').hidden, false);
+    assert.equal(page.byId('portfolio-run').textContent, 'Start');
+    assert.equal(page.byId('portfolio-run').disabled, false);
+    await page.timersRun();
+    assert.equal(page.posts().length, 1); assert.equal(page.uuidCalls, 1);
+    assert.equal(page.timers.size, 0);
+    rejected = false; await page.click('portfolio-run');
+    assert.equal(page.byId('control-message').hidden, true, 'an explicit new attempt clears the older failure');
+    assert.equal(page.posts().length, 2); assert.equal(page.uuidCalls, 2);
+  }
+});
+
+test('a fresh page shows a stopped setup failure only for the fresh displayed Ledger wallet', async () => {
+  const page = await browser();
+  await page.runner(setupRejected());
+  assert.equal(page.byId('control-message').hidden, true, 'runner identity alone does not select a wallet');
+  await page.status({ ...chart(otherWallet), mode: 'ledger' });
+  assert.equal(page.byId('control-message').hidden, true, 'a different chart wallet cannot inherit the failure');
+  await page.status({ ...chart(), mode: 'ledger' });
+  assert.equal(page.byId('control-message').textContent, setupRejected().message);
+  assert.equal(page.byId('control-message').hidden, false);
+  await page.status({ ...chart(otherWallet), mode: 'ledger' });
+  assert.equal(page.byId('control-message').hidden, true, 'switching the chart removes the old wallet failure');
+  await page.status({ ...chart(), mode: 'ledger' }, true);
+  assert.equal(page.byId('control-message').hidden, true, 'disconnected status cannot present a fresh failure');
+  await page.status({ ...chart(), mode: 'raw-key' });
+  assert.equal(page.byId('control-message').hidden, true);
+  await page.status({ ...chart(), mode: 'ledger' });
+  await page.runner({ ...setupRejected(), message: 'x'.repeat(500) });
+  assert.equal(page.byId('control-message').textContent.length, 400);
+  await page.runner(caliburRunner('ready', 'running'));
+  assert.equal(page.byId('control-message').hidden, true, 'a current running update clears the stopped failure');
+  assert.equal(page.posts().length, 0);
+});
+
+test('setup failure summaries cannot overwrite unknown control outcomes from timeouts or uncertain replies', async () => {
+  for (const outcome of ['timeout', 'uncertain']) {
+    const page = await browser({ reply: async call => call.method === 'GET' ? ok(setupRejected())
+      : outcome === 'timeout' ? new Promise<Reply>(() => {})
+      : ok({ ...setupRejected(), requestId: call.body!.requestId, outcome: 'uncertain', message: 'The control outcome is unknown.' }) });
+    await page.ready(); await page.status({ ...chart(), mode: 'ledger' }); await page.click('portfolio-run');
+    if (outcome === 'timeout') await page.timersRun();
+    assert.match(page.byId('control-message').textContent, /outcome is unknown/);
+    await page.runner(setupRejected());
+    assert.match(page.byId('control-message').textContent, /outcome is unknown/, 'an uncorrelated SSE is not receipt for the request');
+    assert.doesNotMatch(page.byId('control-message').textContent, /cancelled on the Ledger/);
+    await page.timersRun(); assert.equal(page.posts().length, 1);
+  }
+});
+
+test('an older setup failure read cannot overwrite a newer streamed setup stage', async () => {
+  const read = deferred<Reply>();
+  const page = await browser({ reply: async () => read.promise });
+  await page.ready(); await page.status({ ...chart(), mode: 'ledger' });
+  await page.runner(caliburRunner('authorizing', 'setting-up')); await page.timersRun();
+  await page.runner(caliburRunner('signing', 'setting-up'));
+  read.resolve(ok(setupRejected())); await flush();
+  assert.equal(page.byId('portfolio-run').textContent, 'Confirm setup…');
+  assert.equal(page.byId('control-message').hidden, true);
+  await page.runner(setupRejected(otherWallet));
+  assert.equal(page.byId('control-message').hidden, true);
+  assert.equal(page.byId('portfolio-run').textContent, 'Unavailable');
+  assert.equal(page.posts().length, 0);
 });
