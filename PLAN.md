@@ -222,3 +222,7 @@ Keep portfolio navigation on the page's validated loopback hostname and release 
 ## One-command Sharpe allocation — September 13
 
 [Prompt 102](docs/prompts/102-one-command-sharpe.md) makes an explicit Sharpe request a deterministic CLI operation. First use resolves one bundled choice; a saved wallet policy reuses its frozen history and constraints. An explicit stock/USDG preset fetches and aligns public adjusted-share and actual USDG/USD history, with bounded validation and labelled proxy/benchmark assumptions. Fetch and solving occur outside the configuration lock, followed by comparison and atomic adoption of policy, targets and one explicit request. No selected portfolio means no optimization; preview saves nothing. The user-risk policy interface remains available. Validate provider failures, sparse calendars, routing, concurrent edits and a real public-data preview in disposable storage without changing a live wallet.
+
+## Quiet demo and network failure recovery — September 13
+
+[Prompt 103](docs/prompts/103-demo-cleanliness-and-sharpe-network-errors.md) distinguishes network access failures from malformed history and guides one approved retry only for a verified prewrite network failure, retaining exact portfolio scope and user intent. Unknown outcomes require public-state inspection. Tenjin's agent integration is fully disabled for the demo; its searches and publishing must not be re-enabled implicitly. Keep the standalone CLI and saved library/wallet available for a later explicit reinstall.

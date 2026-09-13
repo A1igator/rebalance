@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { setImmediate as immediate } from 'node:timers/promises';
-import { fetchSharpeHistory } from '../src/sharpe-history.js';
+import { fetchSharpeHistory, getSharpeHistoryFailure, SharpeHistoryError, sharpeHistoryFailureMessage } from '../src/sharpe-history.js';
 
 const IDS = ['USDG', 'AAPL', 'NVDA', 'MSFT', 'AMD'];
 const NOW = new Date('2026-09-13T12:00:00Z');
@@ -237,7 +237,7 @@ test('HTTP failure, unexpected destinations and malformed bodies fail without ec
   for (const [name, response] of Object.entries(cases)) await t.test(name, async () => {
     let calls = 0;
     await assert.rejects(fetchSharpeHistory(IDS, { now: NOW, fetch: async () => { calls++; return response(); } }), error => {
-      assert.match(String(error), /Sharpe history unavailable/); assert.doesNotMatch(String(error), /provider-secret|attacker/); return true;
+      assert.ok(error instanceof SharpeHistoryError); assert.doesNotMatch(String(error), /provider-secret|attacker/); return true;
     });
     assert.equal(calls, 5);
   });
@@ -259,7 +259,10 @@ test('deadline covers ignored-abort fetches; late responses cannot succeed or re
   const pending = fetchSharpeHistory(IDS, { now: NOW, fetch: async (_input, init) => {
     signals.push(init!.signal!); return new Promise<Response>(resolve => waiters.push(resolve));
   } });
-  const rejection = assert.rejects(pending, /timed out/);
+  const rejection = assert.rejects(pending, error => {
+    assert.deepEqual(getSharpeHistoryFailure(error), { code: 'timeout' });
+    assert.match(String(error), /timed out/); return true;
+  });
   assert.equal(waiters.length, 5);
   t.mock.timers.tick(15_000); await rejection;
   assert.ok(signals.every(signal => signal.aborted));
@@ -273,7 +276,79 @@ test('deadline also bounds a body that never finishes and cancels all readers', 
   const pending = fetchSharpeHistory(IDS, { now: NOW, fetch: async () => new Response(new ReadableStream<Uint8Array>({
     cancel() { cancellations++; },
   }), { headers: { 'content-type': 'application/json' } }) });
-  const rejection = assert.rejects(pending, /timed out/);
+  const rejection = assert.rejects(pending, error => {
+    assert.deepEqual(getSharpeHistoryFailure(error), { code: 'timeout' });
+    assert.match(String(error), /timed out/); return true;
+  });
   await immediate(); t.mock.timers.tick(15_000); await rejection;
   assert.equal(cancellations, 5);
+});
+
+
+test('fetch failures expose only bounded network codes, including nested causes and AggregateError', async t => {
+  const cases: [string, unknown, string][] = [
+    ['permission cause', new TypeError('secret URL https://credentials.invalid', { cause: Object.assign(new Error('secret path'), { code: 'EPERM' }) }), 'network-access-denied'],
+    ['nested permission cause', new Error('secret', { cause: new Error('secret', { cause: { code: 'EACCES', hostname: 'private.invalid' } }) }), 'network-access-denied'],
+    ['aggregate permission cause', new Error('secret', { cause: new AggregateError([{ code: 'ECONNREFUSED' }, { code: 'EPERM' }], 'secret') }), 'network-access-denied'],
+    ['DNS failure', new TypeError('fetch failed', { cause: { code: 'ENOTFOUND', hostname: 'private.invalid' } }), 'network-unavailable'],
+    ['connection failure', new Error('secret', { cause: { code: 'ECONNREFUSED' } }), 'network-unavailable'],
+    ['generic fetch', new Error('secret'), 'network-unavailable'],
+    ['message is not denial proof', new Error('EPERM EACCES permission denied https://private.invalid'), 'network-unavailable'],
+    ['HTTP-like object is not denial proof', { status: 403, message: 'EPERM' }, 'network-unavailable'],
+  ];
+  for (const [name, error, code] of cases) await t.test(name, async () => {
+    let calls = 0;
+    await assert.rejects(fetchSharpeHistory(IDS, { now: NOW, fetch: async () => { calls++; throw error; } }), received => {
+      const failure = getSharpeHistoryFailure(received);
+      assert.deepEqual(failure, { code });
+      assert.doesNotMatch(JSON.stringify({ failure, message: sharpeHistoryFailureMessage(failure), error: String(received) }), /secret|private|credentials|https:|ENOTFOUND|EPERM|EACCES/);
+      return true;
+    });
+    assert.equal(calls, 5); // One parallel attempt per fixed provider endpoint.
+  });
+  const cycle: { cause?: unknown; code: string } = { code: 'UNKNOWN' }; cycle.cause = cycle;
+  await assert.rejects(fetchSharpeHistory(IDS, { now: NOW, fetch: async () => { throw cycle; } }), received => {
+    assert.deepEqual(getSharpeHistoryFailure(received), { code: 'network-unavailable' }); return true;
+  });
+  let accessed = false;
+  const getter = Object.defineProperty({}, 'code', { get() { accessed = true; return 'EPERM'; } });
+  await assert.rejects(fetchSharpeHistory(IDS, { now: NOW, fetch: async () => { throw getter; } }), received => {
+    assert.deepEqual(getSharpeHistoryFailure(received), { code: 'network-unavailable' }); return true;
+  });
+  assert.equal(accessed, false);
+});
+
+test('HTTP 403, 429 and 503 retain only the fixed provider and status, never permission or raw-body claims', async t => {
+  for (const provider of ['yahoo', 'kraken'] as const) for (const status of [403, 429, 503]) await t.test(`${provider} ${status}`, async () => {
+    const f = fixture();
+    const fetch: typeof globalThis.fetch = async (input, init) => {
+      const matching = provider === 'kraken' ? String(input).includes('api.kraken.com') : String(input).includes('/AAPL?');
+      return matching ? new Response('EPERM secret https://credentials.invalid', { status }) : f.fetch(input, init);
+    };
+    await assert.rejects(fetchSharpeHistory(IDS, { now: NOW, fetch }), received => {
+      const failure = getSharpeHistoryFailure(received);
+      assert.deepEqual(failure, { code: 'provider-http', provider, status });
+      assert.match(sharpeHistoryFailureMessage(failure), new RegExp(`HTTP ${status}`));
+      assert.doesNotMatch(JSON.stringify({ failure, error: String(received) }), /permission|EPERM|secret|https:/);
+      return true;
+    });
+  });
+});
+
+test('bad provider schema remains invalid-history even when its text resembles a network error', async () => {
+  const f = fixture(); f.payloads.AAPL = { code: 'EPERM', cause: { code: 'EACCES' }, message: 'secret' };
+  await assert.rejects(fetchSharpeHistory(IDS, { now: NOW, fetch: f.fetch }), received => {
+    assert.deepEqual(getSharpeHistoryFailure(received), { code: 'invalid-history' }); return true;
+  });
+});
+
+test('synchronous abort rejection at the deadline is still timeout, not a fetch permission failure', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const pending = fetchSharpeHistory(IDS, { now: NOW, fetch: async (_input, init) => new Promise<Response>((_resolve, reject) => {
+    init!.signal!.addEventListener('abort', () => reject(Object.assign(new Error('EPERM secret'), { code: 'EPERM' })), { once: true });
+  }) });
+  const rejection = assert.rejects(pending, error => {
+    assert.deepEqual(getSharpeHistoryFailure(error), { code: 'timeout' }); return true;
+  });
+  t.mock.timers.tick(15_000); await rejection;
 });

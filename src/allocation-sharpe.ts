@@ -3,7 +3,7 @@ import { validateManagedAllocation } from './allocation-management.js';
 import { CONFIG_PATH, DATA, loadConfig, validateConfig, withUserRebalanceRequest, type Config } from './config.js';
 import { acquireConfigLock } from './config-lock.js';
 import { ledgerConfigFingerprint } from './ledger-request.js';
-import { fetchSharpeHistory, type SharpeHistoryProvenance } from './sharpe-history.js';
+import { fetchSharpeHistory, getSharpeHistoryFailure, sharpeHistoryFailureMessage, type SharpeHistoryProvenance } from './sharpe-history.js';
 import { atomicWriteJson } from './storage.js';
 
 export type SharpeOptimizeOptions = { preset?: 'stock-usdg-1y'; preview?: boolean };
@@ -55,9 +55,10 @@ export async function optimizeSharpeAllocation(options: SharpeOptimizeOptions = 
     }
     let fetched: Awaited<ReturnType<typeof fetchSharpeHistory>>;
     try { fetched = await deps.fetchHistory(Object.keys(original.targets), { now: deps.now() }); }
-    catch {
+    catch (error) {
+      const failure = getSharpeHistoryFailure(error);
       return { ...base, outcome: 'history-unavailable' as const, applied: false as const,
-        message: 'The complete stock and USDG history could not be verified. No policy or targets were saved.' };
+        failure, message: sharpeHistoryFailureMessage(failure) };
     }
     provenance = fetched.provenance;
     policy = validateAllocationPolicy({ ...(prior ?? { version: 1, horizonMonths: 12, benchmarkReturnBps: 0 }),

@@ -26,8 +26,64 @@ const STOCK_BASIS = 'Yahoo split/dividend-adjusted underlying share close' as co
 const CASH_BASIS = 'Kraken USDG/USD daily close' as const;
 const ALIGNMENT = 'Common equity calendar dates; US equity and UTC USDG closes differ; no filling or interpolation' as const;
 const dateOnly = (ms: number) => new Date(ms).toISOString().slice(0, 10);
-class SharpeHistoryError extends Error {}
-const failure = (reason: string) => new SharpeHistoryError(`Sharpe history unavailable: ${reason}. No allocation was changed.`);
+export type SharpeHistoryFailure =
+  | { code: 'network-access-denied' | 'network-unavailable' | 'timeout' | 'invalid-history' }
+  | { code: 'provider-http'; provider: 'yahoo' | 'kraken'; status: number };
+
+/** Only these structured fields cross the CLI boundary; raw causes stay local. */
+export class SharpeHistoryError extends Error {
+  readonly failure: Readonly<SharpeHistoryFailure>;
+  constructor(failure: SharpeHistoryFailure, detail?: string) {
+    super(detail === undefined ? sharpeHistoryFailureMessage(failure)
+      : `Sharpe history unavailable: ${detail}. No allocation was changed.`);
+    this.name = 'SharpeHistoryError';
+    this.failure = Object.freeze({ ...failure });
+  }
+}
+export function getSharpeHistoryFailure(error: unknown): SharpeHistoryFailure {
+  if (error instanceof SharpeHistoryError) {
+    const value = error.failure;
+    if (value.code === 'provider-http' && ['yahoo', 'kraken'].includes(value.provider) &&
+        Number.isInteger(value.status) && value.status >= 100 && value.status <= 599) {
+      return { code: 'provider-http', provider: value.provider, status: value.status };
+    }
+    if (value.code === 'network-access-denied' || value.code === 'network-unavailable' ||
+        value.code === 'timeout' || value.code === 'invalid-history') return { code: value.code };
+  }
+  return { code: 'invalid-history' };
+}
+export function sharpeHistoryFailureMessage(value: SharpeHistoryFailure): string {
+  const unchanged = 'No policy or targets were saved.';
+  switch (value.code) {
+    case 'network-access-denied': return `Local network permissions denied the history request. ${unchanged}`;
+    case 'network-unavailable': return `The history providers could not be reached. Check this environment's network access. ${unchanged}`;
+    case 'timeout': return `The history request timed out. ${unchanged}`;
+    case 'provider-http': return `${value.provider === 'yahoo' ? 'Yahoo Finance' : 'Kraken'} returned HTTP ${value.status}. ${unchanged}`;
+    case 'invalid-history': return `The requested history was incomplete or invalid. ${unchanged}`;
+  }
+}
+const failure = (reason: string) => new SharpeHistoryError({ code: 'invalid-history' }, reason);
+
+// Node fetch nests OS errors in cause (and sometimes AggregateError.errors).
+// Bound traversal, avoid getters/cycles, and never infer permission denial from
+// message text, a provider HTTP status, or an arbitrary remote response field.
+function networkFailure(error: unknown): SharpeHistoryFailure {
+  const queue: unknown[] = [error];
+  const seen = new Set<object>();
+  for (let visited = 0; queue.length && visited < 16; visited++) {
+    const item = queue.shift();
+    if (!item || typeof item !== 'object' || seen.has(item)) continue;
+    seen.add(item);
+    const own = (key: string): unknown => {
+      try { return Object.getOwnPropertyDescriptor(item, key)?.value; } catch { return undefined; }
+    };
+    if (own('code') === 'EPERM' || own('code') === 'EACCES') return { code: 'network-access-denied' };
+    queue.push(own('cause'));
+    const errors = own('errors');
+    if (Array.isArray(errors)) queue.push(...errors.slice(0, 16));
+  }
+  return { code: 'network-unavailable' };
+}
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 const positive = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0;
 const seconds = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
@@ -38,8 +94,13 @@ function equityDate(timestamp: number): string {
   return ['year', 'month', 'day'].map(type => parts.find(part => part.type === type)!.value).join('-');
 }
 
-async function boundedJson(response: Response, url: string, signal: AbortSignal): Promise<unknown> {
-  if (!response.ok || !response.body || response.redirected || (response.url && response.url !== url) ||
+async function boundedJson(response: Response, url: string, provider: 'yahoo' | 'kraken', signal: AbortSignal): Promise<unknown> {
+  if (!response.ok) {
+    void response.body?.cancel().catch(() => {});
+    throw new SharpeHistoryError(response.status >= 100 && response.status <= 599
+      ? { code: 'provider-http', provider, status: response.status } : { code: 'network-unavailable' });
+  }
+  if (!response.body || response.redirected || (response.url && response.url !== url) ||
       !/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') ?? '') || signal.aborted) {
     void response.body?.cancel().catch(() => {});
     throw failure('a provider did not return the expected JSON response');
@@ -71,7 +132,7 @@ async function boundedJson(response: Response, url: string, signal: AbortSignal)
     catch { throw failure('a provider returned malformed JSON'); }
   } catch (error) {
     if (error instanceof SharpeHistoryError) throw error;
-    throw failure('a provider response could not be read');
+    throw new SharpeHistoryError(networkFailure(error));
   } finally { signal.removeEventListener('abort', cancel); cancel(); }
 }
 
@@ -180,17 +241,24 @@ export async function fetchSharpeHistory(assetIds: readonly string[], options: {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let responses: unknown[];
+  let timedOut = false;
   try {
     const deadline = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => { controller.abort(); reject(failure('market-data request timed out')); }, TIMEOUT_MS);
+      timer = setTimeout(() => { timedOut = true; controller.abort(); reject(new SharpeHistoryError({ code: 'timeout' })); }, TIMEOUT_MS);
     });
     responses = await Promise.race([Promise.all([...stocks.map(id => sources.stocks[id]), USDG_URL].map(async url => {
       let response: Response;
       try { response = await (options.fetch ?? globalThis.fetch)(url, { method: 'GET', signal: controller.signal,
         redirect: 'error', credentials: 'omit', cache: 'no-store', headers: { accept: 'application/json' } }); }
-      catch { throw failure('market-data provider could not be reached'); }
-      return boundedJson(response, url, controller.signal);
+      catch (error) { throw new SharpeHistoryError(networkFailure(error)); }
+      return boundedJson(response, url, url === USDG_URL ? 'kraken' : 'yahoo', controller.signal);
     })), deadline]);
+  } catch (error) {
+    // Abort can synchronously reject fetch or cancel a reader before the timer's
+    // promise wins its race. The local deadline still determines this outcome.
+    if (timedOut) throw new SharpeHistoryError({ code: 'timeout' });
+    if (error instanceof SharpeHistoryError) throw error;
+    throw failure('a provider response could not be validated');
   } finally { if (timer !== undefined) clearTimeout(timer); controller.abort(); }
   const stockCloses = stocks.map((id, index) => yahooCloses(responses[index], id, firstDay, today, nowMs));
   const cash = krakenCloses(responses[stocks.length], firstDay, today, nowMs);
@@ -209,9 +277,12 @@ export async function fetchSharpeHistory(assetIds: readonly string[], options: {
   const series = Object.fromEntries(ids.map(id => [id, id === 'USDG' ? cash : stockCloses[stocks.indexOf(id)]]));
   const observations = dates.slice(1).map((date, index) => ({ date, returns: Object.fromEntries(ids.map(id =>
     [id, series[id].get(date)! / series[id].get(dates[index])! - 1])) }));
-  const history = validateReturnHistory({ source: `${STOCK_BASIS}: ${Object.values(sources.stocks).join(' ')}; ${CASH_BASIS}: ${USDG_URL}; ${ALIGNMENT}. Frozen one-year test preset; zero return benchmark; no annualization or execution costs.`,
-    basis: 'underlying-proxy', quoteCurrency: 'USD', interval: 'daily', asOf: fetchedAt,
-    benchmarkPeriodReturn: 0, observations }, ids);
+  let history: ReturnHistory;
+  try {
+    history = validateReturnHistory({ source: `${STOCK_BASIS}: ${Object.values(sources.stocks).join(' ')}; ${CASH_BASIS}: ${USDG_URL}; ${ALIGNMENT}. Frozen one-year test preset; zero return benchmark; no annualization or execution costs.`,
+      basis: 'underlying-proxy', quoteCurrency: 'USD', interval: 'daily', asOf: fetchedAt,
+      benchmarkPeriodReturn: 0, observations }, ids);
+  } catch { throw failure('the aligned return panel failed validation'); }
   return { history, provenance: { preset: 'stock-usdg-1y', fetchedAt, firstCloseDate: dates[0],
     firstReturnDate: observations[0].date, lastReturnDate: observations.at(-1)!.date, observationCount: observations.length,
     historySha256: createHash('sha256').update(JSON.stringify(history)).digest('hex'), sources,

@@ -10,7 +10,7 @@ import { optimizeSharpeAllocation, type SharpeOptimizeDependencies } from '../sr
 import type { ReturnHistory } from '../src/allocation-metrics.js';
 import { acquireConfigLock } from '../src/config-lock.js';
 import { validateConfig, type Config } from '../src/config.js';
-import type { SharpeHistoryProvenance } from '../src/sharpe-history.js';
+import { SharpeHistoryError, type SharpeHistoryFailure, type SharpeHistoryProvenance } from '../src/sharpe-history.js';
 import { atomicWriteJson, readJson } from '../src/storage.js';
 import { assertTemporaryTestDirectory } from '../src/test-isolation.js';
 
@@ -156,4 +156,31 @@ test('invalid options and future history fail before adoption', async t => {
   f.deps.fetchHistory = async () => ({ history: { ...history(), asOf: '2027-01-01' }, provenance: provenance() });
   await assert.rejects(optimizeSharpeAllocation({ preset: 'stock-usdg-1y' }, f.deps), /not in the future/);
   assert.equal(await f.bytes(), before); assert.equal(f.calls.write, 0);
+});
+
+
+test('sanitized history failure projection leaves configuration byte-identical and never solves or locks', async t => {
+  const cases: SharpeHistoryFailure[] = [
+    { code: 'network-access-denied' }, { code: 'network-unavailable' }, { code: 'timeout' }, { code: 'invalid-history' },
+    { code: 'provider-http', provider: 'yahoo', status: 403 },
+    { code: 'provider-http', provider: 'yahoo', status: 429 },
+    { code: 'provider-http', provider: 'kraken', status: 503 },
+  ];
+  for (const failure of cases) await t.test(JSON.stringify(failure), async () => {
+    const f = await fixture(t); const before = await f.bytes();
+    f.deps.fetchHistory = async () => {
+      f.calls.fetch++;
+      throw new SharpeHistoryError(failure, 'secret provider payload https://private.invalid');
+    };
+    const result = await optimizeSharpeAllocation({ preset: 'stock-usdg-1y' }, f.deps);
+    assert.equal(result.outcome, 'history-unavailable'); assert.equal(result.applied, false);
+    assert.ok('failure' in result); assert.deepEqual(result.failure, failure);
+    assert.match(result.message, /No policy or targets were saved/);
+    assert.doesNotMatch(JSON.stringify(result), /secret|private.invalid|https:/);
+    if (failure.code === 'network-access-denied') assert.match(result.message, /network permissions denied/);
+    if (failure.code === 'network-unavailable') assert.match(result.message, /could not be reached/);
+    assert.deepEqual(f.calls, { fetch: 1, optimize: 0, lock: 0, write: 0 });
+    assert.equal(await f.bytes(), before);
+    assert.deepEqual(await readdir(f.root), ['config.json']);
+  });
 });
