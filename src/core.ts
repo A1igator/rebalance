@@ -241,8 +241,9 @@ export function planTrade(
 
 
 /**
- * Plan one atomic phase: sell overweight assets first, then use a later fresh
- * observation to buy with cash actually held. Never budget hypothetical proceeds.
+ * Plan one atomic phase: sell material overweight assets first, then use a later
+ * fresh observation to buy with cash held. Tolerated sale residuals do not delay
+ * funded purchases. Never budget hypothetical proceeds.
  */
 export function planRebalance(
   portfolio: Portfolio,
@@ -267,8 +268,14 @@ export function planRebalance(
     const right = b.delta < 0n ? -b.delta : b.delta;
     return left === right ? compareIds(a.position.id, b.position.id) : left > right ? -1 : 1;
   };
+  const surplus = deviations.find(({ position }) => position.id === quoteAssetId)!.delta;
+  const overweights = deviations.filter(({ position, delta }) => position.id !== quoteAssetId && delta > 0n);
+  // Realized sale fees/slippage can lower total value, leaving small positive
+  // stock drifts. Spend actual cash surplus before correcting tolerated dust;
+  // material stock drift or a cash shortfall still requires the sales phase.
+  const prioritizeSales = surplus <= 0n || overweights.some(({ delta }) => delta > threshold);
   const sells: TradePlan[] = [];
-  for (const { position, delta } of deviations.filter(({ position, delta }) => position.id !== quoteAssetId && delta > 0n).sort(largestFirst)) {
+  for (const { position, delta } of (prioritizeSales ? overweights : []).sort(largestFirst)) {
     const correction = (delta * 10n ** BigInt(position.decimals)) / (BPS * position.priceUsdE8);
     const amountIn = correction < position.balance ? correction : position.balance;
     if (amountIn === 0n || estimatedOutput(amountIn, position, quote) === 0n) continue;
@@ -276,7 +283,6 @@ export function planRebalance(
       reason: `Sell overweight ${position.symbol} into ${quote.symbol}` });
   }
   if (sells.length) return { trades: sells, reason: `Sell ${sells.length} overweight asset${sells.length === 1 ? "" : "s"} into ${quote.symbol}` };
-  const surplus = deviations.find(({ position }) => position.id === quoteAssetId)!.delta;
   if (surplus <= 0n) return null;
   const available = (surplus * 10n ** BigInt(quote.decimals)) / (BPS * quote.priceUsdE8);
   const budget = available < quote.balance ? available : quote.balance;

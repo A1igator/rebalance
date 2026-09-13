@@ -4,7 +4,7 @@ All queue, filter, binding and delivery state is [per wallet](PORTFOLIOS.md). Th
 
 The local monitor records four kinds of operational events. Recording an event does not necessarily wake a chat:
 
-- `ledger-rebalance-needed`: drift needs attention. The current event hook is implemented; hardware readiness, connection/rejection handling and actual Ledger signing remain deferred. Its message explicitly says hardware setup is pending.
+- `ledger-rebalance-needed`: retained Ledger drift attention. Running Ledger portfolios prepare device requests locally; routine request progression does not require a model turn. See [direct execution and prompt suspension](LEDGER_EXECUTION.md). Historical setup-pending text does not describe current hardware support.
 - `rebalance-completed`: the most recent swap has a successful observed receipt with two confirmations, and a subsequent fresh portfolio is within the configured drift threshold. An approval, a submitted swap, stale holdings or untradeable dust cannot produce a completion claim.
 
 - `rebalance-recovered`: a cancelled or reverted nonce has a verified recovery receipt. Automatic recovery remains in local history and does not wake either chat. It is distinct from a completed rebalance.

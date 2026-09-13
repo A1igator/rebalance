@@ -1,6 +1,6 @@
 # Ledger tooling and documentation feedback
 
-**Status: physical address onboarding verified; a live backend request reached the transaction prompt with “transaction check unavailable.” A subsequent USDG approval was signed and confirmed onchain; readable display and swap evidence remain pending.** No external feedback submission is claimed.
+**Status: physical onboarding and a completed sequential Ledger rebalance are verified. The final swap and refreshed on-target holdings are recorded in [the execution evidence](LEDGER_EXECUTION.md#verified-sequential-rebalance-batch-validation-pending). New batching has offline coverage; live batch execution, readable display and explicit rejection evidence remain separate checks.** No external feedback submission is claimed.
 
 The initial September 4 deferral ended when the Nano Gen5 arrived. Keep address verification, isolated signing fixtures and actual mainnet signing evidence separate; the raw-key backend does not establish Ledger execution.
 
@@ -39,7 +39,7 @@ These observations are not hardware feedback, successful integration evidence or
 - The Signer Kit's observable reports fallback but its completed signature does not establish how the transaction was displayed. Exposing a verified display/context result would help applications report Clear Signing accurately. This application cancels the explicit fallback transition; real Robinhood device display remains to be observed.
 - Node HID owns a process exit listener in addition to transport subscriptions. Explicit lifecycle documentation and cleanup tests would make long-running agents with repeated device operations easier to integrate.
 
-Still to record: exact firmware/Ethereum app versions, real approval/swap signing and rejection, on-device network/token wording, confirmed mainnet receipt, and the final human-narrated demonstration. The unit suite uses injected observable/RPC fixtures and cannot establish these outcomes.
+At the September 10 checkpoint, transaction evidence was still pending. The later approval and completed sequential rebalance below supersede that status. Still to record: exact firmware/Ethereum app versions, explicit rejection, on-device network/token wording, live batching and the final human-narrated demonstration. The unit suite uses injected observable/RPC fixtures and cannot establish these outcomes.
 
 
 ## Live validation and direct device flow — September 12
@@ -80,3 +80,9 @@ The owner reported ineffective Retry despite a visible device. Request-journal t
 An owner-approved official CLI 2.1.0 account-discovery check initially reported a locked device. After the owner unlocked it, Ethereum discovery completed but returned only the first account, which differed from the funded account previously verified through the SDK at an indexed derivation path. The public discover command exposes network/output/device-timeout, with no account index, derivation path or gap-limit option. The source's scan stops at an unused account; a later funded indexed account can therefore be unreachable through this command. Quote inputs require discovered session labels, so we did not substitute the wrong address or fabricate a local session.
 
 Suggested improvement: expose an explicit account index/path or bounded empty-account scan option, and allow a public-address read-only quote without first requiring device discovery. This would make multi-account application comparisons reproducible without altering existing wallets. This observation concerns the published discovery/quote workflow, not a claim that Ethereum swaps or indexed hardware signing are unsupported. [Sanitized outcomes](evidence/ledger-mainnet-account-check-2026-09-12.json).
+
+## Completed sequential rebalance and excess confirmations — September 12
+
+The owner reported a successful run after the historical failures. Independent read-only verification found six successful swap transactions (four stock purchases, two tiny AAPL sales), eight approvals, a completed Ledger request and refreshed holdings within the saved band. One approval preceded the final cycle. [Receipt and app evidence](evidence/ledger-rebalance-2026-09-12.json). The final swap contains one inner router call; it is sequential execution evidence. Device signing success does not establish Clear Signing.
+
+The excessive confirmations had two application causes: one-leg dispatch repeatedly consumed exact USDG allowances, and a fresh valuation could prioritize tiny stock residual sales before remaining purchases. Exact amounts also changed between approval and dispatch, requiring two allowance refreshes. The new phase multicalls and drift-band residual fix address these without unlimited approvals. Positive-target mixed-portfolio runtime fixtures cover actual sale proceeds, reduced proceeds and receipt barriers. The new batch path still needs its own owner-controlled live demonstration.

@@ -1,0 +1,351 @@
+{
+  "verification": "Read-only public RPC receipts/calldata and scoped application status/events; no transaction initiated by this audit.",
+  "chainId": 4663,
+  "wallet": "0xCeD38202ef03b2cB7dc69cD004F5cCe70dC21808",
+  "completedFlow": "Sequential Ledger execution; each swap transaction contained one router inner call.",
+  "finalSwap": {
+    "checkedAt": "2026-09-12T23:46:07.272Z",
+    "chainId": 4663,
+    "transactionHash": "0x16a15a96527bfe50367f390e2de2a711e0eb0023cd596b941b6ffafa624ebc5f",
+    "receiptStatus": "success",
+    "blockNumber": "61493058",
+    "blockHash": "0x0e19086726017c1bceb7c2b647458b5a3da34ca311cfbc4cae938193128f5a49",
+    "canonicalBlockMatched": true,
+    "minedAt": "2026-09-12T23:25:06.000Z",
+    "senderMatchesLedgerPortfolio": true,
+    "toConfiguredRouter": true,
+    "transactionFunction": "multicall",
+    "innerSwapCount": 1,
+    "swaps": [
+      {
+        "method": "exactInputSingle",
+        "sellAsset": "USDG",
+        "buyAsset": "NVDA",
+        "recipientMatchesWallet": true,
+        "amountIn": "1183860",
+        "minimumOut": "5383166150450063"
+      }
+    ],
+    "transfers": [
+      {
+        "asset": "NVDA",
+        "direction": "in",
+        "amount": "0.005410141202189913"
+      },
+      {
+        "asset": "USDG",
+        "direction": "out",
+        "amount": "1.18386"
+      }
+    ]
+  },
+  "applicationObservation": {
+    "observedAt": "2026-09-12T23:44:48.500Z",
+    "mode": "ledger",
+    "error": null,
+    "proposal": null,
+    "operationStatus": "confirmed",
+    "completionEventAt": "2026-09-12T23:25:08.474Z",
+    "requestOutcome": "on-target",
+    "cycleStartedAt": "2026-09-12T23:21:16.402Z",
+    "targetsBps": {
+      "USDG": 500,
+      "AAPL": 2375,
+      "NVDA": 2375,
+      "MSFT": 2375,
+      "AMD": 2375
+    },
+    "holdings": {
+      "USDG": {
+        "balanceAtomic": "258419",
+        "decimals": 6,
+        "weightBps": 518
+      },
+      "AAPL": {
+        "balanceAtomic": "3552014756236461",
+        "decimals": 18,
+        "weightBps": 2375
+      },
+      "NVDA": {
+        "balanceAtomic": "5410141202189913",
+        "decimals": 18,
+        "weightBps": 2374
+      },
+      "MSFT": {
+        "balanceAtomic": "2387458190224876",
+        "decimals": 18,
+        "weightBps": 2365
+      },
+      "AMD": {
+        "balanceAtomic": "2289057922181521",
+        "decimals": 18,
+        "weightBps": 2368
+      }
+    }
+  },
+  "transactionSequence": {
+    "checkedAt": "2026-09-12T23:52:31.439Z",
+    "chainId": 4663,
+    "range": {
+      "fromBlock": "61420000",
+      "toBlock": "61494000"
+    },
+    "scope": "USDG approval/transfer range plus all five configured tokens during completed cycle; contiguous outgoing nonces 0 through 13 observed",
+    "currentAccountNonce": 14,
+    "transactions": [
+      {
+        "hash": "0x2f481158a42c5ae9d8990af46d7739098bc5542d6739eed5e202b429189889f8",
+        "nonce": 0,
+        "blockNumber": "61423563",
+        "at": "2026-09-12T21:27:22.000Z",
+        "status": "success",
+        "method": "approve",
+        "gasUsed": "57976",
+        "gasPriceWei": "97276000",
+        "token": "USDG",
+        "spenderMatchesRouter": true,
+        "amount": "1.1875"
+      },
+      {
+        "hash": "0x61d726f4263cf4c066dfcfc422c9d2060a43d8c9091b7ec9acde0ea33691aa65",
+        "nonce": 1,
+        "blockNumber": "61491022",
+        "at": "2026-09-12T23:21:37.000Z",
+        "status": "success",
+        "method": "multicall",
+        "gasUsed": "166772",
+        "gasPriceWei": "98710000",
+        "innerCalls": 1,
+        "swaps": [
+          {
+            "sell": "USDG",
+            "buy": "AAPL",
+            "amountIn": "1.1875",
+            "recipientMatchesWallet": true
+          }
+        ]
+      },
+      {
+        "hash": "0x6794768c2ac102b398e3b1034b6851f49fe01ee5fcf279314cb9518ec65e7016",
+        "nonce": 2,
+        "blockNumber": "61491325",
+        "at": "2026-09-12T23:22:08.000Z",
+        "status": "success",
+        "method": "approve",
+        "gasUsed": "57976",
+        "gasPriceWei": "96600000",
+        "token": "USDG",
+        "spenderMatchesRouter": true,
+        "amount": "1.187217"
+      },
+      {
+        "hash": "0xc9f422b8a286181ec2288a8eb90691073b8efa2ef62a0b5ac8bd97055511b12e",
+        "nonce": 3,
+        "blockNumber": "61491485",
+        "at": "2026-09-12T23:22:25.000Z",
+        "status": "success",
+        "method": "approve",
+        "gasUsed": "40876",
+        "gasPriceWei": "98578000",
+        "token": "USDG",
+        "spenderMatchesRouter": true,
+        "amount": "1.187221"
+      },
+      {
+        "hash": "0x99a02fc4d451135c9c694c3c8403296bc82b5a8b2c5857b09e6b287065cd41db",
+        "nonce": 4,
+        "blockNumber": "61491643",
+        "at": "2026-09-12T23:22:41.000Z",
+        "status": "success",
+        "method": "multicall",
+        "gasUsed": "168784",
+        "gasPriceWei": "95566000",
+        "innerCalls": 1,
+        "swaps": [
+          {
+            "sell": "USDG",
+            "buy": "AMD",
+            "amountIn": "1.187221",
+            "recipientMatchesWallet": true
+          }
+        ]
+      },
+      {
+        "hash": "0xa1f0ad5e7384ec815d49f0d58e055b4b66e593bb4a01970eb07b68b006a5b14e",
+        "nonce": 5,
+        "blockNumber": "61491787",
+        "at": "2026-09-12T23:22:55.000Z",
+        "status": "success",
+        "method": "approve",
+        "gasUsed": "63625",
+        "gasPriceWei": "97168000",
+        "token": "AAPL",
+        "spenderMatchesRouter": true,
+        "amount": "0.000002387275320276"
+      },
+      {
+        "hash": "0x6f3dbc6d123b40467b544ecd1e3dc604a54bd6f00ac9b9c0a30f1133aa2dc4b1",
+        "nonce": 6,
+        "blockNumber": "61491928",
+        "at": "2026-09-12T23:23:10.000Z",
+        "status": "success",
+        "method": "approve",
+        "gasUsed": "46525",
+        "gasPriceWei": "95558000",
+        "token": "AAPL",
+        "spenderMatchesRouter": true,
+        "amount": "0.000002389721226963"
+      },
+      {
+        "hash": "0x8f50629b8bcab201f7546fefac32f906406c3ee30aca937177fc801a51fc0223",
+        "nonce": 7,
+        "blockNumber": "61492088",
+        "at": "2026-09-12T23:23:26.000Z",
+        "status": "success",
+        "method": "multicall",
+        "gasUsed": "155764",
+        "gasPriceWei": "95994000",
+        "innerCalls": 1,
+        "swaps": [
+          {
+            "sell": "AAPL",
+            "buy": "USDG",
+            "amountIn": "0.000002380760507282",
+            "recipientMatchesWallet": true
+          }
+        ]
+      },
+      {
+        "hash": "0x8810a3b0905035ed89aeaacb38c724a58f116157b6e28bf372073485ca72caee",
+        "nonce": 8,
+        "blockNumber": "61492218",
+        "at": "2026-09-12T23:23:40.000Z",
+        "status": "success",
+        "method": "approve",
+        "gasUsed": "57976",
+        "gasPriceWei": "97066000",
+        "token": "USDG",
+        "spenderMatchesRouter": true,
+        "amount": "1.185531"
+      },
+      {
+        "hash": "0x202ee5ae4771af6db505e28668a71ab4e301c4b69c198193573847919aae2f4f",
+        "nonce": 9,
+        "blockNumber": "61492357",
+        "at": "2026-09-12T23:23:54.000Z",
+        "status": "success",
+        "method": "multicall",
+        "gasUsed": "166751",
+        "gasPriceWei": "97452000",
+        "innerCalls": 1,
+        "swaps": [
+          {
+            "sell": "USDG",
+            "buy": "MSFT",
+            "amountIn": "1.185531",
+            "recipientMatchesWallet": true
+          }
+        ]
+      },
+      {
+        "hash": "0x99a9b3a237325f9542d54aeec17b868bc2233cb23e4b3242ac1e9a558b38cbd2",
+        "nonce": 10,
+        "blockNumber": "61492492",
+        "at": "2026-09-12T23:24:08.000Z",
+        "status": "success",
+        "method": "approve",
+        "gasUsed": "46525",
+        "gasPriceWei": "97884000",
+        "token": "AAPL",
+        "spenderMatchesRouter": true,
+        "amount": "0.000005217356245726"
+      },
+      {
+        "hash": "0x4a34d9fe55ddd257bf63188461942b615e377c352dcad97ff5f5b673cced1e10",
+        "nonce": 11,
+        "blockNumber": "61492619",
+        "at": "2026-09-12T23:24:21.000Z",
+        "status": "success",
+        "method": "multicall",
+        "gasUsed": "150980",
+        "gasPriceWei": "98596000",
+        "innerCalls": 1,
+        "swaps": [
+          {
+            "sell": "AAPL",
+            "buy": "USDG",
+            "amountIn": "0.000005217356245726",
+            "recipientMatchesWallet": true
+          }
+        ]
+      },
+      {
+        "hash": "0x6f2f587d4b3b3aa41efaee71ff85124773664a3202ec211a5b5089a93ced2879",
+        "nonce": 12,
+        "blockNumber": "61492917",
+        "at": "2026-09-12T23:24:52.000Z",
+        "status": "success",
+        "method": "approve",
+        "gasUsed": "57976",
+        "gasPriceWei": "95612000",
+        "token": "USDG",
+        "spenderMatchesRouter": true,
+        "amount": "1.18386"
+      },
+      {
+        "hash": "0x16a15a96527bfe50367f390e2de2a711e0eb0023cd596b941b6ffafa624ebc5f",
+        "nonce": 13,
+        "blockNumber": "61493058",
+        "at": "2026-09-12T23:25:06.000Z",
+        "status": "success",
+        "method": "multicall",
+        "gasUsed": "166784",
+        "gasPriceWei": "96284000",
+        "innerCalls": 1,
+        "swaps": [
+          {
+            "sell": "USDG",
+            "buy": "NVDA",
+            "amountIn": "1.18386",
+            "recipientMatchesWallet": true
+          }
+        ]
+      }
+    ],
+    "counts": {
+      "total": 14,
+      "approvals": 8,
+      "swaps": 6
+    }
+  },
+  "analysis": {
+    "earlierApprovalTransactions": 1,
+    "transactionsDuringCompletedCycle": 13,
+    "allObservedApprovals": {
+      "USDG": 5,
+      "AAPL": 3
+    },
+    "allObservedSwaps": {
+      "stockPurchases": 4,
+      "smallAaplSales": 2
+    },
+    "approvalRefreshes": [
+      [
+        2,
+        3
+      ],
+      [
+        5,
+        6
+      ]
+    ],
+    "newBatchImplementationLiveVerified": false,
+    "clearSigningVerified": false
+  },
+  "limits": [
+    "The owner reported physically confirming the successful run; public chain data alone does not prove the device display or signing method.",
+    "RPC receipt/block checks do not replace independent consensus verification.",
+    "The browser and CLI observations were taken at different times; small displayed weight differences are expected.",
+    "This historical sequence does not measure live batch execution, exact future transaction count or fee savings."
+  ]
+}

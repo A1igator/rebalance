@@ -69,3 +69,43 @@ test('rounded-zero legs are omitted and neither phase exceeds held input balance
     assert(leg.amountIn <= large.positions.find(p => p.id === leg.sellAssetId)!.balance);
   }
 });
+
+
+test('fresh lower sale proceeds fund buys without repeating tolerated residual stock sales', () => {
+  const initial = portfolio([10n, 40n, 30n, 20n, 0n]);
+  assert.deepEqual(planRebalance(initial, 'USDG', 500)!.trades.map(t => t.sellAssetId), ['AAPL', 'NVDA']);
+  // Sales reduced the sold holdings to20 each, but realized29USDG rather than30.
+  // The lower total leaves those stocks slightly above their recomputed19.8 targets.
+  const observed = portfolio([39n, 20n, 20n, 20n, 0n]);
+  const original = structuredClone(observed);
+  const buys = planRebalance(observed, 'USDG', 500)!;
+  assert.deepEqual(buys.trades.map(t => [t.sellAssetId, t.buyAssetId, t.amountIn]), [['USDG', 'AMD', 19_200_000n]]);
+  assert.deepEqual(observed, original, 'planning uses but never mutates the actual observation');
+  const settled = structuredClone(observed);
+  settled.positions[0]!.balance -= buys.trades[0]!.amountIn;
+  settled.positions[4]!.balance += 19_200_000_000_000_000_000n;
+  assert.equal(planRebalance(settled, 'USDG', 500), null, 'tolerated residuals do not force a correction cycle');
+});
+
+test('stock residuals outside the drift band still take sales priority despite cash surplus', () => {
+  const input = portfolio([39n, 26n, 20n, 15n, 0n]);
+  const result = planRebalance(input, 'USDG', 500)!;
+  assert.deepEqual(result.trades.map(t => [t.sellAssetId, t.buyAssetId, t.amountIn]), [['AAPL', 'USDG', 6n * 10n ** 18n]]);
+  const boundary = portfolio([40n, 25n, 20n, 15n, 0n]);
+  assert(planRebalance(boundary, 'USDG', 500)!.trades.every(t => t.sellAssetId === 'USDG'), 'exactly at the band remains tolerated');
+});
+
+test('without quote surplus tolerated overweight stocks remain available to fund deficits', () => {
+  for (const values of [[19n, 23n, 23n, 23n, 12n], [20n, 22n, 22n, 22n, 14n]]) {
+    const result = planRebalance(portfolio(values), 'USDG', 500)!;
+    assert.equal(result.trades.length, 3);
+    assert(result.trades.every(t => t.buyAssetId === 'USDG' && t.sellAssetId !== 'USDG'));
+  }
+});
+
+test('zero drift threshold still sells every positive residual instead of enlarging the band', () => {
+  const observed = portfolio([39n, 20n, 20n, 20n, 0n]);
+  const result = planRebalance(observed, 'USDG', 0)!;
+  assert.equal(result.trades.length, 3);
+  assert(result.trades.every(t => t.buyAssetId === 'USDG' && t.amountIn === 200_000_000_000_000_000n));
+});
