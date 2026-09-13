@@ -226,3 +226,7 @@ Keep portfolio navigation on the page's validated loopback hostname and release 
 ## Quiet demo and network failure recovery — September 13
 
 [Prompt 103](docs/prompts/103-demo-cleanliness-and-sharpe-network-errors.md) distinguishes network access failures from malformed history and guides one approved retry only for a verified prewrite network failure, retaining exact portfolio scope and user intent. Unknown outcomes require public-state inspection. Tenjin's agent integration is fully disabled for the demo; its searches and publishing must not be re-enabled implicitly. Keep the standalone CLI and saved library/wallet available for a later explicit reinstall.
+
+## First-attempt Sharpe access and score units — September 13
+
+[Prompt 104](docs/prompts/104-first-attempt-sharpe-and-score-units.md) moves known network permission needs ahead of the first fresh-history preset invocation, preserving selected-wallet scope and host approval review. Compact results explicitly label their observation-period Sharpe and constant-weight convention. Independently verify the saved ratio and discrete-grid maximum without changing live allocation. Frozen-policy calculations remain local; target selection, scoring and automatic execution are unchanged.

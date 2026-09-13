@@ -40,7 +40,7 @@ export async function optimizeSharpeAllocation(options: SharpeOptimizeOptions = 
   const prior = original.allocation?.policy;
   if (!options.preset && prior?.objective !== 'sharpe') {
     return { ...base, outcome: 'needs-input' as const, applied: false as const,
-      question: QUESTION, preset: 'stock-usdg-1y' as const };
+      question: QUESTION, preset: 'stock-usdg-1y' as const, presetRequiresNetwork: true as const };
   }
   let policy: AllocationPolicy;
   let provenance: SharpeHistoryProvenance | undefined;
@@ -93,6 +93,8 @@ export async function optimizeSharpeAllocation(options: SharpeOptimizeOptions = 
       ...(policy.riskDefinition === undefined ? {} : { riskDefinition: policy.riskDefinition }) },
     ...(provenance ? { provenance } : {}), targets: result.targets, score: result.score,
     scoreBasis: result.diagnostics.scoreBasis, annualized: false,
+    scoreLabel: `${history.interval} historical Sharpe (not annualized)`,
+    pathConvention: 'constant-weight-per-observation' as const,
     search: result.diagnostics.search, candidates: result.candidates, policyHash: result.policyHash,
     computedAt: allocation.computedAt,
     interpretation: 'Historical maximum over the declared grid and feasible incumbent; not a forecast or a continuous optimum.' };

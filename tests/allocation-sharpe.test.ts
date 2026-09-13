@@ -59,6 +59,7 @@ test('bare manual/user-risk portfolios ask for the explicit preset without fetch
     const result = await optimizeSharpeAllocation({}, f.deps);
     assert.equal(result.outcome, 'needs-input'); assert.equal(result.applied, false);
     assert.ok('question' in result && result.question.includes('actual USDG/USD'));
+    assert.ok('presetRequiresNetwork' in result && result.presetRequiresNetwork === true);
     assert.equal(await f.bytes(), before); assert.deepEqual(f.calls, { fetch: 0, optimize: 0, lock: 0, write: 0 });
   }
 });
@@ -75,6 +76,22 @@ test('bare saved Sharpe reuses frozen history and constraints without fetching; 
   assert.equal(await f.bytes(), before); assert.deepEqual(f.calls, { fetch: 0, optimize: 1, lock: 0, write: 0 });
 });
 
+test('saved-history score labels preserve the observation interval without annualizing', async t => {
+  for (const interval of ['daily', 'weekly', 'monthly'] as const) {
+    const policy = fixedPolicy(); policy.history!.interval = interval;
+    const config = withAllocation(configuration(), policy, now);
+    const f = await fixture(t, config); const before = await f.bytes();
+    const result = await optimizeSharpeAllocation({ preview: true }, f.deps);
+    assert.ok('scoreLabel' in result);
+    assert.equal(result.scoreLabel, `${interval} historical Sharpe (not annualized)`);
+    assert.equal(result.annualized, false);
+    assert.equal(result.pathConvention, 'constant-weight-per-observation');
+    assert.equal(result.score, config.allocation!.result.score);
+    assert.equal(await f.bytes(), before);
+    assert.deepEqual(f.calls, { fetch: 0, optimize: 1, lock: 0, write: 0 });
+  }
+});
+
 test('explicit preset includes cash in the unconstrained 1% grid and does not infer bounds from manual targets', async t => {
   const f = await fixture(t); const before = await f.bytes();
   const result = await optimizeSharpeAllocation({ preset: 'stock-usdg-1y', preview: true }, f.deps);
@@ -82,6 +99,8 @@ test('explicit preset includes cash in the unconstrained 1% grid and does not in
   for (const asset of Object.values(result.assumptions.assets)) assert.deepEqual(asset, { minBps: 0, maxBps: 10000 });
   assert.equal(result.assumptions.stepBps, 100); assert.equal(result.history.benchmarkPeriodReturn, 0);
   assert.equal(result.search, 'grid+incumbent'); assert.equal(result.annualized, false);
+  assert.equal(result.scoreLabel, 'daily historical Sharpe (not annualized)');
+  assert.equal(result.pathConvention, 'constant-weight-per-observation');
   assert.equal(Object.values(result.targets).reduce((a, b) => a + b, 0), 10000);
   assert.equal(await f.bytes(), before); assert.deepEqual(f.calls, { fetch: 1, optimize: 1, lock: 0, write: 0 });
 });
