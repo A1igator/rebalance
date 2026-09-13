@@ -73,8 +73,22 @@
       groups.get(assetId).add(record);
       link.addEventListener("pointerenter", () => { record.hovered = true; update(assetId); });
       link.addEventListener("pointerleave", () => { record.hovered = false; update(assetId); });
+      link.addEventListener("pointercancel", () => { record.hovered = false; update(assetId); });
       link.addEventListener("focusin", () => { record.focused = true; update(assetId); });
       link.addEventListener("focusout", () => { record.focused = false; update(assetId); });
+      // A mouse/touch click leaves focus on the anchor after the new tab
+      // opens, so the group stays highlighted after the pointer leaves.
+      // Blur pointer activation; keyboard activation (detail 0) keeps focus.
+      // The direct state clear covers hidden pages where blur/focusout never fires.
+      const releasePointerFocus = (event) => {
+        if (event?.detail !== 0) {
+          record.focused = false;
+          update(assetId);
+          record.link.blur?.();
+        }
+      };
+      link.addEventListener("click", releasePointerFocus);
+      link.addEventListener("auxclick", releasePointerFocus);
     }
     refresh(node);
     update(assetId);
@@ -83,6 +97,19 @@
   function remove(node) {
     const record = wrappers.get(node);
     if (record) detach(record); else node.remove();
+  }
+  // Opening a new tab can hide this page before pointerleave fires, leaving
+  // hover stuck on. Clear hover when the window loses focus.
+  function clearHover() {
+    for (const [assetId, records] of groups) {
+      let changed = false;
+      for (const record of records) if (record.hovered) { record.hovered = false; changed = true; }
+      if (changed) update(assetId);
+    }
+  }
+  if (typeof window.addEventListener === "function") {
+    window.addEventListener("blur", clearHover);
+    window.addEventListener("pagehide", clearHover);
   }
   window.rebalanceStockLinks = Object.freeze({ wrap, remove, refresh, setOffset });
 })();

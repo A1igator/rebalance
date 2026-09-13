@@ -4,16 +4,18 @@ import { createContext, runInContext } from 'node:vm';
 import { test } from 'node:test';
 import { ASSETS } from '../src/assets.js';
 
+type Handler = (event?: unknown) => void;
 type Node = { tag: string; namespace: string; attrs: Record<string, string>; children: Node[]; parentNode: Node | null;
-  handlers: Map<string, () => void>; emit(event: string): void; addEventListener(event: string, handler: () => void): void; cloneNode(deep: boolean): Node;
-  setAttribute(name: string, value: string): void; append(node: Node): void; remove(): void };
+  handlers: Map<string, Handler>; emit(event: string, payload?: unknown): void; addEventListener(event: string, handler: Handler): void; cloneNode(deep: boolean): Node;
+  setAttribute(name: string, value: string): void; append(node: Node): void; remove(): void; blur(): void };
 function node(tag: string, attrs: Record<string, string> = {}): Node {
   const element: Node = { tag, namespace: 'http://www.w3.org/2000/svg', attrs: { ...attrs }, children: [], parentNode: null,
-    handlers: new Map(), emit(event) { element.handlers.get(event)?.(); },
+    handlers: new Map(), emit(event, payload?) { element.handlers.get(event)?.(payload); },
     addEventListener(event, handler) { element.handlers.set(event, handler); },
     cloneNode(deep) { const copy = node(tag, element.attrs); if (deep) for (const child of element.children) copy.append(child.cloneNode(true)); return copy; },
     setAttribute(name, value) { element.attrs[name] = value; },
     append(child) { child.remove(); child.parentNode = element; element.children.push(child); },
+    blur() { element.emit('focusout'); },
     remove() {
       if (element.parentNode) element.parentNode.children = element.parentNode.children.filter(child => child !== element);
       element.parentNode = null;
@@ -23,9 +25,11 @@ function node(tag: string, attrs: Record<string, string> = {}): Node {
 }
 async function fixture() {
   const script = await readFile(new URL('../ui/stock-links.js', import.meta.url), 'utf8');
-  const window: { rebalanceStockLinks?: { wrap(node: Node, id: unknown, kind: unknown): Node; remove(node: Node): void; refresh(node: Node): void; setOffset(id: unknown, x: number, y: number): void }; location: unknown; open(): never } = {
+  const windowHandlers = new Map<string, Handler>();
+  const window: { rebalanceStockLinks?: { wrap(node: Node, id: unknown, kind: unknown): Node; remove(node: Node): void; refresh(node: Node): void; setOffset(id: unknown, x: number, y: number): void; emitWindow?(event: string, payload?: unknown): void }; location: unknown; open(): never; addEventListener(event: string, handler: Handler): void } = {
     location: { href: 'http://127.0.0.1:4663/chart#view=private-view-fixture', hash: '#view=private-view-fixture' },
     open: () => assert.fail('Links must navigate natively only after a user click'),
+    addEventListener(event, handler) { windowHandlers.set(event, handler); },
   };
   const context = createContext({ window, fetch: () => assert.fail('Rendering links must not send requests'),
     document: { createElementNS: (namespace: string, tag: string) => {
@@ -34,7 +38,8 @@ async function fixture() {
   });
   runInContext(script, context);
   assert.ok(window.rebalanceStockLinks);
-  return window.rebalanceStockLinks;
+  const links = window.rebalanceStockLinks;
+  return { ...links, emitWindow: (event: string, payload?: unknown) => { windowHandlers.get(event)?.(payload); } };
 }
 
 test('every configured asset links only its public ticker search, with explicit stablecoin identity for USDG', async () => {
@@ -182,10 +187,55 @@ test('rerenders preserve the native focused anchor and new representations inher
 
 test('highlight interaction never intercepts or scripts native navigation', async () => {
   const links = await fixture(), anchor = links.wrap(node('path'), 'AAPL', 'actual');
-  assert.deepEqual([...anchor.handlers.keys()].sort(), ['focusin', 'focusout', 'pointerenter', 'pointerleave']);
+  assert.deepEqual([...anchor.handlers.keys()].sort(), ['auxclick', 'click', 'focusin', 'focusout', 'pointercancel', 'pointerenter', 'pointerleave']);
   anchor.emit('pointerenter'); anchor.emit('focusin');
   assert.equal(new URL(anchor.attrs.href).searchParams.get('q'), 'AAPL stock chart');
   assert.equal(anchor.attrs.target, '_blank'); assert.equal(anchor.attrs.rel, 'noopener noreferrer');
+});
+
+test('pointer click releases focus so the slice does not stick, keyboard focus is preserved', async () => {
+  const links = await fixture();
+  const actual = links.wrap(node('path'), 'MSFT', 'actual');
+  const label = links.wrap(node('g'), 'MSFT', 'label');
+  const highlighted = () => [actual, label].every(anchor => anchor.attrs.class.includes('is-highlighted'));
+  actual.emit('focusin');
+  assert.equal(highlighted(), true);
+  actual.emit('pointerleave');
+  assert.equal(highlighted(), true, 'focus alone keeps the group highlighted');
+  actual.emit('click', { detail: 1 });
+  assert.equal(highlighted(), false, 'mouse click must release focus so the slice unsticks');
+  label.emit('focusin');
+  assert.equal(highlighted(), true);
+  label.emit('click', { detail: 0 });
+  assert.equal(highlighted(), true, 'keyboard activation must keep focus');
+  label.emit('focusout');
+  assert.equal(highlighted(), false);
+});
+
+test('hover still shows while the pointer is over the slice after a click, then clears on leave', async () => {
+  const links = await fixture();
+  const anchor = links.wrap(node('path'), 'MSFT', 'actual');
+  anchor.emit('pointerenter');
+  anchor.emit('focusin');
+  anchor.emit('click', { detail: 1 });
+  assert.ok(anchor.attrs.class.includes('is-highlighted'), 'hover keeps emphasis while still under the pointer');
+  anchor.emit('pointerleave');
+  assert.ok(!anchor.attrs.class.includes('is-highlighted'));
+});
+
+test('pointercancel and window blur clear stuck hover without affecting other assets', async () => {
+  const links = await fixture();
+  const stuck = links.wrap(node('path'), 'MSFT', 'actual');
+  const other = links.wrap(node('path'), 'NVDA', 'actual');
+  stuck.emit('pointerenter');
+  other.emit('pointerenter');
+  assert.ok(stuck.attrs.class.includes('is-highlighted'));
+  stuck.emit('pointercancel');
+  assert.ok(!stuck.attrs.class.includes('is-highlighted'));
+  assert.ok(other.attrs.class.includes('is-highlighted'));
+  other.emit('pointerenter');
+  links.emitWindow?.('blur');
+  assert.ok(!other.attrs.class.includes('is-highlighted'));
 });
 
 test('shared emphasis, stationary hit area and reduced-motion CSS preserve shape boundaries', async () => {
