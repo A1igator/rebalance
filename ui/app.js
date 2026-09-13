@@ -49,7 +49,13 @@
       ]);
       if (result?.connectedWallet !== null || result?.tradingChanged !== false) throw new Error();
       if (!pageHidden && attempt === backAttempt) {
-        if (window.rebalanceView?.openSelector) window.rebalanceView.openSelector();
+        if (window.rebalanceView?.openSelector) window.rebalanceView.openSelector(message => {
+          if (pageHidden || attempt !== backAttempt) return;
+          const held = backNavigationReleases; backNavigationReleases = [];
+          for (const release of held.reverse()) release();
+          leavingPortfolio = false; back.removeAttribute("aria-busy");
+          notice.textContent = message; notice.hidden = false;
+        });
         else window.location.assign(`/#view=${viewToken}`);
         navigating = true;
         backNavigationReleases = releases;

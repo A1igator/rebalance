@@ -230,7 +230,10 @@
 
   window.rebalanceView?.subscribe((update) => {
     if (update.snapshot) { attached = update.snapshot.connectedWallet; viewReady = true; }
-    else if (update.error) viewReady = false;
+    else if (update.error) {
+      viewReady = false;
+      if (update.navigation === true) tell(update.error);
+    }
     render();
   });
   window.rebalanceControls = { updateStatus, updateRunner, refreshRunner };

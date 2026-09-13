@@ -23,7 +23,7 @@ async function until(condition: () => boolean, message: string) {
   assert.ok(condition(), message);
 }
 
-test('releasing one page’s SSE pair admits queued requests from a full six-socket HTTP pool', { timeout: 15_000 }, async t => {
+test('live streams yield capacity so another tab can load a document and issue short requests', { timeout: 15_000 }, async t => {
   // Model a bounded same-origin HTTP/1.1 pool explicitly; this does not assert
   // that any particular browser exposes Node’s Agent or the same default limit.
   const root = await mkdtemp(join(tmpdir(), 'rebalance-server-capacity-'));
@@ -80,14 +80,14 @@ test('releasing one page’s SSE pair admits queued requests from a full six-soc
       req.end(post ? JSON.stringify({ token }) : undefined);
     });
   }
-  function call(marker: string, body?: Command, independent = false) {
+  function call(marker: string, body?: Command, path = '/api/runner') {
     let assigned = false;
     const done = new Promise<{ code: number; body: unknown }>((resolve, reject) => {
-      const req = request(url + '/api/runner', { agent: independent ? false : pool, method: body ? 'POST' : 'GET',
+      const req = request(url + path, { agent: pool, method: body ? 'POST' : 'GET',
         headers: { Origin: url, 'Content-Type': 'application/json', 'X-Fixture-Request': marker } }, response => {
         let raw = ''; response.setEncoding('utf8');
         response.on('error', reject); response.on('data', chunk => { raw += chunk; });
-        response.on('end', () => { try { resolve({ code: response.statusCode!, body: JSON.parse(raw) }); } catch (error) { reject(error); } });
+        response.on('end', () => { try { resolve({ code: response.statusCode!, body: path === '/chart' ? raw : JSON.parse(raw) }); } catch (error) { reject(error); } });
       });
       requests.push(req); req.on('socket', () => { assigned = true; }); req.on('error', reject);
       req.end(body ? JSON.stringify(body) : undefined);
@@ -98,27 +98,25 @@ test('releasing one page’s SSE pair admits queued requests from a full six-soc
 
   const pages: IncomingMessage[][] = [];
   for (let index = 0; index < 3; index++) pages.push(await Promise.all([stream('/api/status/events'), stream('/api/view/events')]));
-  assert.equal(sockets(), 6); assert.equal(queued(), 0);
-  assert.equal(streams.every(response => !response.destroyed), true);
+  await until(() => pages[0]!.every(response => response.readableEnded), 'the oldest streams end without requiring their tab to close');
+  assert.ok(sockets() <= 6); assert.equal(queued(), 0);
+  assert.equal(streams.filter(response => !response.readableEnded && !response.destroyed).length, 4);
 
   const body: Command = { token, wallet, action: 'start', requestId: randomUUID() };
-  const control = call('queued-control', body), read = call('queued-read');
-  await until(() => queued() === 2, 'both requests remain queued behind six open streams');
-  assert.equal(control.assigned(), false); assert.equal(read.assigned(), false);
-  assert.deepEqual(received, []); assert.deepEqual(commands, []);
-
-  const independent = await call('independent-read', undefined, true).done;
-  assert.equal(independent.code, 200); assert.deepEqual(independent.body, { wallet, state: 'stopped' });
-  assert.deepEqual(received, ['independent-read']); assert.deepEqual(commands, []);
-  assert.equal(queued(), 2, 'an independent successful read does not release the shared pool');
-
-  for (const response of pages[0]!) response.destroy();
-  const [controlResult, readResult] = await Promise.all([control.done, read.done]);
+  const navigation = call('document', undefined, '/chart');
+  const control = call('control', body), read = call('read');
+  const [documentResult, controlResult, readResult] = await Promise.all([navigation.done, control.done, read.done]);
+  assert.equal(documentResult.code, 200); assert.match(String(documentResult.body), /Rebalance/);
   assert.equal(controlResult.code, 200); assert.equal(readResult.code, 200);
   assert.deepEqual(controlResult.body, { wallet, state: 'starting', requestId: body.requestId, outcome: 'fixture-accepted' });
   assert.deepEqual(readResult.body, { wallet, state: 'stopped' });
-  assert.deepEqual(commands, [body], 'the released request reaches only the injected control once');
-  assert.deepEqual(received.slice(1).sort(), ['queued-control', 'queued-read']);
+  assert.deepEqual(commands, [body], 'only the explicit fixture control is dispatched once');
+  assert.deepEqual(received.sort(), ['control', 'document', 'read']);
   assert.equal(queued(), 0);
   assert.equal(pages.slice(1).flat().every(response => !response.destroyed), true, 'other pages keep their four streams');
+  await stream('/api/view/events');
+  await until(() => pages[1]!.some(response => response.readableEnded), 'an older tab can reconnect and yield the next oldest stream');
+  assert.equal(streams.filter(response => !response.readableEnded && !response.destroyed).length, 4);
+  assert.equal((await call('document-again', undefined, '/chart').done).code, 200);
+  assert.equal(commands.length, 1, 'stream rotation never repeats a control');
 });

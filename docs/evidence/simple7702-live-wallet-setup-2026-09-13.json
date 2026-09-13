@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "verifiedAt": "2026-09-13T08:05:23.130Z",
+  "method": "Read-only canonical Robinhood JSON-RPC receipt, transaction and code verification; no signing, writes to portfolio state or recovery",
+  "chainId": 4663,
+  "rpc": "https://rpc.mainnet.chain.robinhood.com",
+  "wallet": "0xCeD38202ef03b2cB7dc69cD004F5cCe70dC21808",
+  "implementation": "0x4Cd241E8d1510e30b2076397afc7508Ae59C66c9",
+  "transactionHash": "0xe53d8dbe9f8eac1024e24b1b9da5998b5739914a3e1eaadc7c5e131c3d9701b2",
+  "blockNumber": 61798118,
+  "blockHash": "0x0795b2d2696cec5b4cac1499f891ce9e584cccde15c5707cca4913a73c1f9b09",
+  "blockTimestamp": "2026-09-13T07:59:56.000Z",
+  "observedHead": 61801342,
+  "confirmations": 3225,
+  "transaction": {
+    "type": "eip7702",
+    "from": "0xced38202ef03b2cb7dc69cd004f5cce70dc21808",
+    "to": "0xced38202ef03b2cb7dc69cd004f5cce70dc21808",
+    "valueWei": "0",
+    "nonce": 25,
+    "input": "0x34fcd5be00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000",
+    "authorizationList": [
+      {
+        "chainId": 4663,
+        "address": "0x4cd241e8d1510e30b2076397afc7508ae59c66c9",
+        "nonce": 26
+      }
+    ]
+  },
+  "receipt": {
+    "status": "success",
+    "gasUsed": "37433",
+    "effectiveGasPriceWei": "87616000",
+    "networkFeeWei": "3279729728000",
+    "logCount": 0
+  },
+  "code": {
+    "wallet": "0xef01004cd241e8d1510e30b2076397afc7508ae59c66c9",
+    "implementationSize": 3639,
+    "implementationKeccak256": "0x82c1e6c0f83d22eef579344e8eff26baf24db4dabe5408d681b00d0512bc3ec4"
+  },
+  "walletNextNonce": 27,
+  "checks": {
+    "chain4663": true,
+    "success": true,
+    "type4": true,
+    "transactionChain4663": true,
+    "receiptHash": true,
+    "transactionHash": true,
+    "sender": true,
+    "selfTarget": true,
+    "zeroValue": true,
+    "exactEmptyBatch": true,
+    "receiptBlock": true,
+    "twoConfirmations": true,
+    "exactDelegation": true,
+    "runtimeHash": true,
+    "singleAuthorization": true,
+    "authorizationScope": true,
+    "noLogs": true
+  },
+  "limits": [
+    "This proves empty wallet setup and current exact delegation, not a swap or completed Simple7702 rebalance.",
+    "Receipts cannot count physical review screens or independently establish Clear Signing.",
+    "Authorization signature bytes and raw signed transactions are excluded."
+  ],
+  "appObservation": {
+    "statusUpdatedAt": "2026-09-13T08:03:38.665Z",
+    "execution": "simple7702",
+    "armed": true,
+    "error": null,
+    "proposal": null,
+    "latestOperation": {
+      "kind": "simple7702-setup",
+      "status": "confirmed",
+      "hash": "0xe53d8dbe9f8eac1024e24b1b9da5998b5739914a3e1eaadc7c5e131c3d9701b2",
+      "blockNumber": 61798118
+    },
+    "latestLedgerRequestOutcome": "on-target",
+    "cycleStartedAt": "2026-09-13T05:23:38.451Z",
+    "cycleActiveUntil": "2026-09-13T05:24:28.752Z",
+    "simple7702Status": "already-enabled",
+    "interpretation": "The observed runner is monitoring existing within-threshold holdings. The retained cycle is the earlier direct-router rebalance, not a new Simple7702 rebalance."
+  },
+  "ownerObservation": "The owner reported that EIP-7702 worked. The public receipt independently verifies a successful chain-scoped authorization and setup. Physical device wording was not recorded by this read-only audit."
+}

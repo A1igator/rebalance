@@ -15,7 +15,7 @@ const current = {
   config: { targets: allocation },
   portfolio: { totalUsdE8: '500000000', positions: Object.entries(allocation).map(([id, weightBps]) => ({ id, symbol: id, weightBps, balance: '1', valueUsdE8: String(weightBps * 50000) })) },
 };
-type DisplayNode = { tag: string; textContent: string; attrs: Record<string, string>; children: DisplayNode[];
+type DisplayNode = { tag: string; textContent: string; hidden?: boolean; attrs: Record<string, string>; children: DisplayNode[];
   classes: Set<string>; style: Record<string, string>; parentNode: DisplayNode | null; listeners: Map<string, () => void>;
   classList: { add: (name: string) => void; remove: (name: string) => void; toggle: (name: string, on?: boolean) => void; contains: (name: string) => boolean };
   cloneNode: (deep?: boolean) => DisplayNode; replaceChildren: () => void; append: (child: DisplayNode) => void; remove: () => void;
@@ -24,7 +24,7 @@ type DisplayNode = { tag: string; textContent: string; attrs: Record<string, str
 type Response = { ok: boolean; json: () => Promise<unknown> };
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
-async function browser(options: { view?: { suspendForControl: () => () => void }; trackControls?: boolean; hidden?: boolean; status?: () => Promise<Response>; stockLinks?: boolean; hash?: string; disconnect?: () => Promise<Response> } = {}) {
+async function browser(options: { view?: { suspendForControl: () => () => void; openSelector?: (onFailure: (message: string) => void) => void }; trackControls?: boolean; hidden?: boolean; status?: () => Promise<Response>; stockLinks?: boolean; hash?: string; disconnect?: () => Promise<Response> } = {}) {
   const [ringScript, script, html] = await Promise.all(['allocation-ring.js', 'app.js', 'index.html']
     .map(file => readFile(new URL(`../ui/${file}`, import.meta.url), 'utf8')));
   const htmlIds = new Set([...html!.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]));
@@ -1234,4 +1234,25 @@ test('Back replies from before pagehide cannot navigate a restored chart', async
   assert.equal(page.element('portfolios-back').attrs['aria-busy'], undefined);
   assert.equal(page.calls.filter(call => call.url === '/api/disconnect').length, 1);
   page.hide();
+});
+
+test('Back releases its own busy state when the selector document fails to load', async () => {
+  let releases = 0, failure!: (message: string) => void;
+  const page = await browser({ hash: `#view=${'a'.repeat(64)}`, view: {
+    suspendForControl: () => () => { releases++; },
+    openSelector: callback => { failure = callback; },
+  }, disconnect: async () => ({ ok: true, json: async () => ({ connectedWallet: null, tradingChanged: false }) }) });
+  const back = page.element('portfolios-back');
+  back.listeners.get('click')!(); await flush();
+  assert.equal(back.attrs['aria-busy'], 'true'); assert.equal(releases, 0);
+  failure('The selector did not open. Try again.'); await flush();
+  assert.equal(back.attrs['aria-busy'], undefined); assert.equal(releases, 1);
+  assert.equal(page.element('control-message').hidden, false);
+  assert.match(page.element('control-message').textContent, /selector did not open/);
+  assert.equal(page.calls.filter(call => call.url === '/api/disconnect').length, 1);
+  back.listeners.get('click')!(); await flush();
+  assert.equal(page.calls.filter(call => call.url === '/api/disconnect').length, 2, 'only another click repeats detach');
+  page.hide();
+  failure('obsolete navigation failure');
+  assert.doesNotMatch(page.element('control-message').textContent, /obsolete/);
 });

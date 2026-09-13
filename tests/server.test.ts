@@ -314,7 +314,7 @@ test('chart uses events while connected and one polling fallback only while disc
         if (id === 'arcs') renders++;
         if (!elements.has(id)) elements.set(id, { textContent: '', style: {}, parentNode: null, children: [],
           classList: { add: () => {}, remove: () => {}, toggle: () => {}, contains: () => false },
-          replaceChildren: () => {}, append: () => {}, remove: () => {}, addEventListener: () => {}, setAttribute: () => {} });
+          replaceChildren: () => {}, append: () => {}, remove: () => {}, addEventListener: () => {}, setAttribute: () => {}, removeAttribute: () => {} });
         return elements.get(id);
       },
       createElementNS: () => ({ setAttribute: () => {}, textContent: '', style: {}, parentNode: null,

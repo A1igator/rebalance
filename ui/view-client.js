@@ -5,28 +5,44 @@
   const subscribers = new Set(), controlHolds = new Set();
   let latest = null, controller = null, retryTimer = null, suspended = document.visibilityState === "hidden", generation = 0;
   let pageHidden = false, returningToSelector = false, navigating = false;
-  let navigationReleases = [];
+  let navigationReleases = [], navigationTimer = null, failedNavigation = null;
   function releaseNavigation() {
+    clearTimeout(navigationTimer); navigationTimer = null;
     const releases = navigationReleases; navigationReleases = [];
     for (const release of releases.reverse()) release();
     navigating = false;
   }
-  function navigate(url) {
-    if (navigating || pageHidden) return;
+  function navigate(url, onFailure, explicit = false) {
+    if (navigating || pageHidden || !explicit && url === failedNavigation) return;
+    failedNavigation = null;
     navigating = true;
     try {
       navigationReleases.push(suspendForControl());
       const releaseStatus = window.rebalanceStatus?.suspendForControl?.();
       if (typeof releaseStatus === "function") navigationReleases.push(releaseStatus);
       window.location.assign(url);
+      // assign() only starts a document request. A saturated destination origin
+      // can leave this page alive indefinitely without an exception or pagehide.
+      navigationTimer = setTimeout(() => {
+        navigationTimer = null;
+        if (!navigating || pageHidden) return;
+        try { window.stop?.(); } catch { /* A failed load is still reported. */ }
+        // The resumed stream establishes a baseline; it must not retry this
+        // same failed navigation automatically from its first snapshot.
+        failedNavigation = url; latest = null; returningToSelector = false;
+        releaseNavigation();
+        const message = "The page did not open. Try opening the portfolio or selector again; your saved connection is unchanged.";
+        emit({ error: message, navigation: true });
+        if (typeof onFailure === "function") onFailure(message);
+      }, 15000);
     } catch (error) {
       releaseNavigation(); throw error;
     }
   }
-  function openSelector() {
-    if (returningToSelector || pageHidden) return;
+  function openSelector(onFailure, explicit = true) {
+    if (returningToSelector || pageHidden || !explicit && failedNavigation === `/${fragment}`) return;
     returningToSelector = true;
-    try { navigate(`/${fragment}`); }
+    try { navigate(`/${fragment}`, onFailure, explicit); }
     catch (error) { returningToSelector = false; throw error; }
   }
   function chartUrl(value) {
@@ -49,7 +65,7 @@
         (value.chartUrl !== null && !chartUrl(value.chartUrl))) throw new Error("View update unavailable.");
     const changed = latest !== null && latest.connectedWallet?.toLowerCase() !== value.connectedWallet?.toLowerCase();
     latest = value; emit({ snapshot: value });
-    if (value.connectedWallet === null && window.location.pathname === "/chart") openSelector();
+    if (value.connectedWallet === null && window.location.pathname === "/chart") openSelector(undefined, false);
     else if (changed && value.connectedWallet && value.chartUrl) navigate(chartUrl(value.chartUrl));
   }
   async function connect() {
@@ -110,8 +126,10 @@
     const hold = {};
     controlHolds.add(hold);
     if (controlHolds.size === 1) stopTransport();
-    return () => {
-      if (!controlHolds.delete(hold) || controlHolds.size || suspended || pageHidden || document.visibilityState === "hidden") return;
+    return (options) => {
+      if (!controlHolds.delete(hold)) return;
+      if (options?.resetSelectionBaseline) latest = null;
+      if (controlHolds.size || suspended || pageHidden || document.visibilityState === "hidden") return;
       void connect();
     };
   }
@@ -126,7 +144,7 @@
     if (window.location.pathname === "/") latest = null;
     suspended = false; void connect();
   }
-  window.addEventListener("pagehide", () => { pageHidden = true; suspend(); });
+  window.addEventListener("pagehide", () => { pageHidden = true; clearTimeout(navigationTimer); navigationTimer = null; suspend(); });
   window.addEventListener("pageshow", () => {
     const restored = pageHidden;
     pageHidden = false;

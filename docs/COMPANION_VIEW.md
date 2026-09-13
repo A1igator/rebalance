@@ -79,3 +79,9 @@ Card selection and agent wallet connection remain non-trading operations. For Co
 ## Returning to the selector
 
 The chart’s Portfolios link explicitly detaches that displayed wallet from the capability-bound chat before opening the grid. A stale chart cannot detach a different selected wallet. This suspends that chat’s portfolio notifications and leaves its runners, settings and notification Pause preference untouched. The chart also follows a streamed detach back to the grid. Generic view reads and background grid pages never clear a newer attachment; an already-open old grid can still show a remembered “This chat” connection until explicit Back/deselection or a new choice. See [prompt 090](prompts/090-selector-deselection.md).
+
+## Bounded document navigation
+
+Each chart listener keeps at most four long-lived status/view/setup streams, ending the oldest when another is admitted. Existing read-only reconnect behavior keeps older pages usable while leaving capacity for documents and short requests. This is separate from a saved chat attachment or a portfolio runner; rotating a stream never disconnects the chat or changes trading.
+
+Selection keeps its opening status until the new document leaves the selector. A 15-second navigation deadline cancels a stuck document load and restores the original page's controls. Agent-driven navigation and Back have the same bound. Errors remain visible after fresh snapshots, and the failed navigation is not repeated automatically. A saved attachment stays saved when its chart fails to open; users need not disconnect the session. See [prompt 098](prompts/098-bounded-portfolio-navigation.md).

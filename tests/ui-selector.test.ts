@@ -33,7 +33,7 @@ function content(node: Node): string { return [node.textContent, ...node.childre
 async function browser(options: { origin?: string; onNavigate?: (url: string) => void; onStatusHold?: (event: 'hold' | 'release') => void; hidden?: boolean; hash?: string; pathname?: string; client?: boolean; selector?: boolean; registry?: typeof portfolios; reply?: (call: Call) => Promise<Reply | undefined> } = {}) {
   const elements = new Map<string, Node>(), lifecycle = new Map<string, (() => void)[]>(), timers = new Map<number, () => void>();
   const calls: Call[] = [], navigations: string[] = [], streams: ReadableStreamDefaultController<Uint8Array>[] = [], setupStreams: ReadableStreamDefaultController<Uint8Array>[] = [];
-  let timerId = 0, uuidCalls = 0, selectedWallet: string | null = walletA;
+  let timerId = 0, uuidCalls = 0, stops = 0, selectedWallet: string | null = walletA;
   const timerDelays = new Map<number, number>();
   const byId = (id: string) => {
     if (!elements.has(id)) { const node = new Node('div'); node.id = id; elements.set(id, node); }
@@ -41,7 +41,7 @@ async function browser(options: { origin?: string; onNavigate?: (url: string) =>
   };
   const origin = new URL(options.origin ?? 'http://127.0.0.1:4663');
   const location = { hash: options.hash ?? fragment, pathname: options.pathname ?? (options.selector === false ? '/chart' : '/'), origin: origin.origin, hostname: origin.hostname, protocol: origin.protocol, assign: (url: string) => { options.onNavigate?.(url); navigations.push(url); } };
-  const window = { location,
+  const window = { location, stop: () => { stops++; },
     rebalanceStatus: options.onStatusHold ? { suspendForControl: () => {
       options.onStatusHold!('hold'); let released = false;
       return () => { if (!released) { released = true; options.onStatusHold!('release'); } };
@@ -84,7 +84,7 @@ async function browser(options: { origin?: string; onNavigate?: (url: string) =>
   return {
     hold: () => (window as typeof window & { rebalanceView: { suspendForControl: () => () => void } }).rebalanceView.suspendForControl(),
     async openSelector() { (window as typeof window & { rebalanceView: { openSelector: () => void } }).rebalanceView.openSelector(); await flush(); },
-    byId, calls, navigations, timers, streams, setupStreams, get uuidCalls() { return uuidCalls; },
+    byId, calls, navigations, timers, streams, setupStreams, get uuidCalls() { return uuidCalls; }, get stops() { return stops; },
     select: (value: string | null) => { selectedWallet = value; },
     async expire(delay: number) {
       const entry = [...timers].find(([id]) => timerDelays.get(id) === delay);
@@ -409,11 +409,12 @@ test('view stream updates cards and follows only subsequent selection changes, s
   const third = { ...portfolios[0]!, wallet: walletC, chartUrl: 'http://127.0.0.1:4665/chart' };
   await page.send(snapshot(walletA, [...portfolios, third]));
   assert.equal(page.cards().length, 4, 'registry changes appear without a reload');
+  assert.equal(page.timers.size, 0, 'healthy streams need no poll timer');
   await page.send(snapshot(walletB));
   assert.match(content(page.cards()[1]!), /This chat/);
   assert.deepEqual(page.navigations, [`http://127.0.0.1:4664/chart${fragment}`]);
   assert.equal(page.calls.filter(c => c.url === '/api/connect').length, 0, 'agent connection changes are observed, not written back');
-  assert.equal(page.timers.size, 0, 'healthy streams need no poll timer');
+  assert.equal(page.timers.size, 1, 'only the document navigation deadline is active');
   await page.hide();
   const back = await browser();
   await back.send(snapshot(walletB));
@@ -468,7 +469,7 @@ test('malformed and unsafe stream updates cannot leak the handle; failures recon
   await page.retry(); assert.equal(page.calls.length, 2);
   await page.send(snapshot(walletB));
   assert.deepEqual(page.navigations, [`http://127.0.0.1:4664/chart${fragment}`]);
-  assert.equal(page.timers.size, 0);
+  assert.equal(page.timers.size, 1, 'navigation has a deadline, not a stream poll');
   await page.hide();
   const denied = await browser({ selector: false, reply: async () => ({ ok: false, status: 403, json: async () => ({ error: 'Invalid view' }) }) });
   assert.equal(denied.timers.size, 0, 'invalid capability does not retry indefinitely');
@@ -1088,5 +1089,65 @@ test('navigation ignores later selection frames already buffered in the same abo
   assert.match(content(page.cards()[1]!), /This chat/, 'the later buffered frame cannot overwrite the snapshot that initiated navigation');
   assert.ok(page.calls.filter(call => call.url === '/api/view/events').every(call => call.signal!.aborted));
   assert.equal(page.calls.some(call => call.url === '/api/connect'), false);
+  await page.hide();
+});
+
+test('a saved selection with a stalled chart load recovers the cards without replaying selection', async () => {
+  const page = await browser(); await page.send(snapshot());
+  await page.click(page.cards()[1]!);
+  assert.match(page.byId('portfolio-status').textContent, /Opening portfolio/);
+  assert.ok(page.cards().slice(0, -1).every(card => card.disabled));
+  await page.expire(15000);
+  assert.equal(page.stops, 1);
+  assert.match(page.byId('portfolio-status').textContent, /connection was saved.*chart did not open/);
+  assert.ok(page.cards().slice(0, -1).every(card => !card.disabled));
+  await page.send(snapshot(walletB));
+  await page.send(snapshot(walletB));
+  assert.equal(page.navigations.length, 1);
+  assert.equal(page.calls.filter(call => call.url === '/api/connect').length, 1);
+  assert.match(page.byId('portfolio-status').textContent, /chart did not open/);
+  assert.equal(page.calls.filter(call => call.url === '/api/disconnect').length, 0);
+  await page.click(page.cards()[1]!);
+  assert.equal(page.navigations.length, 2, 'an explicit click may retry');
+  await page.hide(); await page.show();
+  assert.equal(page.stops, 1, 'pagehide cancels the old navigation deadline');
+  assert.equal(page.byId('portfolio-status').textContent, '');
+  await page.hide();
+});
+
+test('view-only chart navigation times out visibly without attaching or changing a portfolio', async () => {
+  const page = await browser({ hash: '' });
+  await page.click(page.cards()[0]!); await page.expire(15000);
+  assert.equal(page.stops, 1);
+  assert.match(page.byId('portfolio-status').textContent, /^The chart did not open/);
+  assert.ok(page.cards().slice(0, -1).every(card => !card.disabled));
+  assert.equal(page.calls.some(call => call.method === 'POST'), false);
+  await page.hide();
+});
+
+test('a stalled automatic return to the selector releases streams and requires explicit retry', async () => {
+  const holds: string[] = [];
+  const page = await browser({ selector: false, onStatusHold: event => holds.push(event) });
+  await page.send(snapshot()); await page.send(snapshot(null));
+  assert.deepEqual(page.navigations, [`/${fragment}`]);
+  await page.expire(15000);
+  assert.equal(page.stops, 1); assert.deepEqual(holds, ['hold', 'release']);
+  await page.send(snapshot(null)); await page.send(snapshot(null));
+  assert.equal(page.navigations.length, 1, 'the unchanged stream must not loop navigation');
+  await page.openSelector(); assert.equal(page.navigations.length, 2);
+  assert.equal(page.calls.filter(call => !call.url.endsWith('/events')).length, 0);
+  await page.hide(); await page.show(); await page.hide();
+});
+
+test('a stalled agent-driven chart change retains its error after fresh connection snapshots', async () => {
+  const holds: string[] = [];
+  const page = await browser({ onStatusHold: event => holds.push(event) });
+  await page.send(snapshot()); await page.send(snapshot(walletB));
+  await page.expire(15000);
+  assert.equal(page.stops, 1); assert.deepEqual(holds, ['hold', 'release']);
+  await page.send(snapshot(walletB)); await page.send(snapshot(walletB));
+  assert.equal(page.navigations.length, 1);
+  assert.match(page.byId('portfolio-status').textContent, /page did not open/);
+  assert.ok(page.cards().slice(0, -1).every(card => !card.disabled));
   await page.hide();
 });

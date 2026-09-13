@@ -829,3 +829,12 @@ test('missing Simple7702 deployment remains an actionable stopped message withou
   assert.match(page.byId('portfolio-run').title,/ETH is required/);
   await page.advance(60000);assert.equal(page.posts().length,0);
 });
+
+test('a document navigation failure stays visible across healthy runner and connection updates', async () => {
+  const page = await browser(); await page.ready('running');
+  await page.view({ error: 'The page did not open. Try again.', navigation: true });
+  assert.equal(page.byId('control-message').hidden, false);
+  await page.view(); await page.runner(runner('running')); await page.status();
+  assert.match(page.byId('control-message').textContent, /page did not open/);
+  assert.equal(page.posts().length, 0);
+});

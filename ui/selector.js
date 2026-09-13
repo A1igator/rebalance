@@ -11,7 +11,7 @@
   let viewReady = !token, connecting = false, setupBusy = false, setupRequest = null, streamed = false, connectionRevision = 0;
   let setupExisting = null;
   let setupState = null, setupController = null, setupGeneration = 0, setupSuspended = document.visibilityState === "hidden", setupAttachmentAllowed = false;
-  let pageHidden = false, connectionAttempt = 0, connectionController = null, connectionRelease = null, connectionError = false;
+  let pageHidden = false, connectionAttempt = 0, connectionController = null, connectionRelease = null, connectionError = false, navigationTimer = null;
 
   function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -97,11 +97,33 @@
     setSetupButtons();
     byId("setup-dialog").showModal();
   }
+  function openChart(url, attempt, releaseStream, wasConnected) {
+    byId("portfolio-status").textContent = "Opening portfolio…";
+    window.location.assign(url);
+    navigationTimer = setTimeout(() => {
+      navigationTimer = null;
+      if (pageHidden || attempt !== connectionAttempt) return;
+      try { window.stop?.(); } catch { /* Keep the failed load visible. */ }
+      connecting = false; connectionError = true;
+      byId("portfolio-status").textContent = `${wasConnected ? "The connection was saved, but the chart did not open." : "The chart did not open."} Select it again to retry opening.`;
+      if (connectionRelease === releaseStream) connectionRelease = null;
+      if (typeof releaseStream === "function") releaseStream({ resetSelectionBaseline: true });
+      render();
+    }, 15000);
+  }
   async function choose(portfolio) {
     if (!viewReady || connecting || pageHidden) return;
     const url = safeChartUrl(portfolio.chartUrl);
     if (!url) { byId("portfolio-status").textContent = "This portfolio’s chart address is unavailable."; return; }
-    if (!authorized) { window.location.assign(url); return; }
+    if (!authorized) {
+      connecting = true; connectionError = false; render();
+      try { openChart(url, ++connectionAttempt, null, false); }
+      catch {
+        connecting = false; connectionError = true; render();
+        byId("portfolio-status").textContent = "The chart could not be opened. Please try again.";
+      }
+      return;
+    }
     connecting = true; connectionError = false; render();
     const revision = ++connectionRevision, attempt = ++connectionAttempt;
     const controller = new AbortController();
@@ -134,8 +156,7 @@
         throw new Error(replied ? "The chat’s portfolio changed while connecting. Select a portfolio again if needed."
           : failure instanceof Error ? failure.message : "Could not confirm this portfolio selection. It may still finish; refresh the selector to check it. No selection was repeated.");
       }
-      byId("portfolio-status").textContent = "";
-      window.location.assign(chartUrl);
+      openChart(chartUrl, attempt, releaseStream, true);
       navigating = true;
     } catch (error) {
       if (pageHidden || attempt !== connectionAttempt) return;
@@ -375,6 +396,7 @@
   window.addEventListener("pagehide", () => {
     // Browser Back may restore this document after a completed or pending
     // selection. Old replies cannot navigate it or keep its cards disabled.
+    clearTimeout(navigationTimer); navigationTimer = null;
     connectionAttempt++; connectionController?.abort(); connectionController = null;
     if (connecting) byId("portfolio-status").textContent = "";
     connecting = false; connectionError = false;
@@ -401,6 +423,11 @@
       byId("reload-portfolios").hidden = true;
       setSetupButtons(); render();
     } else if (update.error) {
+      if (update.navigation) {
+        connectionError = true;
+        byId("portfolio-status").textContent = update.error;
+        return;
+      }
       if (update.unauthorized) { authorized = false; canSetup = false; viewReady = true; setSetupButtons(); render(); }
       byId("view-notice").textContent = update.unauthorized ? "Viewing only. Open this page again through your agent to connect your chat." : "Live connection updates unavailable. You can still select a portfolio; reopen through your agent if needed.";
     }

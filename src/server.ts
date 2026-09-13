@@ -115,7 +115,7 @@ async function streamView(response: ServerResponse, deps: ChartDependencies, tok
   const view = await readView(deps.rootDir, token);
   const directory = resolve(deps.rootDir, 'connections');
   await mkdir(directory, { recursive: true, mode: 0o700 });
-  if (response.destroyed) return;
+  if (response.destroyed || response.writableEnded) return;
   const file = basename(connectionPath(deps.rootDir, view.sessionId));
   const watchers: FSWatcher[] = [];
   let closed = false, reading = false, dirty = true, writable = true;
@@ -156,7 +156,7 @@ async function streamView(response: ServerResponse, deps: ChartDependencies, tok
   response.once('close', close); response.on('error', fail);
   response.on('drain', () => { writable = true; schedule(); });
   try {
-    if (response.destroyed) { close(); return; }
+    if (response.destroyed || response.writableEnded) { close(); return; }
     watchDirectory(directory, [file]);
     watchDirectory(deps.rootDir, ['portfolios.json','config.json','run.lock','stop.json','chart.lock']);
     response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', Connection: 'keep-alive' });
@@ -195,7 +195,7 @@ async function streamSetup(response: ServerResponse, deps: ChartDependencies, to
     watcher = deps.watchChanges(deps.walletSetups.directory, () => { dirty = true; schedule(); });
     watcher.on('error', fail);
     watcher.on('close', () => { if (!closed) fail(); });
-    if (response.destroyed) { close(); return; }
+    if (response.destroyed || response.writableEnded) { close(); return; }
     response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', Connection: 'keep-alive' });
     response.flushHeaders(); await flush();
   } catch { fail(); }
@@ -206,6 +206,21 @@ export async function serve(port = chartPort(), overrides: Partial<ChartDependen
   const rootDir = overrides.rootDir ?? overrides.dataDir ?? portfolioRoot();
   const deps: ChartDependencies = { portfolioControls: new PortfolioControls(rootDir, overrides.dataDir ?? DATA), walletSetups: new WalletSetups(rootDir), dataDir: DATA, rootDir: overrides.dataDir ?? portfolioRoot(), ensureChart: ensurePortfolioChart, readStatus: status, readGas: createGasDisplayReader(), readConfig: loadConfig,
     watchChanges: (directory, listener) => watch(directory, listener), ...overrides };
+  // Leave room for documents and short requests in a six-connection HTTP pool.
+  // Older tabs reconnect through their existing read-only transport; no wallet
+  // connection or runner is changed when an idle stream yields its socket.
+  const liveStreams = new Set<ServerResponse>();
+  const admitStream = (response: ServerResponse) => {
+    if (response.destroyed || response.writableEnded) return false;
+    while (liveStreams.size >= 4) {
+      const oldest = liveStreams.values().next().value!;
+      liveStreams.delete(oldest);
+      oldest.end();
+    }
+    liveStreams.add(response);
+    response.once('close', () => liveStreams.delete(response));
+    return true;
+  };
   const server = createServer(async (request, response) => {
     response.setHeader('Cache-Control', 'no-store');
     response.setHeader('Referrer-Policy', 'no-referrer');
@@ -250,8 +265,12 @@ export async function serve(port = chartPort(), overrides: Partial<ChartDependen
         }
         try { await readView(deps.rootDir, input.token as string); }
         catch { response.writeHead(403).end('Open this view through the agent to reconnect it.'); return; }
-        if (request.url === '/api/view/events') { await streamView(response, deps, input.token as string); return; }
-        if (request.url === '/api/setup/events') { await streamSetup(response, deps, input.token as string, input.requestId as string); return; }
+        if (request.url === '/api/view/events') { if (admitStream(response)) await streamView(response, deps, input.token as string); return; }
+        if (request.url === '/api/setup/events') {
+          await deps.walletSetups.read(input.token as string, input.requestId as string);
+          if (admitStream(response)) await streamSetup(response, deps, input.token as string, input.requestId as string);
+          return;
+        }
         let result: unknown;
         if (request.url === '/api/ledger/retry') result = await deps.portfolioControls.retry(input as LedgerRetryRequest);
         else if (request.url === '/api/runner') result = await deps.portfolioControls.command(input as { token: string; wallet: string; action: 'start' | 'stop'; requestId: string });
@@ -277,7 +296,7 @@ export async function serve(port = chartPort(), overrides: Partial<ChartDependen
     }
     if (request.url === '/api/status/events') {
       if (request.method !== 'GET') { response.writeHead(405, { Allow: 'GET' }).end('View only'); return; }
-      streamStatus(response, deps); return;
+      if (admitStream(response)) streamStatus(response, deps); return;
     }
     if (request.method !== 'GET' && request.method !== 'HEAD') {
       response.writeHead(405, { Allow: 'GET, HEAD' }).end('View only'); return;
