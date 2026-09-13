@@ -87,7 +87,7 @@ function subscribe(url: string, token: string) {
 
 test('view HTTP routes reject foreign origin/host, missing origin, non-JSON and oversized or unexpected input', async t => {
   const f = await fixture(t), { token } = await issueView(f.root, sessionA);
-  for (const path of ['/api/view', '/api/connect', '/api/setup', '/api/view/events']) {
+  for (const path of ['/api/view', '/api/connect', '/api/disconnect', '/api/setup', '/api/view/events']) {
     assert.equal((await call(f.url, path, { method: 'GET' })).code, 405);
     for (const headers of [
       { Origin: undefined }, { Origin: 'https://foreign.invalid' },
@@ -196,6 +196,10 @@ test('view SSE reports session-scoped connection changes without leaking its tok
   assert.equal(first.events.at(-1)?.connectedWallet, walletB);
   const payload = JSON.stringify([first.events, second.events]);
   for (const privateContext of [a.token, b.token, sessionA, sessionB, f.root]) assert.ok(!payload.includes(privateContext));
+  assert.equal((await call(f.url, '/api/disconnect', { body: { token: a.token, wallet: walletB } })).code, 200);
+  await until(() => first.events.at(-1)?.connectedWallet === null, 'deselection should update the linked view');
+  assert.equal(first.events.at(-1)?.chartUrl, null);
+  assert.equal(second.events.at(-1)?.connectedWallet, walletA);
   first.close(); second.close();
 });
 
@@ -234,4 +238,32 @@ test('setup SSE sends file-driven progress and final completion without starting
   complete({ address: walletB as `0x${string}` });
   await ended;
   assert.equal(events.at(-1)?.state, 'ready'); assert.equal(f.setupCalls(), 1);
+});
+
+
+test('disconnect HTTP verifies capability and expected selection without touching financial or notification state', async t => {
+  const f = await fixture(t); await f.register();
+  const a = await issueView(f.root, sessionA), b = await issueView(f.root, sessionB);
+  await atomicWriteJson(connectionPath(f.root, sessionA), { version: 1, chainId: 4663, wallet: walletA });
+  await atomicWriteJson(connectionPath(f.root, sessionB), { version: 1, chainId: 4663, wallet: walletB });
+  const protectedBytes = new Map<string, string>();
+  for (const name of ['config.json', 'pending.json', 'recovery.json', 'cycle.json', 'stop.json', 'run.lock', 'codex-notifications.json', 'codex-notification-deliveries.json']) {
+    const path = join(f.root, name);
+    if (name !== 'config.json') await atomicWriteJson(path, name === 'codex-notifications.json' ? { enabled: false } : { fixture: name });
+    protectedBytes.set(path, await readFile(path, 'utf8'));
+  }
+  for (const body of [{ wallet: walletA }, { token: a.token }, { token: a.token, wallet: 'invalid' }, { token: a.token, wallet: walletA, sessionId: sessionB }]) {
+    assert.equal((await call(f.url, '/api/disconnect', { body })).code, 400);
+  }
+  assert.equal((await call(f.url, '/api/disconnect', { body: { token: 'f'.repeat(64), wallet: walletA } })).code, 403);
+  assert.equal((await call(f.url, '/api/disconnect', { body: { token: b.token, wallet: walletA } })).code, 409);
+  assert.equal((await call(f.url, '/api/disconnect', { body: { token: a.token, wallet: walletB } })).code, 409);
+  assert.equal((await readJson<{ wallet: string }>(connectionPath(f.root, sessionA)))?.wallet, walletA);
+  const reply = await call(f.url, '/api/disconnect', { body: { token: a.token, wallet: walletA } });
+  assert.equal(reply.code, 200); assert.deepEqual(JSON.parse(reply.body), { connectedWallet: null, tradingChanged: false });
+  assert.equal((await call(f.url, '/api/disconnect', { body: { token: a.token, wallet: walletA } })).code, 200);
+  assert.equal(await readJson(connectionPath(f.root, sessionA)), null);
+  assert.equal((await readJson<{ wallet: string }>(connectionPath(f.root, sessionB)))?.wallet, walletB);
+  for (const [path, bytes] of protectedBytes) assert.equal(await readFile(path, 'utf8'), bytes);
+  assert.equal(f.ensured.length, 0); assert.equal(f.setupCalls(), 0);
 });

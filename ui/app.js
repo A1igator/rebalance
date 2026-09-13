@@ -2,7 +2,7 @@
   "use strict";
   const ns = "http://www.w3.org/2000/svg";
   const byId = (id) => document.getElementById(id);
-  // Carry a valid view handle back to the selector; anything else goes to the root.
+  // Back clears this chart’s chat attachment before opening the selector.
   const viewToken = /^#view=([a-f0-9]{64})$/i.exec(window.location?.hash || "")?.[1];
   byId("portfolios-back")?.setAttribute("href", viewToken ? `/#view=${viewToken}` : "/");
   const percent = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
@@ -10,7 +10,38 @@
   // One palette for the whole app: the selector tiles and this chart must never
   // disagree about what colour an asset is.
   const { assetOrder, color } = window.rebalanceRing;
-  let lastSnapshot = null;
+  let lastSnapshot = null, leavingPortfolio = false;
+  byId("portfolios-back")?.addEventListener("click", async event => {
+    if (!viewToken || event?.metaKey || event?.ctrlKey || event?.shiftKey || event?.altKey || event?.button > 0) return;
+    event?.preventDefault();
+    if (leavingPortfolio || pageHidden || document.visibilityState === "hidden") return;
+    const wallet = lastSnapshot?.wallet;
+    const notice = byId("control-message");
+    if (typeof wallet !== "string" || !/^0x[0-9a-f]{40}$/i.test(wallet)) {
+      notice.textContent = "Waiting for portfolio details. Try Portfolios again."; notice.hidden = false; return;
+    }
+    leavingPortfolio = true;
+    const back = byId("portfolios-back"), request = new AbortController();
+    back.setAttribute("aria-busy", "true");
+    const timeout = setTimeout(() => request.abort(), 5000);
+    try {
+      const response = await fetch("/api/disconnect", { method: "POST", cache: "no-store",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: viewToken, wallet }), signal: request.signal });
+      const result = await response.json();
+      if (!response.ok || result?.connectedWallet !== null || result?.tradingChanged !== false) throw new Error();
+      if (!pageHidden) {
+        if (window.rebalanceView?.openSelector) window.rebalanceView.openSelector();
+        else window.location.assign(`/#view=${viewToken}`);
+      }
+    } catch {
+      if (!pageHidden) {
+        notice.textContent = "Could not confirm leaving this portfolio. Try Portfolios again; trading is unchanged.";
+        notice.hidden = false;
+      }
+    } finally {
+      clearTimeout(timeout); leavingPortfolio = false; back.removeAttribute("aria-busy");
+    }
+  });
   function positive(value) {
     try { return BigInt(value) > 0n; } catch { return false; }
   }

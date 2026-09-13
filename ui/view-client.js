@@ -4,7 +4,11 @@
   const fragment = token ? `#view=${token}` : "";
   const subscribers = new Set();
   let latest = null, controller = null, retryTimer = null, suspended = document.visibilityState === "hidden", generation = 0;
-  let pageHidden = false;
+  let pageHidden = false, returningToSelector = false;
+  function openSelector() {
+    if (returningToSelector || pageHidden) return;
+    returningToSelector = true; window.location.assign(`/${fragment}`);
+  }
   function chartUrl(value) {
     try {
       const url = new URL(value, window.location.origin);
@@ -21,7 +25,8 @@
         (value.chartUrl !== null && !chartUrl(value.chartUrl))) throw new Error("View update unavailable.");
     const changed = latest !== null && latest.connectedWallet?.toLowerCase() !== value.connectedWallet?.toLowerCase();
     latest = value; emit({ snapshot: value });
-    if (changed && value.connectedWallet && value.chartUrl) window.location.assign(chartUrl(value.chartUrl));
+    if (value.connectedWallet === null && window.location.pathname === "/chart") openSelector();
+    else if (changed && value.connectedWallet && value.chartUrl) window.location.assign(chartUrl(value.chartUrl));
   }
   async function connect() {
     if (!token || suspended || controller) return;
@@ -64,7 +69,7 @@
     }
   }
   window.rebalanceView = {
-    token, fragment, chartUrl,
+    token, fragment, chartUrl, openSelector,
     subscribe(subscriber) {
       subscribers.add(subscriber);
       if (latest) subscriber({ snapshot: latest });
@@ -85,7 +90,7 @@
     suspended = false; void connect();
   }
   window.addEventListener("pagehide", () => { pageHidden = true; suspend(); });
-  window.addEventListener("pageshow", () => { pageHidden = false; resume(); });
+  window.addEventListener("pageshow", () => { pageHidden = false; returningToSelector = false; resume(); });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") suspend(); else resume();
   });

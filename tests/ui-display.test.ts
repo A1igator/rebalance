@@ -24,7 +24,7 @@ type DisplayNode = { tag: string; textContent: string; attrs: Record<string, str
 type Response = { ok: boolean; json: () => Promise<unknown> };
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
-async function browser(options: { hidden?: boolean; status?: () => Promise<Response>; stockLinks?: boolean } = {}) {
+async function browser(options: { hidden?: boolean; status?: () => Promise<Response>; stockLinks?: boolean; hash?: string; disconnect?: () => Promise<Response> } = {}) {
   const [ringScript, script, html] = await Promise.all(['allocation-ring.js', 'app.js', 'index.html']
     .map(file => readFile(new URL(`../ui/${file}`, import.meta.url), 'utf8')));
   const htmlIds = new Set([...html!.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]));
@@ -32,8 +32,9 @@ async function browser(options: { hidden?: boolean; status?: () => Promise<Respo
   const lifecycle = new Map<string, () => void>(), visibility = new Map<string, () => void>();
   const pageDocument = { visibilityState: options.hidden ? "hidden" : "visible" };
   const timers = new Map<number, { fn: () => void; at: number }>();
-  const calls: { url: string; at: number; signal: AbortSignal }[] = [];
+  const calls: { url: string; at: number; signal: AbortSignal; body?: string }[] = [];
   let now = initialTime, nextTimer = 0, pieRenders = 0;
+  const navigations: string[] = [];
   const getStatus = options.status || (async () => ({ ok: true, json: async () => current }));
   function node(tag: string, id?: string): DisplayNode {
     const item = {
@@ -80,12 +81,13 @@ async function browser(options: { hidden?: boolean; status?: () => Promise<Respo
     Date: ClockDate, EventSource: Source, AbortController,
     setTimeout: (fn: () => void, ms: number) => { const id = ++nextTimer; timers.set(id, { fn, at: now + ms }); return id; },
     clearTimeout: (id: number) => timers.delete(id),
-    fetch: async (url: string, request: { signal: AbortSignal }) => {
-      calls.push({ url, at: now, signal: request.signal });
+    fetch: async (url: string, request: { signal: AbortSignal; body?: string }) => {
+      calls.push({ url, at: now, signal: request.signal, body: request.body });
+      if (url === '/api/disconnect' && options.disconnect) return options.disconnect();
       assert.equal(url, '/api/status', 'the chart has no independent gas quote requests');
       return getStatus();
     },
-    window: { addEventListener: (name: string, handler: () => void) => lifecycle.set(name, handler) },
+    window: { location: { hash: options.hash ?? '', pathname: '/chart', assign: (url: string) => navigations.push(url) }, addEventListener: (name: string, handler: () => void) => lifecycle.set(name, handler) },
     document: {
       get visibilityState() { return pageDocument.visibilityState; },
       addEventListener: (name: string, handler: () => void) => visibility.set(name, handler),
@@ -102,7 +104,7 @@ async function browser(options: { hidden?: boolean; status?: () => Promise<Respo
   return {
     element: (id: string) => elements.get(id)!,
     get renders() { return pieRenders; }, get now() { return now; },
-    calls, timers, source, sources: Source.instances,
+    calls, timers, source, sources: Source.instances, navigations,
     visible(value: boolean) { pageDocument.visibilityState = value ? "visible" : "hidden"; visibility.get("visibilitychange")!(); },
     hide() { lifecycle.get('pagehide')!(); },
     show() { lifecycle.get('pageshow')!(); },
@@ -1072,4 +1074,35 @@ test('the icon-only Ledger retry shares the hint row, keeps value below and resp
   assert.match(css, /\.retry-button\[aria-busy="true"\] \.retry-icon\s*\{ animation: retry-spin/);
   assert.match(css, /prefers-reduced-motion: reduce[\s\S]*?\.retry-button\[aria-busy="true"\] \.retry-icon\s*\{ animation: none/);
   assert.match(css, /\.retry-button:focus-visible\s*\{[^}]*outline: 2px/);
+});
+
+
+test('Back waits for a confirmed chat-only detach and serializes repeated clicks', async () => {
+  const fragment = `#view=${'a'.repeat(64)}`;
+  let finish!: (value: Response) => void;
+  const page = await browser({hash:fragment, disconnect: () => new Promise(resolve => {finish=resolve;})});
+  page.element('portfolios-back').listeners.get('click')!();
+  page.element('portfolios-back').listeners.get('click')!();
+  await flush();
+  assert.equal(page.calls.filter(call=>call.url==='/api/disconnect').length,1);
+  assert.deepEqual(JSON.parse(page.calls.find(call=>call.url==='/api/disconnect')!.body!),{token:'a'.repeat(64),wallet});
+  assert.deepEqual(page.navigations,[]);
+  finish({ok:true,json:async()=>({connectedWallet:null,tradingChanged:false})});
+  await flush();
+  assert.deepEqual(page.navigations,[`/${fragment}`]);
+});
+
+test('Back retains the chart on stale or unverifiable detach and ignores late navigation after pagehide', async () => {
+  const fragment = `#view=${'a'.repeat(64)}`;
+  for(const response of [{ok:false,json:async()=>({error:'Selection changed'})},{ok:true,json:async()=>({connectedWallet:wallet,tradingChanged:false})}]) {
+    const page=await browser({hash:fragment,disconnect:async()=>response});
+    page.element('portfolios-back').listeners.get('click')!(); await flush();
+    assert.deepEqual(page.navigations,[]);
+    assert.match(page.element('control-message').textContent,/Could not confirm leaving/);
+  }
+  let finish!: (value:Response)=>void;
+  const page=await browser({hash:fragment,disconnect:()=>new Promise(resolve=>{finish=resolve;})});
+  page.element('portfolios-back').listeners.get('click')!(); await flush(); page.hide();
+  finish({ok:true,json:async()=>({connectedWallet:null,tradingChanged:false})}); await flush();
+  assert.deepEqual(page.navigations,[]);
 });

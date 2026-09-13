@@ -3,7 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { lstat, readdir } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 import { connectionPath, readProfiles, validateProfileDirectory, walletIdentity } from '../scripts/profile-routing.mjs';
-import { connectPortfolio } from './profiles.js';
+import { connectPortfolio, disconnectPortfolio } from './profiles.js';
 import { acquireLock, atomicWriteJson, readJson } from './storage.js';
 
 const hex = /^[a-f0-9]{64}$/;
@@ -106,6 +106,11 @@ export async function viewState(root: string, token: string): Promise<{ connecte
 export async function connectView(root: string, token: string, wallet: string) {
   const view = await readView(root, token);
   return connectPortfolio(rootPath(root), view.sessionId, walletIdentity(wallet));
+}
+
+export async function disconnectView(root: string, token: string, expectedWallet: string) {
+  const view = await readView(root, token);
+  return disconnectPortfolio(rootPath(root), view.sessionId, expectedWallet);
 }
 
 function requestIdentity(viewHash: string, requestId: string): string { return hash(`${viewHash}\0${requestId}`); }

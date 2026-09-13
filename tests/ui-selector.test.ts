@@ -702,3 +702,16 @@ test('a late pre-Back success or failure cannot replace a newer selection in pro
     await page.hide();
   }
 });
+
+
+test('a chart returns to the selector when its chat is detached, including the first snapshot', async () => {
+  for(const initial of [false,true]) {
+    const page=await browser({selector:false});
+    if(!initial) await page.send(snapshot(walletA));
+    await page.send(snapshot(null));
+    await page.send(snapshot(null));
+    assert.deepEqual(page.navigations,[`/${fragment}`],'stream and Back response share one navigation');
+    assert.equal(page.calls.filter(call=>call.url==='/api/disconnect').length,0,'observing deselection never writes it again');
+    await page.hide();
+  }
+});

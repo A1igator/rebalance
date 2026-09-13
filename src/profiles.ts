@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { rm } from 'node:fs/promises';
 import { withNotificationSelection } from './notification-selection.js';
 import { ensureSelectedCodexNotifications } from './selected-notifications.js';
 import { getAddress } from 'viem';
@@ -66,4 +67,27 @@ export async function connectPortfolio(root: string, sessionId: string, wallet: 
   const notifications = await ensureSelectedCodexNotifications(root, sessionId, { dataDir: profile.dataDir, explicitSelection: true }).catch(() => ({ state: 'unavailable' as const }));
   return { sessionId, wallet: getAddress(profile.wallet!), chainId: 4663,
     chartUrl: `http://127.0.0.1:${profile.chartPort}/chart`, tradingChanged: false, notifications };
+}
+
+
+export class PortfolioSelectionError extends Error {
+  readonly statusCode = 409;
+  constructor() { super('The selected portfolio changed. Refresh before returning to portfolios.'); }
+}
+
+/** Clear only this chat's expected selection; never stop its independent runner. */
+export async function disconnectPortfolio(root: string, sessionId: string, expectedWallet: string) {
+  const expected = walletIdentity(expectedWallet);
+  const path = connectionPath(root, sessionId);
+  return withNotificationSelection(root, sessionId, async () => {
+    const current = await readJson<{ version?: unknown; chainId?: unknown; wallet?: unknown }>(path);
+    if (current !== null) {
+      if (!current || typeof current !== 'object' || Array.isArray(current) ||
+          Object.keys(current).some(key => !['version', 'chainId', 'wallet'].includes(key)) ||
+          current.version !== 1 || current.chainId !== 4663) throw new Error('Portfolio selection is invalid');
+      if (walletIdentity(current.wallet) !== expected) throw new PortfolioSelectionError();
+      await rm(path);
+    }
+    return { connectedWallet: null, tradingChanged: false } as const;
+  });
 }

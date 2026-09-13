@@ -4,8 +4,8 @@ import { watch, type FSWatcher } from 'node:fs';
 import { mkdir, readFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import { portfolioRoot, connectionPath, resolveProfile } from '../scripts/profile-routing.mjs';
-import { portfolios } from './profiles.js';
-import { readView, viewState, connectView } from './view-session.js';
+import { portfolios, PortfolioSelectionError } from './profiles.js';
+import { readView, viewState, connectView, disconnectView } from './view-session.js';
 import { WalletSetups } from './wallet-setup.js';
 import { ensurePortfolioChart } from './view.js';
 import { fileURLToPath } from 'node:url';
@@ -218,7 +218,7 @@ export async function serve(port = chartPort(), overrides: Partial<ChartDependen
         (request.headers.origin !== undefined && request.headers.origin !== `http://${host}`)) {
       response.writeHead(403).end('Local chart only'); return;
     }
-    if (['/api/ledger/retry', '/api/view', '/api/connect', '/api/setup', '/api/setup/status', '/api/setup/events', '/api/view/events'].includes(request.url ?? '') ||
+    if (['/api/ledger/retry', '/api/view', '/api/connect', '/api/disconnect', '/api/setup', '/api/setup/status', '/api/setup/events', '/api/view/events'].includes(request.url ?? '') ||
         (request.url === '/api/runner' && !['GET','HEAD'].includes(request.method ?? ''))) {
       if (request.method !== 'POST') { response.writeHead(405, { Allow: 'POST' }).end('Use POST'); return; }
       if (request.headers.origin !== `http://${host}` || request.headers['content-type']?.split(';')[0]?.trim() !== 'application/json') {
@@ -233,9 +233,12 @@ export async function serve(port = chartPort(), overrides: Partial<ChartDependen
         let input: Record<string, unknown>;
         try { input = JSON.parse(body); } catch { response.writeHead(400).end('Invalid JSON'); return; }
         if (!input || typeof input !== 'object' || Array.isArray(input)) { response.writeHead(400).end('Invalid request'); return; }
-        const allowed = request.url === '/api/ledger/retry' ? ['token','wallet','requestId','retryOf'] : request.url === '/api/runner' ? ['token','wallet','action','requestId'] : request.url === '/api/connect' ? ['token','wallet'] : request.url === '/api/setup' ? ['token','mode','requestId'] : request.url?.startsWith('/api/setup/') ? ['token','requestId'] : ['token'];
+        const allowed = request.url === '/api/ledger/retry' ? ['token','wallet','requestId','retryOf'] : request.url === '/api/runner' ? ['token','wallet','action','requestId'] : ['/api/connect', '/api/disconnect'].includes(request.url ?? '') ? ['token','wallet'] : request.url === '/api/setup' ? ['token','mode','requestId'] : request.url?.startsWith('/api/setup/') ? ['token','requestId'] : ['token'];
         if (Object.keys(input).some(key => !allowed.includes(key)) || allowed.some(key => typeof input[key] !== 'string')) {
           response.writeHead(400).end('Invalid request fields'); return;
+        }
+        if (request.url === '/api/disconnect' && !/^0x[0-9a-f]{40}$/i.test(input.wallet as string)) {
+          response.writeHead(400).end('Invalid portfolio selection'); return;
         }
         if (request.url === '/api/runner' && (!/^0x[0-9a-f]{40}$/i.test(input.wallet as string) ||
             !['start','stop'].includes(input.action as string) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.requestId as string))) {
@@ -252,6 +255,7 @@ export async function serve(port = chartPort(), overrides: Partial<ChartDependen
         let result: unknown;
         if (request.url === '/api/ledger/retry') result = await deps.portfolioControls.retry(input as LedgerRetryRequest);
         else if (request.url === '/api/runner') result = await deps.portfolioControls.command(input as { token: string; wallet: string; action: 'start' | 'stop'; requestId: string });
+        else if (request.url === '/api/disconnect') result = await disconnectView(deps.rootDir, input.token as string, input.wallet as string);
         else if (request.url === '/api/view') result = await viewState(deps.rootDir, input.token as string);
         else if (request.url === '/api/connect') {
           const profile = await resolveProfile(deps.rootDir, { wallet: input.wallet as string });
@@ -262,8 +266,8 @@ export async function serve(port = chartPort(), overrides: Partial<ChartDependen
         else result = await deps.walletSetups.begin( input.token as string, input.mode as 'private-key' | 'privy' | 'ledger', input.requestId as string);
         response.writeHead(200, { 'Content-Type': 'application/json' }).end(stringifyJson(result));
       } catch (error) {
-        if (!response.headersSent) response.writeHead(error instanceof PortfolioControlError ? error.statusCode : 503, { 'Content-Type': 'application/json' })
-          .end(stringifyJson({ error: error instanceof PortfolioControlError ? error.message : 'The view request could not be verified. Reconnect through the agent before retrying.' }));
+        if (!response.headersSent) response.writeHead(error instanceof PortfolioControlError || error instanceof PortfolioSelectionError ? error.statusCode : 503, { 'Content-Type': 'application/json' })
+          .end(stringifyJson({ error: error instanceof PortfolioControlError || error instanceof PortfolioSelectionError ? error.message : 'The view request could not be verified. Reconnect through the agent before retrying.' }));
         else response.destroy();
       }
       return;
