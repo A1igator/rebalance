@@ -97,3 +97,12 @@ test('Calibur is a deliberate Ledger-only setting; existing configs remain direc
   for (const mode of ['private-key', 'privy']) assert.throws(() => validateConfig({ ...config, mode, execution: 'calibur' }), /requires the Ledger/);
   for (const execution of ['unknown', null, 7702]) assert.throws(() => validateConfig({ ...config, mode: 'ledger', execution }), /Unknown execution/);
 });
+
+
+test('Simple7702 is explicit, Ledger-only and preserves legacy Calibur identity', () => {
+  for (const execution of ['calibur', 'simple7702'] as const) {
+    assert.equal(validateConfig({ ...config, mode: 'ledger', execution }).execution, execution);
+    for (const mode of ['private-key', 'privy']) assert.throws(() => validateConfig({ ...config, mode, execution }), /requires the Ledger/);
+  }
+  assert.equal(validateConfig(config).execution, undefined);
+});

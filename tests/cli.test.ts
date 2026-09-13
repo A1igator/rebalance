@@ -463,9 +463,15 @@ test('standalone Calibur CLI is explicit and rejects unrelated flags before any 
     ['ledger', 'setup-calibur', '--expected-stop', 'invalid'],
     ['ledger', 'calibur-status', '--expected-stop', 'none'],
     ['ledger', 'calibur-status', '--background'],
+    ['ledger', 'setup-simple7702', '--targets', 'USDG=100'],
+    ['ledger', 'setup-simple7702', '--request-id', 'fixture'],
+    ['ledger', 'setup-simple7702', '--expected-stop', 'invalid'],
+    ['ledger', 'simple7702-status', '--expected-stop', 'none'],
+    ['ledger', 'simple7702-status', '--background'],
     ['ledger', 'rebalance', '--expected-stop', 'none'],
   ]) await assert.rejects(command(args));
-  await assert.rejects(command(['ledger', 'setup-calibur', '--expected-stop', 'none']), /saved Ledger Calibur configuration/);
+  await assert.rejects(command(['ledger', 'setup-calibur', '--expected-stop', 'none']), /saved Ledger configuration/);
+  await assert.rejects(command(['ledger', 'setup-simple7702', '--expected-stop', 'none']), /saved Ledger configuration/);
   for (const file of ['run.lock', 'pending.json', 'private-key', 'unexpected-network', 'start.log']) {
     assert.equal(existsSync(join(directory, file)), false);
   }

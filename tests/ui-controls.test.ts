@@ -146,7 +146,7 @@ test('Ledger Start describes monitoring and uses only the ordinary runner contro
   await page.ready(); await page.status({ ...chart(), mode: 'ledger' });
   assert.equal(page.byId('portfolio-run').disabled, false);
   assert.match(page.byId('portfolio-run').title, /Start this Ledger wallet/);
-  assert.match(page.byId('portfolio-run').title, /Calibur is Uniswap wallet code/);
+  assert.match(page.byId('portfolio-run').title, /Simple7702 is Ledger-allowlisted wallet code/);
   assert.match(page.byId('portfolio-run').title, /two Ledger signatures and one transaction paid in ETH/);
   await page.click('portfolio-run');
   assert.deepEqual(page.posts().map(call => ({ url: call.url, body: call.body })), [
@@ -619,12 +619,12 @@ test('the later stopping transition read frees stream slots again after the cont
 
 const caliburRunner = (stage = 'needed', state = 'stopped', address = wallet) => ({ ...runner(state, address), calibur: { state: stage } });
 
-test('Ledger Start explains first Calibur setup only when readiness is absent, needed or unknown', async () => {
+test('Ledger Start explains first Simple7702 setup only when readiness is absent, needed or unknown', async () => {
   const page = await browser(); await page.ready(); await page.status({ ...chart(), mode: 'ledger' });
   for (const summary of [runner(), caliburRunner('needed'), caliburRunner('unknown')]) {
     await page.runner(summary);
     assert.equal(page.byId('portfolio-run').textContent, 'Start'); assert.equal(page.byId('portfolio-run').disabled, false);
-    assert.match(page.byId('portfolio-run').title, /Uniswap wallet code that batches token approvals and swaps/);
+    assert.match(page.byId('portfolio-run').title, /Ledger-allowlisted wallet code that batches token approvals and Uniswap swaps/);
     assert.match(page.byId('portfolio-run').title, /two Ledger signatures and one transaction paid in ETH/);
     assert.match(page.byId('portfolio-run').title, /later rebalances need one transaction signature/);
   }
@@ -641,8 +641,8 @@ test('Ledger Start explains first Calibur setup only when readiness is absent, n
 
 test('setup stage labels require the current wallet and never dispatch another Start', async () => {
   const page = await browser(); await page.ready(); await page.status({ ...chart(), mode: 'ledger' });
-  for (const [stage, label] of [['authorizing', 'Authorize Calibur…'], ['signing', 'Confirm setup…'],
-    ['confirming', 'Waiting for setup receipt…'], ['unknown', 'Setting up Calibur…'], ['unexpected-stage', 'Setting up Calibur…']]) {
+  for (const [stage, label] of [['authorizing', 'Authorize Simple7702…'], ['signing', 'Confirm setup…'],
+    ['confirming', 'Waiting for setup receipt…'], ['unknown', 'Setting up Simple7702…'], ['unexpected-stage', 'Setting up Simple7702…']]) {
     await page.runner(caliburRunner(stage, 'setting-up'));
     assert.equal(page.byId('portfolio-run').textContent, label);
     assert.equal(page.byId('portfolio-run').dataset.state, 'setting-up');
@@ -663,7 +663,7 @@ test('one Start can enter setup, advance stage and become running without anothe
     ? ok({ ...caliburRunner(stage, state), requestId, outcome: 'setting-up' }) : ok(caliburRunner(stage, state)) });
   await page.ready(); await page.status({ ...chart(), mode: 'ledger' }); await page.runner(caliburRunner());
   await page.click('portfolio-run');
-  assert.equal(page.byId('portfolio-run').textContent, 'Authorize Calibur…');
+  assert.equal(page.byId('portfolio-run').textContent, 'Authorize Simple7702…');
   assert.equal(page.byId('control-message').hidden, true);
   assert.deepEqual(page.posts().map(call => ({ url: call.url, body: call.body })), [
     { url: '/api/runner', body: { token, wallet, action: 'start', requestId } },
@@ -684,7 +684,7 @@ test('setup refresh lasts beyond ordinary transitions but stops at five minutes 
   const page = await browser({ reply: async () => ok(caliburRunner(stage, 'setting-up')) });
   await page.ready(); await page.status({ ...chart(), mode: 'ledger' }); await page.runner(caliburRunner(stage, 'setting-up'));
   for (let i = 0; i < 31; i++) await page.timersRun();
-  assert.equal(page.byId('portfolio-run').textContent, 'Authorize Calibur…');
+  assert.equal(page.byId('portfolio-run').textContent, 'Authorize Simple7702…');
   assert.equal(page.calls.length, 31, 'setup is not exhausted by the ordinary 30-read budget');
   page.advance(299_000); stage = 'signing'; await page.runner(caliburRunner(stage, 'setting-up')); await page.timersRun();
   assert.equal(page.byId('portfolio-run').textContent, 'Confirm setup…');
@@ -712,7 +712,7 @@ test('setup status does not loosen control uncertainty, stale response or select
   const page = await browser({ reply: async call => call.method === 'POST' ? post.promise : read.promise });
   await page.ready(); await page.status({ ...chart(), mode: 'ledger' }); await page.click('portfolio-run');
   await page.runner(caliburRunner('authorizing', 'setting-up'));
-  assert.equal(page.byId('portfolio-run').textContent, 'Authorize Calibur…', 'a fresh setup event can be displayed during a pending POST');
+  assert.equal(page.byId('portfolio-run').textContent, 'Authorize Simple7702…', 'a fresh setup event can be displayed during a pending POST');
   await page.timersRun(); // Existing HTTP deadline still applies; do not resend.
   assert.match(page.byId('control-message').textContent, /outcome is unknown/);
   await page.runner(caliburRunner('signing', 'setting-up'));
@@ -806,4 +806,26 @@ test('an older setup failure read cannot overwrite a newer streamed setup stage'
   assert.equal(page.byId('control-message').hidden, true);
   assert.equal(page.byId('portfolio-run').textContent, 'Unavailable');
   assert.equal(page.posts().length, 0);
+});
+
+
+test('Simple7702 and retained Calibur setup labels use the explicit implementation', async () => {
+  const page=await browser();await page.ready();await page.status({...chart(),mode:'ledger'});
+  await page.runner({...caliburRunner('authorizing','setting-up'),calibur:{state:'authorizing',implementation:'simple7702'}});
+  assert.equal(page.byId('portfolio-run').textContent,'Authorize Simple7702…');
+  assert.match(page.byId('portfolio-run').title,/Ledger-allowlisted/);assert.doesNotMatch(page.byId('portfolio-run').title,/Calibur/);
+  await page.runner({...caliburRunner('authorizing','setting-up'),calibur:{state:'authorizing',implementation:'calibur'}});
+  assert.equal(page.byId('portfolio-run').textContent,'Authorize Calibur…');
+  assert.match(page.byId('portfolio-run').title,/Calibur is Uniswap wallet code/);assert.doesNotMatch(page.byId('portfolio-run').title,/Simple7702/);
+  assert.equal(page.posts().length,0);
+});
+
+test('missing Simple7702 deployment remains an actionable stopped message without automatic prompts', async () => {
+  const page=await browser();await page.ready();await page.status({...chart(),mode:'ledger'});
+  const message='Simple7702 needs a one-time contract deployment on this network. Complete deployment before pressing Start; ETH is required.';
+  await page.runner({...runner('stopped'),message,calibur:{state:'needed',implementation:'simple7702',message}});
+  assert.equal(page.byId('portfolio-run').textContent,'Start');assert.equal(page.byId('portfolio-run').disabled,false);
+  assert.match(page.byId('control-message').textContent,/one-time contract deployment/);
+  assert.match(page.byId('portfolio-run').title,/ETH is required/);
+  await page.advance(60000);assert.equal(page.posts().length,0);
 });

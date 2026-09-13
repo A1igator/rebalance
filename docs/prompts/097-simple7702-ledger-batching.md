@@ -1,0 +1,17 @@
+# Prompt 097 — Ledger-allowlisted batching and one-off chain deployment
+
+Date: 2026-09-13. This records the owner's retained intent and implementation scope; paraphrases below are not fabricated verbatim quotes.
+
+The owner encountered a physical Ledger refusal for Calibur delegation and authorized the canonical Ledger-allowlisted Simple7702Account alternative. The goal remains the same Ledger portfolio with exact approvals and the existing Uniswap rebalance in one transaction after setup. Trust minimization, direct Ledger confirmation and sponsor-native integration remain requirements.
+
+The final clarification separates shared chain deployment from product behavior: deploy the canonical implementation once per chain through a one-off operator script, **not an application deployment feature**. An explicit portfolio Start verifies that implementation and performs the per-wallet authorization/setup before starting. Missing deployment must explain the required one-time action without repeatedly prompting the device. The script prepares by default and requires explicit `--send` for a transaction; implementing it is not authorization to run it against a funded wallet.
+
+Start may migrate a failed Calibur configuration to Simple only when fresh public state proves no delegation and there is no pending operation. An actual Calibur delegate and every retained pending kind preserve their original implementation and receipt proof. Raw-key/Privy flows and already-running portfolios retain their behavior. No hosted service, relayer, API key, session key or USDG gas-payment path is added; native ETH pays deployment, setup and execution fees.
+
+Setup is an empty self-call, not a rebalance or cadence completion. The current wallet's Stop/configuration/nonce, fee target, canonical bytecode, fresh public state and pending-before-broadcast barriers remain authoritative. Device rejection can be retried only by new explicit user intent after its cause is resolved; uncertain sends are receipt-only and cannot cause another automatic authorization or broadcast. The chat reads fresh daemon state on demand, with portfolio notifications remaining paused.
+
+Evidence is bounded: the owner's Calibur refusal agrees with current pinned Ledger whitelist source, but that device's firmware version was not independently measured. The canonical Simple artifact's 20 embedded source files reproduce its address/runtime. Public deployment simulation and disposable canonical EVM execution are verified; no live Simple deployment, device authorization, rebalance or Clear Signing is claimed. See [Simple7702 evidence and provenance](../SIMPLE7702.md).
+
+Subsequent authorized live result: the one-off factory deployment was physically signed and confirmed at 07:51:39 UTC in block 61793215. Its exact runtime and receipt are recorded in the linked evidence. This completes shared chain deployment only; wallet authorization, Simple rebalance and Clear Signing remain separate milestones.
+
+Codex coordinated bounded core/provenance, signer/setup, controller/UI and independent-review/documentation work. Tests use isolated temporary state and public fixture identities; live wallet data and secrets are not fixtures. The retained source and compiler artifacts are MIT upstream work, with new application integration disclosed in [AI usage](../AI_USAGE.md). Standing main-branch commit/push authorization remains separate from signing or deployment authority. Tenjin search was unavailable; publishing remains paused.

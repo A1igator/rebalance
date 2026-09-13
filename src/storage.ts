@@ -9,7 +9,7 @@ export type PendingTransaction = {
   wallet: string;
   hash: string;
   nonce: number;
-  kind: "approval" | "swap" | "wrap" | "calibur-setup";
+  kind: "approval" | "swap" | "wrap" | "calibur-setup" | "simple7702-setup";
   createdAt: string;
   status: "prepared" | "broadcast" | "unknown";
   gas?: string;

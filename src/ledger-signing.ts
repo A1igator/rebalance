@@ -9,6 +9,7 @@ import { completedAddress, findLedgerAccount, withLedgerDevice,
   type LedgerAddressAction, type LedgerDevice, type LedgerOnboardingDependencies } from './ledger-onboarding.js';
 import type { CaliburAuthorizationRequest, PreparedTransaction } from './privy.js';
 import { CALIBUR_ADDRESS } from './calibur.js';
+import { SIMPLE7702_ADDRESS } from './simple7702.js';
 
 export type LedgerSigningOutcome = 'rejected' | 'cancelled' | 'timeout' | 'unavailable' |
   'account-mismatch' | 'invalid-transaction' | 'invalid-signature' | 'unsupported';
@@ -43,12 +44,13 @@ const fingerprint = (wallet: Address) => createHash('sha256').update(wallet.toLo
 
 const uint256 = (value: unknown): value is bigint => typeof value === 'bigint' && value >= 0n && value < 2n ** 256n;
 
-/** This adapter can authorize only the pinned Calibur deployment on Robinhood. */
+/** Only the two pinned implementation addresses on Robinhood may be authorized. */
 export function preparedLedgerAuthorization(request: CaliburAuthorizationRequest): CaliburAuthorizationRequest {
   if (!object(request) || Object.keys(request).some(key => !['chainId', 'address', 'nonce'].includes(key)) ||
-      request.chainId !== 4663 || typeof request.address !== 'string' || request.address.toLowerCase() !== CALIBUR_ADDRESS.toLowerCase() ||
+      request.chainId !== 4663 || typeof request.address !== 'string' ||
+      ![CALIBUR_ADDRESS.toLowerCase(), SIMPLE7702_ADDRESS.toLowerCase()].includes(request.address.toLowerCase()) ||
       !Number.isSafeInteger(request.nonce) || request.nonce < 0) throw new LedgerSigningError('invalid-transaction');
-  return Object.freeze({ chainId: 4663, address: CALIBUR_ADDRESS, nonce: request.nonce });
+  return Object.freeze({ chainId: 4663, address: getAddress(request.address), nonce: request.nonce });
 }
 
 function signatureScalars(output: Record<string, unknown>): { r: Hex; s: Hex } {

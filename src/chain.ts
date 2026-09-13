@@ -14,7 +14,7 @@ import {
   type Hex,
 } from "viem";
 import { evaluatePortfolio, planRebalance, planAtomicRebalance, copyRebalanceInputLimits, RebalanceNotRequiredError, RebalanceInputLimitError, type RebalanceInputLimits, type Portfolio, type TradePlan, type RebalancePlan } from "./core.ts";
-import { buildCaliburSelfTransaction } from "./calibur.js";
+import { delegationFor, isDelegatedExecution } from "./delegation.js";
 import { ASSETS } from "./assets.ts";
 export { ASSETS } from "./assets.ts";
 
@@ -46,7 +46,7 @@ export type ChainConfig = {
   slippageBps: number;
   deadlineSeconds: number;
   mode?: "private-key" | "privy" | "ledger";
-  execution?: "direct" | "calibur";
+  execution?: "direct" | "calibur" | "simple7702";
 };
 
 export type RouteQuote = {
@@ -74,6 +74,7 @@ export type ChainTransaction = {
   plan?: RebalancePlan;
   /** Exact approvals execute inside this same swap transaction. */
   calibur?: { approvalCount: number };
+  simple7702?: { approvalCount: number };
 };
 
 // Official ABI sources:
@@ -128,8 +129,8 @@ function fresh(header: Header): void {
 }
 
 export function createChain(config: ChainConfig) {
-  if (config.execution !== undefined && !["direct", "calibur"].includes(config.execution)) throw new Error("Unknown execution mode");
-  if (config.execution === "calibur" && config.mode !== "ledger") throw new Error("Calibur execution requires Ledger");
+  if (config.execution !== undefined && !["direct", "calibur", "simple7702"].includes(config.execution)) throw new Error("Unknown execution mode");
+  if (isDelegatedExecution(config.execution) && config.mode !== "ledger") throw new Error("Delegated execution requires Ledger");
   const url = new URL(config.rpcUrl);
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("RPC must use HTTP or HTTPS");
   if (!isAddress(config.wallet) || getAddress(config.wallet) === zeroAddress) {
@@ -350,7 +351,7 @@ export function createChain(config: ChainConfig) {
   }
 
   async function transaction(trade: TradePlan, _previousQuote: RouteQuote): Promise<ChainTransaction> {
-    if (config.execution === "calibur") throw new Error("Calibur execution requires the full rebalance batch");
+    if (isDelegatedExecution(config.execution)) throw new Error("Delegated execution requires the full rebalance batch");
     trade = { ...trade };
     const { sell, buy } = assetsFor(trade, assetList);
     const block = await header();
@@ -472,7 +473,7 @@ export function createChain(config: ChainConfig) {
   }
 
   async function transactionBatch(plan: RebalancePlan, _previous: BatchQuote, context?: RebalanceContext): Promise<ChainTransaction> {
-    if (config.execution === "calibur" && context === undefined) throw new Error("Calibur requires fresh full-portfolio preparation");
+    if (isDelegatedExecution(config.execution) && context === undefined) throw new Error("Delegated execution requires fresh full-portfolio preparation");
     const preparedContext = context === undefined ? undefined : contextFor(context);
     const originalTrades = preparedContext ? undefined : validatedBatch(plan);
     const block = await header();
@@ -488,7 +489,7 @@ export function createChain(config: ChainConfig) {
     fresh(block);
     const metadata = prepared ? { plan: prepared.plan } : {};
     const deficient = allowances.filter(({ allowance, amountIn }) => allowance < amountIn);
-    if (deficient.length && config.execution !== "calibur") {
+    if (deficient.length && !isDelegatedExecution(config.execution)) {
       const first = deficient[0]!;
       return { to: first.asset.address, value: 0n, kind: "approval", swapCount: trades.length, approvalCount: deficient.length, ...metadata,
         data: encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: [ROUTER, first.amountIn] }) };
@@ -504,12 +505,12 @@ export function createChain(config: ChainConfig) {
       }] });
     });
     const data = encodeFunctionData({ abi: ROUTER_ABI, functionName: "multicall", args: [deadline, swaps] });
-    if (config.execution === "calibur") {
+    if (isDelegatedExecution(config.execution)) {
       const calls = deficient.map(({ asset, amountIn }) => ({ to: asset.address, value: 0n,
         data: encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: [ROUTER, amountIn] }) }));
       calls.push({ to: ROUTER, value: 0n, data });
-      return { ...buildCaliburSelfTransaction(wallet, calls), kind: "swap", expiresAt: deadline,
-        swapCount: trades.length, approvalCount: 0, calibur: { approvalCount: deficient.length }, ...metadata };
+      return { ...delegationFor(config.execution).buildTransaction(wallet, calls), kind: "swap", expiresAt: deadline,
+        swapCount: trades.length, approvalCount: 0, [config.execution]: { approvalCount: deficient.length }, ...metadata };
     }
     return { to: ROUTER, value: 0n, kind: "swap", expiresAt: deadline, swapCount: trades.length, approvalCount: 0, ...metadata, data };
   }

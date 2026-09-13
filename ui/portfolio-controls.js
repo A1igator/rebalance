@@ -44,7 +44,7 @@
     const setup = runner.state === "setting-up";
     if (transitionReads >= (setup ? 300 : 30) || (transitionDeadline !== null && Date.now() >= transitionDeadline)) {
       runner = { wallet, state: "unavailable", message: setup
-        ? "Calibur setup status has not settled. It may still finish; refresh the page to check before trying again."
+        ? "Wallet setup status has not settled. It may still finish; refresh the page to check before trying again."
         : "Runner state has not settled. Refresh the page to check it." };
       return;
     }
@@ -59,10 +59,14 @@
       finally { releaseStreams(); transitionReading = false; render(); }
     }, 1000);
   }
+  function setupName() { return runner?.calibur?.implementation === "calibur" ? "Calibur" : "Simple7702"; }
   function setupLabel() {
-    return ({ authorizing: "Authorize Calibur…", signing: "Confirm setup…", confirming: "Waiting for setup receipt…" })[runner?.calibur?.state] || "Setting up Calibur…";
+    return ({ authorizing: `Authorize ${setupName()}…`, signing: "Confirm setup…", confirming: "Waiting for setup receipt…" })[runner?.calibur?.state] || `Setting up ${setupName()}…`;
   }
-  const setupExplanation = "Calibur is Uniswap wallet code that batches token approvals and swaps. First setup needs two Ledger signatures and one transaction paid in ETH; later rebalances need one transaction signature.";
+  function setupExplanation() {
+    const identity = setupName() === "Calibur" ? "Calibur is Uniswap wallet code" : "Simple7702 is Ledger-allowlisted wallet code";
+    return `${identity} that batches token approvals and Uniswap swaps in one transaction. First setup needs two Ledger signatures and one transaction paid in ETH; later rebalances need one transaction signature. ETH is still required.`;
+  }
   function render() {
     reconcileTransition();
     const state = runnerFresh && same(wallet, runner?.wallet) ? runner.state : "unavailable";
@@ -84,9 +88,9 @@
       : state === "running" ? (mode === "ledger" ? "Stop this Ledger portfolio and cancel waiting device prompts. Submitted transactions still settle." : "Stop this portfolio. Submitted transactions still settle.")
       : state === "stopped" ? (mode === "ledger" ? runner?.calibur?.state === "ready"
         ? "Start this Ledger wallet. The backend opens device prompts automatically; physically confirm each transaction."
-        : `Start this Ledger wallet. ${setupExplanation} Start checks setup before running.`
+        : `Start this Ledger wallet. ${runner?.calibur?.message || ""} ${setupExplanation()} Start checks setup before running.`
         : "Start automatic rebalancing for this wallet with its saved targets.")
-      : state === "setting-up" ? `${setupLabel()} ${setupExplanation}`
+      : state === "setting-up" ? `${setupLabel()} ${setupExplanation()}`
       : runner?.message || "Waiting for the local runner.";
     run.setAttribute("aria-busy", String(busy || ["starting", "stopping", "setting-up"].includes(state)));
     run.setAttribute("aria-label", `${run.textContent} portfolio${wallet ? ` ${short(wallet)}` : ""}`);

@@ -15,6 +15,7 @@ import { ledgerContextWithoutReports, setupLedgerWallet, watchLedgerPresence, ty
 import { LedgerSigningError, ledgerSigner, preparedLedgerAuthorization, preparedLedgerTransaction, verifiedLedgerAuthorization, verifiedLedgerTransaction } from '../src/ledger-signing.js';
 import type { CaliburAuthorizationRequest, CaliburPreparedTransaction, PreparedTransaction } from '../src/privy.js';
 import { CALIBUR_ADDRESS } from '../src/calibur.js';
+import { SIMPLE7702_ADDRESS } from '../src/simple7702.js';
 import { atomicWriteJson } from '../src/storage.js';
 
 // Published disposable vectors only. No device, wallet CLI, RPC or network is used.
@@ -419,6 +420,16 @@ test('Ledger USB write failure is classified without exposing the native error',
 
 
 const delegation: CaliburAuthorizationRequest = { chainId: 4663, address: CALIBUR_ADDRESS, nonce: 1 };
+test('Simple7702 authorization pins its exact address and Robinhood chain, independently of Calibur', async () => {
+  const request = { chainId: 4663 as const, address: SIMPLE7702_ADDRESS, nonce: 1 };
+  assert.deepEqual(preparedLedgerAuthorization(request), request);
+  const signature = await account.signAuthorization(request);
+  const result = await verifiedLedgerAuthorization(sdkAuthorization(signature), account.address, request);
+  assert.equal(result.address, SIMPLE7702_ADDRESS);
+  await assert.rejects(verifiedLedgerAuthorization(sdkAuthorization(signature), account.address, delegation), outcome('invalid-signature'));
+  assert.throws(() => preparedLedgerAuthorization({ ...request, chainId: 0 } as unknown as CaliburAuthorizationRequest), outcome('invalid-transaction'));
+  assert.throws(() => preparedLedgerAuthorization({ ...request, address: account.address }), outcome('invalid-transaction'));
+});
 async function authorization(input = delegation, signer = account): Promise<SignedAuthorization<number>> {
   return signer.signAuthorization(input);
 }

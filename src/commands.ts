@@ -44,7 +44,7 @@ const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
   status                               Read local graph/portfolio state
   configure --targets USDG=5,AAPL=23.75,NVDA=23.75,MSFT=23.75,AMD=23.75
                                        Set explicit percentages (example only)
-    [--wallet 0x...] [--mode private-key|privy|ledger] [--execution direct|calibur] [--rpc https://...]
+    [--wallet 0x...] [--mode private-key|privy|ledger] [--execution direct|calibur|simple7702] [--rpc https://...]
     [--threshold 5] [--slippage 0.5] [--deadline 120] [--poll 30] [--rebalance-interval-seconds 3600]
   targets set AAPL 30                   Change one percentage; redistribute the rest
   targets replace <ASSET=percent,...>   Replace all five targets explicitly
@@ -61,6 +61,8 @@ const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
   fees status                          Read the saved fee target; estimates are not guarantees
   ledger setup-calibur                  Install Calibur with an empty self-call; no rebalance or runner start
   ledger calibur-status                 Read Calibur delegation/setup progress; never sign
+  ledger setup-simple7702               Install the verified Simple7702 delegation; never start a runner
+  ledger simple7702-status              Read Simple7702 deployment/delegation readiness; never sign
   ledger status                        Read the latest Ledger rebalance request
   ledger rebalance [--request-id UUID]   Request one device-confirmed rebalance on a running Ledger monitor
   check                                Fresh read/plan/quote; never sign
@@ -288,7 +290,7 @@ async function main() {
   if (values['request-id'] !== undefined && !['launch', 'recover', 'ledger'].includes(command)) throw new Error('--request-id applies only to launch, recover or ledger rebalance');
   if (values.cancel && command !== 'recover') throw new Error('--cancel applies only to recover');
   if ((values.apply || values.settings) && command !== 'share') throw new Error('--apply and --settings apply only to share import');
-  if (values['expected-stop'] !== undefined && (!(['start', 'launch', 'recover'].includes(command) || (command === 'ledger' && args[1] === 'setup-calibur')) || values['resume-start'] ||
+  if (values['expected-stop'] !== undefined && (!(['start', 'launch', 'recover'].includes(command) || (command === 'ledger' && ['setup-calibur', 'setup-simple7702'].includes(args[1]!))) || values['resume-start'] ||
       !/^(none|[a-f0-9]{64})$/.test(values['expected-stop']))) throw new Error('Invalid conditional-start token');
   if (values['expected-runner-generation'] !== undefined && (!['start', 'launch'].includes(command) ||
       !RUNNER_GENERATION.test(values['expected-runner-generation']) || values['setup-only'])) throw new Error('Invalid conditional runner preference generation');
@@ -322,19 +324,20 @@ async function main() {
     }
     case 'ledger': {
       const action = args[1];
-      if (args.length !== 2 || !['status', 'rebalance', 'setup-calibur', 'calibur-status'].includes(action!)) {
-        throw new Error('Use ledger status, ledger rebalance, ledger setup-calibur or ledger calibur-status');
+      if (args.length !== 2 || !['status', 'rebalance', 'setup-calibur', 'calibur-status', 'setup-simple7702', 'simple7702-status'].includes(action!)) {
+        throw new Error('Use ledger status, rebalance, setup-calibur, calibur-status, setup-simple7702 or simple7702-status');
       }
-      const allowed = action === 'rebalance' ? 'request-id' : action === 'setup-calibur' ? 'expected-stop' : undefined;
+      const allowed = action === 'rebalance' ? 'request-id' : ['setup-calibur', 'setup-simple7702'].includes(action!) ? 'expected-stop' : undefined;
       for (const [name, value] of Object.entries(values)) {
         if (name !== allowed && value !== undefined && value !== false) throw new Error(`--${name} does not apply to ledger ${action}`);
       }
-      if (action === 'setup-calibur' || action === 'calibur-status') {
-        const { setupCalibur, caliburSetupStatus } = await import('./calibur-setup.js');
+      if (['setup-calibur', 'calibur-status', 'setup-simple7702', 'simple7702-status'].includes(action!)) {
+        const { setupCalibur, caliburSetupStatus, setupSimple7702, simple7702SetupStatus } = await import('./calibur-setup.js');
         if (action === 'calibur-status') { print(await caliburSetupStatus()); return; }
+        if (action === 'simple7702-status') { print(await simple7702SetupStatus()); return; }
         const abort = new AbortController(), stop = () => abort.abort();
         process.once('SIGINT', stop); process.once('SIGTERM', stop);
-        try { print(await setupCalibur({ signal: abort.signal, expectedStop: values['expected-stop'] })); }
+        try { print(await (action === 'setup-simple7702' ? setupSimple7702 : setupCalibur)({ signal: abort.signal, expectedStop: values['expected-stop'] })); }
         finally { process.off('SIGINT', stop); process.off('SIGTERM', stop); }
         return;
       }
@@ -526,12 +529,12 @@ async function main() {
         if (await chain.publicClient.getChainId() !== 4663) throw new Error('Wrong RPC chain');
         const receipt = await chain.publicClient.getTransactionReceipt({ hash: pending.hash as Hex });
         if (receipt.status !== 'reverted' || receipt.from.toLowerCase() !== config.wallet.toLowerCase()) throw new Error('Only a mined reverted transaction can be acknowledged');
-        if (pending.kind === 'calibur-setup') {
+        if (['calibur-setup', 'simple7702-setup'].includes(pending.kind)) {
           const [head, block] = await Promise.all([chain.publicClient.getBlockNumber({ cacheTime: 0 }),
             chain.publicClient.getBlock({ blockNumber: receipt.blockNumber })]);
-          if (head < receipt.blockNumber + 1n || block.hash !== receipt.blockHash) throw new Error('Calibur setup needs two canonical receipt confirmations');
-          const { verifyCaliburSetupReceipt } = await import('./calibur-setup-proof.js');
-          await verifyCaliburSetupReceipt(config, chain, pending, receipt);
+          if (head < receipt.blockNumber + 1n || block.hash !== receipt.blockHash) throw new Error('Delegation setup needs two canonical receipt confirmations');
+          const { verifyDelegatedSetupReceipt } = await import('./calibur-setup-proof.js');
+          await verifyDelegatedSetupReceipt(config, chain, pending, receipt);
         }
         await rm(PENDING_PATH);
         print({ status: 'revert-acknowledged', hash: pending.hash });

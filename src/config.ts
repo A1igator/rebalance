@@ -24,8 +24,8 @@ export type Config = {
   chainId: 4663;
   wallet: Address;
   mode: 'private-key' | 'privy' | 'ledger';
-  /** Explicit per-wallet opt-in. Calibur delegation is signed on the device. */
-  execution?: 'direct' | 'calibur';
+  /** Explicit per-wallet opt-in. The selected delegation is signed on the device. */
+  execution?: 'direct' | 'calibur' | 'simple7702';
   rpcUrl: string;
   targets: Record<string, number>;
   allocation?: ManagedAllocation;
@@ -62,8 +62,8 @@ export function validateConfig(value: unknown): Config {
   if (c.version !== 1 || c.chainId !== 4663) throw new Error('Only Robinhood mainnet (4663) is supported');
   if (!isAddress(c.wallet, { strict: false })) throw new Error('Invalid public wallet address');
   if (!['private-key', 'privy', 'ledger'].includes(c.mode)) throw new Error('Unknown signing mode');
-  if (c.execution !== undefined && !['direct', 'calibur'].includes(c.execution)) throw new Error('Unknown execution mode');
-  if (c.execution === 'calibur' && c.mode !== 'ledger') throw new Error('Calibur execution currently requires the Ledger signer');
+  if (c.execution !== undefined && !['direct', 'calibur', 'simple7702'].includes(c.execution)) throw new Error('Unknown execution mode');
+  if (['calibur', 'simple7702'].includes(c.execution ?? '') && c.mode !== 'ledger') throw new Error('Delegated execution currently requires the Ledger signer');
   const url = new URL(c.rpcUrl);
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search) {
     throw new Error('Use an HTTP(S) RPC URL without credentials or query parameters');

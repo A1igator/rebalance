@@ -12,23 +12,26 @@ import { validatePending } from './transactions.js';
 import type { PendingTransaction } from './storage.js';
 import { ensureSelectedCodexNotifications } from './selected-notifications.js';
 
-export type CaliburSummary = { state: 'needed' | 'ready' | 'unknown' | 'authorizing' | 'signing' | 'confirming'; message?: string };
+type BatchingImplementation = 'calibur' | 'simple7702';
+export type CaliburSummary = { implementation?: BatchingImplementation; state: 'needed' | 'ready' | 'unknown' | 'authorizing' | 'signing' | 'confirming'; message?: string };
 export type RunnerSummary = { wallet: string | null; state: 'running' | 'stopped' | 'starting' | 'stopping' | 'setting-up' | 'unavailable' | 'deferred'; message?: string; calibur?: CaliburSummary };
 export type RunnerResult = RunnerSummary & { requestId: string; outcome: string };
 export type RunnerRequest = { token: string; wallet: string; action: 'start' | 'stop'; requestId: string };
 export type LedgerRetryRequest = { token: string; wallet: string; requestId: string; retryOf: string };
 type Outcome = 'prepared' | 'armed' | 'starting' | 'stop-requested' | 'blocked' | 'busy' | 'deferred' | 'uncertain';
 const setupFailures = {
-  'simulation-failed': 'Calibur setup simulation could not be verified. Check the network, then press Start to retry.',
-  'insufficient-eth': 'Calibur setup needs more ETH for gas. Fund this wallet, then press Start.',
-  'fee-above-target': 'Calibur setup exceeds the fee target. Wait for lower fees or update the target, then press Start.',
-  'fee-unavailable': 'A fresh Calibur setup fee estimate is unavailable. Check the network, then press Start to retry.',
-  rejected: 'Calibur setup was cancelled on the Ledger. Press Start when ready to try again.',
-  cancelled: 'Calibur setup was cancelled before broadcast. Press Start when ready to try again.',
+  'deployment-needed': 'Simple7702 needs a one-time contract deployment on this network. Complete deployment before pressing Start; ETH is required.',
+  'existing-calibur': 'This wallet already uses Calibur. Its delegation and pending receipts were preserved.',
+  'simulation-failed': 'Batching setup simulation could not be verified. Check the network, then press Start to retry.',
+  'insufficient-eth': 'Batching setup needs more ETH for gas. Fund this wallet, then press Start.',
+  'fee-above-target': 'Batching setup exceeds the fee target. Wait for lower fees or update the target, then press Start.',
+  'fee-unavailable': 'A fresh Batching setup fee estimate is unavailable. Check the network, then press Start to retry.',
+  rejected: 'Batching setup was cancelled on the Ledger. Press Start when ready to try again.',
+  cancelled: 'Batching setup was cancelled before broadcast. Press Start when ready to try again.',
   timeout: 'Ledger setup timed out. Unlock the device, open Ethereum, then press Start.',
   unavailable: 'Open Ethereum on the connected Ledger, then press Start to retry setup.',
   'account-mismatch': 'The Ledger account does not match this portfolio. Select the correct account before pressing Start.',
-  'invalid-transaction': 'Calibur setup could not be prepared. Review the setup configuration before retrying.',
+  'invalid-transaction': 'Batching setup could not be prepared. Review the setup configuration before retrying.',
   'invalid-signature': 'The Ledger signature could not be verified. Check the selected device before retrying.',
   unsupported: 'The Ledger cannot sign this setup. Review device signing support before retrying.',
 } as const;
@@ -39,6 +42,7 @@ type Entry = { version: 1; sessionId: string; requestId: string; wallet: string;
 export type PortfolioControlDependencies = {
   execute: (profile: RoutedProfile, args: readonly string[], sessionId?: string, options?: { timeoutMs?: number; signal?: AbortSignal }) => Promise<{ ok: boolean; value: unknown }>;
   caliburStatus: (profile: RoutedProfile) => Promise<unknown>;
+  simple7702Status: (profile: RoutedProfile) => Promise<unknown>;
   wait: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   selectedNotifications: (profile: RoutedProfile, sessionId: string, starting: boolean) => Promise<unknown>;
   alive: (pid: number) => boolean;
@@ -81,6 +85,11 @@ const defaults: PortfolioControlDependencies = {
     if (!result.ok) throw new Error('Calibur status is unavailable');
     return result.value;
   },
+  simple7702Status: async profile => {
+    const result = await defaults.execute(profile, ['ledger', 'simple7702-status'], undefined, { timeoutMs: 10_000 });
+    if (!result.ok) throw new Error('Simple7702 status is unavailable');
+    return result.value;
+  },
   wait: (milliseconds, signal) => new Promise((done, fail) => {
     signal.throwIfAborted();
     const abort = () => { clearTimeout(timer); fail(signal.reason); };
@@ -101,18 +110,20 @@ const defaults: PortfolioControlDependencies = {
 export class PortfolioControls {
   private readonly deps: PortfolioControlDependencies;
   private readonly active = new Map<string, { action: RunnerRequest['action']; promise: Promise<RunnerResult> }>();
-  private readonly setups = new Map<string, { controller: AbortController; expectedStop: string }>();
+  private readonly setups = new Map<string, { controller: AbortController; expectedStop: string; implementation?: BatchingImplementation }>();
   private caliburCache: { at: number; value: CaliburSummary } | undefined;
   private caliburRefresh: Promise<void> | undefined;
   readonly rootDir: string;
   readonly dataDir: string;
   constructor(rootDir: string, dataDir: string, overrides: Partial<PortfolioControlDependencies> = {}) {
     this.rootDir = resolve(rootDir); this.dataDir = resolve(dataDir); this.deps = { ...defaults, ...overrides };
-    if (overrides.execute && !overrides.caliburStatus) this.deps.caliburStatus = async profile => {
-      const result = await overrides.execute!(profile, ['ledger', 'calibur-status'], undefined, { timeoutMs: 10_000 });
-      if (!result.ok) throw new Error('Calibur status is unavailable');
-      return result.value;
-    };
+    for (const [dependency, command] of [['caliburStatus', 'calibur-status'], ['simple7702Status', 'simple7702-status']] as const) {
+      if (overrides.execute && !overrides[dependency]) this.deps[dependency] = async profile => {
+        const result = await overrides.execute!(profile, ['ledger', command], undefined, { timeoutMs: 10_000 });
+        if (!result.ok) throw new Error('Batching status is unavailable');
+        return result.value;
+      };
+    }
   }
   private path(name: string) { return resolve(this.dataDir, name); }
   private async profile() {
@@ -181,36 +192,53 @@ export class PortfolioControls {
     if (!pid(saved.runner)) throw new Error('Invalid launch process record');
     return this.deps.alive(saved.runner);
   }
-  private setupState(value: unknown, wallet: string): CaliburSummary {
+  private setupState(value: unknown, wallet: string, implementation: BatchingImplementation): CaliburSummary {
     const result = value as { app?: string; operation?: string; wallet?: string; chainId?: number; outcome?: string; blockedReason?: string } | null;
-    if (result?.app !== 'Rebalance' || result.operation !== 'calibur-setup' || result.chainId !== 4663 ||
-        result.wallet?.toLowerCase() !== wallet.toLowerCase()) throw new Error('Calibur setup identity could not be verified');
+    if (result?.app !== 'Rebalance' || result.operation !== `${implementation}-setup` || result.chainId !== 4663 ||
+        result.wallet?.toLowerCase() !== wallet.toLowerCase()) throw new Error('Batching setup identity could not be verified');
     if (result.outcome === 'blocked' && result.blockedReason && Object.hasOwn(setupFailures, result.blockedReason)) {
       throw new SetupBlockedError(result.blockedReason as SetupFailure);
     }
+    const label = implementation === 'calibur' ? 'Calibur' : 'Simple7702';
     const state: CaliburSummary['state'] = ['already-enabled', 'confirmed'].includes(result.outcome ?? '') ? 'ready'
       : result.outcome === 'needed' ? 'needed' : result.outcome === 'authorizing' ? 'authorizing'
       : result.outcome === 'signing' ? 'signing' : ['confirming', 'pending'].includes(result.outcome ?? '') ? 'confirming' : 'unknown';
     const messages: Record<CaliburSummary['state'], string> = {
       needed: 'Start enables one-signature rebalances. Initial Ledger setup requires authorization and transaction confirmation.',
-      ready: 'Calibur is enabled. Rebalances require one Ledger transaction confirmation.',
-      unknown: 'Calibur setup could not be verified. No automatic signing retry will occur.',
-      authorizing: 'Confirm Calibur delegation on your Ledger.', signing: 'Confirm the Calibur setup transaction on your Ledger.',
-      confirming: 'Waiting for the Calibur setup receipt before starting the portfolio.',
+      ready: `${label} is enabled. Approvals and Uniswap swaps share one transaction; ETH is required.`,
+      unknown: 'Batching setup could not be verified. No automatic signing retry will occur.',
+      authorizing: `Confirm ${label} delegation on your Ledger.`, signing: `Confirm the ${label} setup transaction on your Ledger.`,
+      confirming: 'Waiting for the Batching setup receipt before starting the portfolio.',
     };
-    const summary = { state, message: messages[state] };
+    const summary = { implementation, state, message: messages[state] };
     this.caliburCache = { at: Date.now(), value: summary };
     return summary;
   }
-  private cachedCalibur(profile: RoutedProfile): CaliburSummary {
+  private statusFor(profile: RoutedProfile, implementation: BatchingImplementation) {
+    return implementation === 'calibur' ? this.deps.caliburStatus(profile) : this.deps.simple7702Status(profile);
+  }
+  private async currentBatching(profile: RoutedProfile) {
+    const value = await this.deps.simple7702Status(profile);
+    const result = value as { app?: string; operation?: string; wallet?: string; chainId?: number; outcome?: string; blockedReason?: string } | null;
+    if (result?.app === 'Rebalance' && result.operation === 'simple7702-setup' && result.chainId === 4663 &&
+        result.wallet?.toLowerCase() === profile.wallet?.toLowerCase() && result.outcome === 'blocked' && result.blockedReason === 'existing-calibur') {
+      return this.setupState(await this.deps.caliburStatus(profile), profile.wallet!, 'calibur');
+    }
+    return this.setupState(value, profile.wallet!, 'simple7702');
+  }
+  private cachedCalibur(profile: RoutedProfile, implementation?: BatchingImplementation): CaliburSummary {
     if ((!this.caliburCache || Date.now() - this.caliburCache.at >= 2_000) && !this.caliburRefresh) {
-      this.caliburRefresh = this.deps.caliburStatus(profile).then(value => { this.setupState(value, profile.wallet!); })
-        .catch(() => { this.caliburCache = { at: Date.now(), value: { state: 'unknown', message: 'Calibur setup status is unavailable.' } }; })
+      this.caliburRefresh = (implementation
+        ? this.statusFor(profile, implementation).then(value => this.setupState(value, profile.wallet!, implementation))
+        : this.currentBatching(profile)).then(() => {})
+        .catch(error => { this.caliburCache = { at: Date.now(), value: { implementation: implementation ?? 'simple7702',
+          state: error instanceof SetupBlockedError ? 'needed' : 'unknown',
+          message: error instanceof SetupBlockedError ? error.message : 'Batching setup status is unavailable.' } }; })
         .finally(() => { this.caliburRefresh = undefined; });
     }
-    return this.caliburCache?.value ?? { state: 'unknown', message: 'Checking Calibur setup.' };
+    return this.caliburCache?.value ?? { implementation: implementation ?? 'simple7702', state: 'unknown', message: 'Checking batching setup.' };
   }
-  private async prepareCalibur(profile: RoutedProfile, entry: Entry, signal: AbortSignal, receiptOnly = false): Promise<boolean> {
+  private async prepareCalibur(profile: RoutedProfile, entry: Entry, signal: AbortSignal, receiptOnly = false): Promise<BatchingImplementation | undefined> {
     const current = async () => {
       signal.throwIfAborted();
       if (await this.stopToken() !== entry.expectedStop) throw new Error('A newer Stop superseded this Start');
@@ -219,6 +247,22 @@ export class PortfolioControls {
     // Only this explicit stopped-wallet Start opts in. Hold the same short
     // execution/configuration boundaries as configure; preserve every field.
     let hasPendingSetup = receiptOnly;
+    const initialConfig = (await this.profile()).config;
+    const retained = await readJson<PendingTransaction>(this.path('pending.json'));
+    let implementation: BatchingImplementation;
+    if (retained || receiptOnly) {
+      if (initialConfig.execution !== 'calibur' && initialConfig.execution !== 'simple7702') throw new Error('Setup execution mode changed');
+      implementation = initialConfig.execution;
+      if (retained && retained.kind !== `${implementation}-setup`) throw new Error('Pending transaction belongs to another execution path');
+      if (retained) validatePending(retained, initialConfig);
+    } else {
+      const state = await this.currentBatching(profile); await current();
+      if (state.state !== 'needed' && state.state !== 'ready') return undefined;
+      implementation = state.implementation!;
+      // An existing Calibur designation is never migrated by Start.
+      if (implementation === 'calibur' && state.state !== 'ready') return undefined;
+    }
+    const activeSetup = this.setups.get(key(entry)); if (activeSetup) activeSetup.implementation = implementation;
     const releaseRun = await acquireLock(this.dataDir, 'run.lock');
     try {
       const releaseConfig = await acquireConfigLock(this.dataDir, { signal });
@@ -226,44 +270,44 @@ export class PortfolioControls {
         await current();
         const { config } = await this.profile();
         const pending = await readJson<{ kind?: string }>(this.path('pending.json'));
-        hasPendingSetup ||= pending?.kind === 'calibur-setup';
+        hasPendingSetup ||= pending?.kind === `${implementation}-setup`;
         if (config.mode !== 'ledger' || walletIdentity(config.wallet) !== entry.wallet ||
-            (pending && (pending.kind !== 'calibur-setup' || config.execution !== 'calibur'))) {
+            (pending && (pending.kind !== `${implementation}-setup` || config.execution !== implementation))) {
           throw new Error('Ledger setup requires an idle portfolio without a pending transaction');
         }
-        if (receiptOnly && config.execution !== 'calibur') throw new Error('Setup execution mode changed');
-        if (config.execution !== 'calibur') {
+        if (receiptOnly && config.execution !== implementation) throw new Error('Setup execution mode changed');
+        if (config.execution !== implementation) {
           const raw = await readJson<Record<string, unknown>>(this.path('config.json'));
-          const next = { ...raw, execution: 'calibur' }; validateConfig(next);
+          const next = { ...raw, execution: implementation }; validateConfig(next);
           await this.deps.persist(this.path('config.json'), next);
         }
         await current();
       } finally { await releaseConfig(); }
     } finally { await releaseRun(); }
     await current();
-    const result = hasPendingSetup ? { ok: true, value: await this.deps.caliburStatus(profile) }
-      : await this.deps.execute(profile, ['ledger', 'setup-calibur', '--expected-stop', entry.expectedStop], entry.sessionId,
+    const result = hasPendingSetup ? { ok: true, value: await this.statusFor(profile, implementation) }
+      : await this.deps.execute(profile, ['ledger', `setup-${implementation}`, '--expected-stop', entry.expectedStop], entry.sessionId,
         { timeoutMs: 270_000, signal });
     await current();
-    const initial = this.setupState(result.value, entry.wallet);
-    if (!result.ok) return false;
-    if (initial.state === 'ready') return true;
-    if (initial.state !== 'confirming') return false;
+    const initial = this.setupState(result.value, entry.wallet, implementation);
+    if (!result.ok) return undefined;
+    if (initial.state === 'ready') return implementation;
+    if (initial.state !== 'confirming') return undefined;
     // Receipt-only checks never call setup a second time, even after uncertainty.
     const deadline = Date.now() + 60_000;
     for (let attempt = 0; attempt < 30 && Date.now() < deadline; attempt++) {
       await this.deps.wait(Math.min(2_000, deadline - Date.now()), signal); await current();
-      const remaining = deadline - Date.now(); if (remaining <= 0) return false;
+      const remaining = deadline - Date.now(); if (remaining <= 0) return undefined;
       let timer: ReturnType<typeof setTimeout> | undefined;
-      const observed = await Promise.race([this.deps.caliburStatus(profile), new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error('Calibur receipt confirmation timed out')), remaining);
+      const observed = await Promise.race([this.statusFor(profile, implementation), new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('Batching receipt confirmation timed out')), remaining);
       })]).finally(() => { clearTimeout(timer); });
-      const state = this.setupState(observed, entry.wallet);
+      const state = this.setupState(observed, entry.wallet, implementation);
       await current();
-      if (state.state === 'ready') return true;
-      if (state.state !== 'confirming') return false;
+      if (state.state === 'ready') return implementation;
+      if (state.state !== 'confirming') return undefined;
     }
-    return false;
+    return undefined;
   }
   async read(): Promise<RunnerSummary> {
     let wallet: string | null = null;
@@ -285,7 +329,7 @@ export class PortfolioControls {
       const setupFailure = entries.findLast(item => item.action === 'start' && item.expectedStop === generation)?.setupBlocked;
       const setupMessage = setupFailure ? setupFailures[setupFailure] : undefined;
       const setup = [...this.setups.values()].find(item => item.expectedStop === generation && !item.controller.signal.aborted);
-      if (setup) return { wallet, state: 'setting-up', calibur: this.cachedCalibur(profile) };
+      if (setup) return { wallet, state: 'setting-up', calibur: this.cachedCalibur(profile, setup.implementation) };
       if (stopped !== null && (pending?.action !== 'start' || (run && saved?.armed === true))) {
         return { wallet, state: run || launch || spawning || inFlight ? 'stopping' : 'stopped',
           message: run || launch || spawning || inFlight ? messages['stop-requested'] : setupMessage,
@@ -299,14 +343,14 @@ export class PortfolioControls {
           ...(config.mode === 'ledger' && running ? { message: 'Ledger monitoring is active. The backend opens device prompts automatically; physical confirmation is required for every transaction.' } : {}) };
       }
       if (launch || spawning) return { wallet, state: 'starting', message: messages.starting };
-      if (pending && !inFlight && config.mode === 'ledger' && config.execution === 'calibur') {
+      if (pending && !inFlight && config.mode === 'ledger' && ['calibur', 'simple7702'].includes(config.execution ?? '')) {
         const transaction = await readJson<PendingTransaction>(this.path('pending.json'));
-        if (transaction?.kind === 'calibur-setup') {
+        if (transaction?.kind === `${config.execution}-setup`) {
           validatePending(transaction, config);
           // Keep this barrier intact until a fresh explicit Start requests a
           // receipt-only continuation; passive UI reads must not consume it.
           const message = 'Setup outcome unconfirmed. Start checks its receipt before continuing.';
-          return { wallet, state: 'stopped', message, calibur: { state: 'confirming', message } };
+          return { wallet, state: 'stopped', message, calibur: { implementation: config.execution as BatchingImplementation, state: 'confirming', message } };
         }
       }
       if (pending) return inFlight
@@ -376,7 +420,7 @@ export class PortfolioControls {
         if (entry.action === 'start' && sinceStop.some(item => ['prepared','uncertain','starting'].includes(item.outcome))) {
           const activeStart = sinceStop.some(item => item.outcome === 'prepared' && this.active.has(key(item)));
           const pending = await readJson<{kind?:string}>(this.path('pending.json'));
-          if (!activeStart && config.mode === 'ledger' && config.execution === 'calibur' && pending?.kind === 'calibur-setup') receiptOnly = true;
+          if (!activeStart && config.mode === 'ledger' && ['calibur', 'simple7702'].includes(config.execution ?? '') && pending?.kind === `${config.execution}-setup`) receiptOnly = true;
           else entry.outcome = activeStart ? 'busy' : 'uncertain';
         }
         entries.push(entry);
@@ -397,14 +441,15 @@ export class PortfolioControls {
           }
           const controller = new AbortController();
           this.setups.set(id, { controller, expectedStop: entry.expectedStop });
-          this.caliburCache = { at: Date.now(), value: { state: 'needed', message: 'Preparing Calibur setup before starting the portfolio.' } };
+          this.caliburCache = { at: Date.now(), value: { implementation: 'simple7702', state: 'needed', message: 'Preparing batching setup before starting the portfolio.' } };
           accepted({ wallet: entry.wallet, requestId: entry.requestId, outcome: 'setting-up', state: 'setting-up', calibur: this.caliburCache.value });
           try {
-            if (!await this.prepareCalibur(profile, entry, controller.signal, receiptOnly)) throw new Error('Calibur setup remains unresolved');
+            const implementation = await this.prepareCalibur(profile, entry, controller.signal, receiptOnly);
+            if (!implementation) throw new Error('Batching setup remains unresolved');
             controller.signal.throwIfAborted();
             if (await this.stopToken() !== entry.expectedStop) throw new Error('A newer Stop superseded this Start');
             const latest = (await this.profile()).config;
-            if (latest.mode !== 'ledger' || latest.execution !== 'calibur' || walletIdentity(latest.wallet) !== entry.wallet) {
+            if (latest.mode !== 'ledger' || latest.execution !== implementation || walletIdentity(latest.wallet) !== entry.wallet) {
               throw new Error('The selected Calibur execution configuration changed');
             }
           } finally { this.setups.delete(id); }

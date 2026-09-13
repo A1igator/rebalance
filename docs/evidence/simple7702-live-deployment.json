@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "kind": "simple7702-deploy",
+  "chainId": 4663,
+  "wallet": "0xCeD38202ef03b2cB7dc69cD004F5cCe70dC21808",
+  "hash": "0x551dbbd3af22ba4d18126dee3bd4493df4caaf83d0438f2c1721c88e6b4e6dc3",
+  "nonce": 24,
+  "createdAt": "2026-09-13T07:51:39.107Z",
+  "gas": "1020396",
+  "gasPrice": "104546400",
+  "maxFeeWei": "110000000000000",
+  "payloadHash": "0x42c352f68a00f49a36af36149ed3d5bfe278e0db7e9ff389a957eac866fc564a"
+}

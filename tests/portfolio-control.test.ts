@@ -36,7 +36,7 @@ async function fixture(t: TestContext, mode = 'private-key') {
   const { token } = await issueView(root, session);
   const calls: { profile: Parameters<PortfolioControlDependencies['execute']>[0]; args: readonly string[] }[] = [];
   const alive = new Set<number>();
-  const setupOutcome = (outcome = 'already-enabled') => ({ app: 'Rebalance', operation: 'calibur-setup', wallet: walletA, chainId: 4663, outcome });
+  const setupOutcome = (outcome = 'already-enabled') => ({ app: 'Rebalance', operation: 'simple7702-setup', wallet: walletA, chainId: 4663, outcome });
   const outcome = (state: string) => ({ ok: state !== 'blocked', value: { app: 'Rebalance', outcome: state,
     status: { chain: { id: 4663 }, wallet: walletA } } });
   const run: PortfolioControlDependencies['execute'] = async (profile, args) => {
@@ -51,7 +51,7 @@ async function fixture(t: TestContext, mode = 'private-key') {
       return outcome('armed');
     }
     if (args[0] === 'ledger') {
-      assert.deepEqual(args, ['ledger', 'setup-calibur', '--expected-stop', digest(await readJson(join(root, 'stop.json')))]);
+      assert.deepEqual(args, ['ledger', 'setup-simple7702', '--expected-stop', digest(await readJson(join(root, 'stop.json')))]);
       return { ok: true, value: setupOutcome() };
     }
     assert.deepEqual(args, ['stop']);
@@ -60,7 +60,8 @@ async function fixture(t: TestContext, mode = 'private-key') {
   };
   let execute = run;
   const deps: Partial<PortfolioControlDependencies> = { alive: pid => alive.has(pid),
-    caliburStatus: async () => setupOutcome(), wait: async (_milliseconds, signal) => { signal.throwIfAborted(); },
+    simple7702Status: async () => setupOutcome('needed'),
+    caliburStatus: async () => ({ ...setupOutcome('needed'), operation: 'calibur-setup' }), wait: async (_milliseconds, signal) => { signal.throwIfAborted(); },
     selectedNotifications: async () => undefined,
     execute: async (profile, args) => { calls.push({ profile, args }); return execute(profile, args); } };
   const controls = new PortfolioControls(root, root, deps);
@@ -349,19 +350,19 @@ test('stopped Ledger Start durably claims once, preserves settings and waits for
   let release!: () => void;
   const gate = new Promise<void>(done => { release = done; });
   let statusReads = 0;
-  const controls = new PortfolioControls(f.root, f.root, { ...f.deps, caliburStatus: async () => {
-    statusReads++; return f.setupOutcome(statusReads < 2 ? 'pending' : 'confirmed');
+  const controls = new PortfolioControls(f.root, f.root, { ...f.deps, simple7702Status: async () => {
+    statusReads++; return f.setupOutcome(statusReads === 1 ? 'needed' : statusReads < 3 ? 'pending' : 'confirmed');
   }, execute: async (profile, args, sessionId, options) => {
     f.calls.push({ profile, args });
     if (args[0] === 'ledger') {
       assert.equal(options?.timeoutMs, 270_000); assert.ok(options?.signal);
       const journal = await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json'));
       assert.equal(journal?.[0]?.outcome, 'prepared');
-      assert.deepEqual(await readJson(join(f.root, 'config.json')), { ...original, execution: 'calibur' });
+      assert.deepEqual(await readJson(join(f.root, 'config.json')), { ...original, execution: 'simple7702' });
       assert.equal(args[3], digest(oldStop)); await gate;
       return { ok: true, value: f.setupOutcome('pending') };
     }
-    assert.equal(args[0], 'launch'); assert.ok(statusReads >= 2);
+    assert.equal(args[0], 'launch'); assert.ok(statusReads >= 3);
     assert.equal(args[4], digest(oldStop)); return f.run(profile, args, sessionId);
   } });
   const request = f.request('start');
@@ -428,7 +429,7 @@ test('foreign or unverified setup results cannot launch and pending state blocks
   }
 });
 
-test('already running Ledger Start preserves direct execution and never installs Calibur', async t => {
+test('already running Ledger Start preserves direct execution and never installs Simple7702', async t => {
   const f = await fixture(t, 'ledger'); f.alive.add(424242);
   await atomicWriteJson(join(f.root, 'run.lock'), { pid: 424242 });
   await atomicWriteJson(join(f.root, 'launch-processes.json'), { runner: 424242 });
@@ -439,10 +440,10 @@ test('already running Ledger Start preserves direct execution and never installs
   assert.equal(await readFile(join(f.root, 'config.json'), 'utf8'), before);
 });
 
-test('Calibur public status reads coalesce and expose device stages without dispatching setup', async t => {
+test('Simple7702 public status reads coalesce and expose device stages without dispatching setup', async t => {
   const f = await fixture(t, 'ledger'); let reads = 0, release!: () => void;
   const gate = new Promise<void>(done => { release = done; });
-  const controls = new PortfolioControls(f.root, f.root, { ...f.deps, caliburStatus: async () => {
+  const controls = new PortfolioControls(f.root, f.root, { ...f.deps, simple7702Status: async () => {
     reads++; await gate; return f.setupOutcome('needed');
   } });
   await controls.read(); await controls.read(); await controls.read();
@@ -470,7 +471,7 @@ test('typed pre-broadcast Ledger rejection stays actionable and permits only a n
 test('a fresh Start after an uncertain setup send can only reconcile its retained receipt', async t => {
   const f = await fixture(t, 'ledger');
   f.setExecute(async () => {
-    await atomicWriteJson(join(f.root, 'pending.json'), { kind: 'calibur-setup', wallet: walletA, chainId: 4663, hash: `0x${'1'.repeat(64)}`, nonce: 0, status: 'unknown' });
+    await atomicWriteJson(join(f.root, 'pending.json'), { kind: 'simple7702-setup', wallet: walletA, chainId: 4663, hash: `0x${'1'.repeat(64)}`, nonce: 0, status: 'unknown' });
     return { ok: true, value: f.setupOutcome('unresolved') };
   });
   const first = f.request('start'); await f.controls.command(first);
@@ -480,7 +481,7 @@ test('a fresh Start after an uncertain setup send can only reconcile its retaine
   assert.match(uncertain.message!, /Start checks its receipt/);
   assert.notEqual(await readJson(join(f.root, 'pending.json')), null);
   let reads = 0;
-  const restarted = new PortfolioControls(f.root, f.root, { ...f.deps, caliburStatus: async () => {
+  const restarted = new PortfolioControls(f.root, f.root, { ...f.deps, simple7702Status: async () => {
     reads++; await rm(join(f.root, 'pending.json'), { force: true }); return f.setupOutcome('confirmed');
   } });
   f.setExecute(f.run); await restarted.command(first); assert.equal(f.calls.length, 1);
@@ -503,7 +504,7 @@ test('a later CLI Stop during receipt confirmation prevents runner launch withou
 });
 
 
-test('a public-status or unrelated run-lock owner cannot bypass Calibur setup and launch direct', async t => {
+test('a public-status or unrelated run-lock owner cannot bypass Simple7702 setup and launch direct', async t => {
   const f = await fixture(t, 'ledger'); f.alive.add(424242);
   await atomicWriteJson(join(f.root, 'run.lock'), { pid: 424242 });
   await atomicWriteJson(join(f.root, 'status.json'), { wallet: walletA, armed: true });
@@ -512,4 +513,62 @@ test('a public-status or unrelated run-lock owner cannot bypass Calibur setup an
   const result = await f.controls.command(f.request('start'));
   assert.equal(result.outcome, 'busy'); assert.equal(f.calls.length, 0);
   assert.equal(await readFile(join(f.root, 'config.json'), 'utf8'), before);
+});
+
+
+test('an undelegated failed Calibur opt-in migrates to Simple7702 only on the new explicit Start', async t => {
+  const f = await fixture(t, 'ledger');
+  await atomicWriteJson(join(f.root, 'config.json'), { ...configuration(walletA, 'ledger'), execution: 'calibur' });
+  await f.controls.read(); assert.equal((await readJson<{execution:string}>(join(f.root, 'config.json')))!.execution, 'calibur');
+  await f.controls.command(f.request('start'));
+  await until(async () => (await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json')))?.[0]?.outcome === 'armed');
+  assert.equal((await readJson<{execution:string}>(join(f.root, 'config.json')))!.execution, 'simple7702');
+  assert.equal(f.calls[0]!.args[1], 'setup-simple7702');
+});
+
+test('existing Calibur delegation remains on its legacy execution and setup command', async t => {
+  const f = await fixture(t, 'ledger');
+  await atomicWriteJson(join(f.root, 'config.json'), { ...configuration(walletA, 'ledger'), execution: 'calibur' });
+  const legacy = { ...f.setupOutcome('already-enabled'), operation: 'calibur-setup' };
+  const controls = new PortfolioControls(f.root, f.root, { ...f.deps,
+    simple7702Status: async () => ({ ...f.setupOutcome('blocked'), blockedReason: 'existing-calibur' }),
+    caliburStatus: async () => legacy,
+    execute: async (profile, args) => { f.calls.push({profile,args});
+      return args[0] === 'ledger' ? {ok:true,value:legacy} : f.run(profile,args);
+    },
+  });
+  await controls.command(f.request('start'));
+  await until(async () => (await readJson<{outcome:string}[]>(join(f.root, 'runner-requests.json')))?.[0]?.outcome === 'armed');
+  assert.equal((await readJson<{execution:string}>(join(f.root, 'config.json')))!.execution, 'calibur');
+  assert.deepEqual(f.calls[0]!.args.slice(0,2), ['ledger','setup-calibur']);
+});
+
+test('a retained Calibur setup receipt is never reinterpreted or migrated by Simple7702 Start', async t => {
+  const f = await fixture(t, 'ledger');
+  await atomicWriteJson(join(f.root, 'config.json'), { ...configuration(walletA, 'ledger'), execution: 'calibur' });
+  const pending = { kind:'calibur-setup',wallet:walletA,chainId:4663,hash:`0x${'2'.repeat(64)}`,nonce:0,status:'unknown' };
+  await atomicWriteJson(join(f.root, 'pending.json'),pending);
+  let simpleReads=0, legacyReads=0;
+  const controls = new PortfolioControls(f.root,f.root,{...f.deps,
+    simple7702Status:async()=>{simpleReads++;return f.setupOutcome('needed');},
+    caliburStatus:async()=>{legacyReads++;return {...f.setupOutcome('unresolved'),operation:'calibur-setup'};},
+  });
+  await controls.command(f.request('start'));
+  await until(async()=> (await readJson<{outcome:string}[]>(join(f.root,'runner-requests.json')))?.[0]?.outcome==='uncertain');
+  assert.equal(simpleReads,0); assert.equal(legacyReads,1); assert.equal(f.calls.length,0);
+  assert.equal((await readJson<{execution:string}>(join(f.root,'config.json')))!.execution,'calibur');
+  assert.deepEqual(await readJson(join(f.root,'pending.json')),pending);
+});
+
+test('missing Simple7702 deployment blocks before setup or device prompts and reports the required action', async t => {
+  const f=await fixture(t,'ledger');
+  const controls=new PortfolioControls(f.root,f.root,{...f.deps,
+    simple7702Status:async()=>({...f.setupOutcome('blocked'),blockedReason:'deployment-needed'}),
+  });
+  const first=f.request('start');await controls.command(first);
+  await until(async()=> (await readJson<{outcome:string}[]>(join(f.root,'runner-requests.json')))?.[0]?.outcome==='blocked');
+  const current=await controls.read();assert.equal(current.state,'stopped');
+  assert.match(current.message!,/one-time contract deployment/);assert.equal(current.calibur?.implementation,'simple7702');
+  await controls.command(first);assert.equal(f.calls.length,0);
+  assert.equal((await readJson<{execution?:string}>(join(f.root,'config.json')))!.execution,undefined);
 });

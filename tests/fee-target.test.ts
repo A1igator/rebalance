@@ -184,3 +184,12 @@ test('standalone setup rejects asset calls and other transaction kinds still req
     assert.equal(fetched, false);
   }
 });
+
+
+test('Simple7702 enrollment fees include only their own buffered gas', async () => {
+  for (const kind of ['simple7702-setup'] as const) {
+    const fee = await checkRebalanceFee({ ...input, kind, swaps: 0, swapsInCurrentTransaction: 0, remainingApprovals: 0 }, dependencies);
+    assert.equal(fee.estimatedUsdE8, '27000000');
+    await assert.rejects(checkRebalanceFee({ ...input, kind, swaps: 1 }, dependencies), /cannot include portfolio trades/);
+  }
+});

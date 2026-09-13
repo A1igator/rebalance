@@ -1,0 +1,19 @@
+{
+  "chainId": 4663,
+  "hash": "0x551dbbd3af22ba4d18126dee3bd4493df4caaf83d0438f2c1721c88e6b4e6dc3",
+  "status": "success",
+  "from": "0xced38202ef03b2cb7dc69cd004f5cce70dc21808",
+  "to": "0x4e59b44847b379578588920ca78fbf26c0b4956c",
+  "blockNumber": "61793215",
+  "blockHash": "0x456d31355378ff763ede627b115ae4d0f137f588e6391db69fb579de3907ccd6",
+  "blockTimestamp": "2026-09-13T07:51:39.000Z",
+  "gasUsed": "834744",
+  "effectiveGasPriceWei": "85264000",
+  "networkFeeWei": "71173612416000",
+  "networkFeeEth": "0.000071173612416",
+  "implementation": "0x4Cd241E8d1510e30b2076397afc7508Ae59C66c9",
+  "runtimeBytes": 3639,
+  "runtimeHash": "0x82c1e6c0f83d22eef579344e8eff26baf24db4dabe5408d681b00d0512bc3ec4",
+  "canonicalBlock": true,
+  "verification": "The operator script checked two canonical confirmations, exact factory transaction identity and canonical deployed runtime. This is shared contract deployment only; wallet delegation and trading were not performed."
+}
