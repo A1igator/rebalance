@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { percentToBps } from '../src/config.js';
-import { bpsToPercent, decodeShareCode, encodeShareCode, sharePreview } from '../src/share.js';
+import { bpsToPercent, decodeShareCode, encodeShareCode, encodeSharedStrategy, sharePreview } from '../src/share.js';
 
 const demo = { targets: { USDG: 500, AAPL: 2375, NVDA: 2375, MSFT: 2375, AMD: 2375 }, driftThresholdBps: 500, rebalanceIntervalSeconds: 3600 };
 const code = 'rebalance:v1 USDG=5,AAPL=23.75,NVDA=23.75,MSFT=23.75,AMD=23.75 drift=5 interval=3600';
+const canonicalCode = 'rebalance:v1 USDG=5,AAPL=23.75,AMD=23.75,MSFT=23.75,NVDA=23.75 drift=5 interval=3600';
 
 test('every basis-point value survives the percentage round trip', () => {
   for (let bps = 0; bps <= 10000; bps++) assert.equal(percentToBps(bpsToPercent(bps)), bps);
@@ -15,9 +16,34 @@ test('a share code carries only targets, drift trigger and cycle interval', () =
   const config = { ...demo, version: 1, chainId: 4663, wallet: `0x${'1'.repeat(40)}`, mode: 'private-key',
     rpcUrl: 'https://rpc.example/v2/secret-path-key', slippageBps: 50, deadlineSeconds: 120, pollSeconds: 30 };
   const encoded = encodeShareCode(config);
-  assert.equal(encoded, code);
+  assert.equal(encoded, canonicalCode);
   assert.doesNotMatch(encoded, /0x|private-key|secret|rpc|slippage/i);
   assert.deepEqual(decodeShareCode(encoded), demo);
+});
+
+test('equivalent target maps export one canonical code while old codes still import', () => {
+  const variants = [demo.targets,
+    { NVDA: 2375, AMD: 2375, USDG: 500, MSFT: 2375, AAPL: 2375 },
+    { AAPL: 2375, MSFT: 2375, AMD: 2375, NVDA: 2375, USDG: 500 }];
+  for (const targets of variants) assert.equal(encodeShareCode({ ...demo, targets }), canonicalCode);
+  assert.deepEqual(decodeShareCode(code), decodeShareCode(canonicalCode));
+});
+
+test('canonical decoded strategies preserve omitted settings rather than supplying defaults', () => {
+  const targets = { NVDA: 2375, AMD: 2375, USDG: 500, MSFT: 2375, AAPL: 2375 };
+  const prefix = 'rebalance:v1 USDG=5,AAPL=23.75,AMD=23.75,MSFT=23.75,NVDA=23.75';
+  const cases = [
+    { strategy: { targets }, expected: prefix },
+    { strategy: { targets, driftThresholdBps: 0 }, expected: `${prefix} drift=0` },
+    { strategy: { targets, rebalanceIntervalSeconds: 7200 }, expected: `${prefix} interval=7200` },
+    { strategy: { targets, driftThresholdBps: 500, rebalanceIntervalSeconds: 3600 }, expected: canonicalCode },
+  ];
+  for (const { strategy, expected } of cases) {
+    const encoded = encodeSharedStrategy(strategy);
+    assert.equal(encoded, expected);
+    assert.deepEqual(decodeShareCode(encoded), strategy);
+    assert.equal(encodeSharedStrategy(decodeShareCode(encoded)), encoded);
+  }
 });
 
 test('decoding tolerates pasted whitespace and targets-only codes', () => {

@@ -46,6 +46,21 @@ export function recoveryPromptFormat(value, root = repository) {
   });
 }
 
+/** Only a whole pasted strategy request reaches the read-only preview. */
+export function sharedCodeFromPrompt(value, root = repository) {
+  let code = null;
+  promptFormat(value, root, prompt => {
+    if (!/^rebalance:v1(?:\s|$)/.test(prompt)) return null;
+    code = prompt;
+    return 'pasted-share-code';
+  });
+  return code;
+}
+export function selectShareImportRequest(input, root = repository) {
+  const selected = selectRequest(input, root, value => sharedCodeFromPrompt(value, root), 'share preview');
+  return selected && !selected.blocked ? { ...selected, code: sharedCodeFromPrompt(input.prompt, root) } : selected;
+}
+
 /** Prompt data never becomes a command. Accept the typed command or this project's picker reference. */
 export function selectLaunchRequest(input, root = repository) {
   return selectRequest(input, root, launchPromptFormat, 'launch');
@@ -74,7 +89,7 @@ export async function recordHookObservation(input, root = repository) {
   let temporary;
   try {
     const prompt = typeof input?.prompt === 'string' ? input.prompt.trim() : null;
-    const selected = selectLaunchRequest(input, root) ?? selectRecoveryRequest(input, root);
+    const selected = selectShareImportRequest(input, root) ?? selectLaunchRequest(input, root) ?? selectRecoveryRequest(input, root);
     const hasIdentity = typeof input?.session_id === 'string' && input.session_id &&
       typeof input?.turn_id === 'string' && input.turn_id;
     const observation = {
@@ -83,7 +98,7 @@ export async function recordHookObservation(input, root = repository) {
       requestId: hasIdentity ? createHash('sha256')
         .update(JSON.stringify([input.session_id, input.turn_id])).digest('hex') : null,
       event: input?.hook_event_name === 'UserPromptSubmit' ? 'UserPromptSubmit' : 'other',
-      promptFormat: launchPromptFormat(input?.prompt, root) ??
+      promptFormat: (sharedCodeFromPrompt(input?.prompt, root) ? 'pasted-share-code' : null) ?? launchPromptFormat(input?.prompt, root) ??
         (recoveryPromptFormat(input?.prompt, root) ? `recovery-${recoveryPromptFormat(input.prompt, root)}` : null) ??
         (prompt === null ? 'missing' : prompt.includes('$rebalance') ? 'other-with-command' : 'other'),
       promptLength: typeof input?.prompt === 'string' ? input.prompt.length : null,
@@ -109,6 +124,7 @@ export async function recordHookObservation(input, root = repository) {
 }
 
 export function hookReply(result) {
+  const sharedImport = result?.operation === 'share-import';
   const appEntry = typeof result?.restoration === 'string' || Array.isArray(result?.restorationResults)
     || Array.isArray(result?.portfolios) || result?.outcome === 'select-portfolio';
   const view = result?.view;
@@ -124,6 +140,7 @@ export function hookReply(result) {
       hookEventName: 'UserPromptSubmit',
       additionalContext: 'The deterministic Rebalance command handler already handled this invocation. '
         + presentation
+        + (sharedImport ? 'This was a read-only shared-strategy preview. Present the parsed strategy and computed changes below without recalculating or rewriting its code. If selection is required, invite choosing a portfolio; no comparison has been performed yet. Never apply targets or settings merely because a code was pasted. ' : '')
         + (appEntry ? 'Restoration results are not wallet inventory; an empty results array never establishes an empty registry. Briefly describe readiness in natural language, invite choosing a portfolio when the view is ready, and include actual blockers; ' : 'Report the public result below; ')
         + 'do not repeat launch or start, or repeat recovery or restoration. An outcome is not a trade receipt.\n'
         + JSON.stringify(result),
@@ -291,6 +308,21 @@ async function legacyRequest(root, selected) {
   return await readRoutingJson(resolve(rootDir, 'launch-requests', `${digest}.json`)) !== null ||
     await readRoutingJson(resolve(rootDir, 'recovery-requests', `${digest}.json`)) !== null;
 }
+export async function runSharePreview(root, selected, execute = executeFile) {
+  const env = { ...process.env, REBALANCE_ROOT_DIR: portfolioRoot(process.env, root), REBALANCE_SESSION_ID: selected.sessionId };
+  // A native request belongs to its own conversation, not an inherited worker.
+  for (const key of ['REBALANCE_PROFILE_PINNED', 'REBALANCE_PROFILE_WALLET', 'REBALANCE_CHART_PORT']) delete env[key];
+  const { stdout } = await execute(process.execPath, ['--import', 'tsx', resolve(root, 'src/cli.ts'),
+    'share', 'preview', selected.code, '--session', selected.sessionId], {
+    cwd: root, env, timeout: 20_000, maxBuffer: 16_384,
+  });
+  const result = JSON.parse(stdout);
+  if (result?.app !== 'Rebalance' || result.operation !== 'share-import' || result.applied !== false ||
+      !['preview', 'select-portfolio'].includes(result.outcome) || typeof result.code !== 'string' ||
+      result.code.length > 400 || !result.code.startsWith('rebalance:v1 ')) throw new Error('Invalid share preview result');
+  return result;
+}
+
 async function runRestore(root, requestId, sessionId) {
   const rootDir = portfolioRoot(process.env, root);
   const env = { ...process.env, REBALANCE_ROOT_DIR: rootDir, REBALANCE_DATA_DIR: rootDir, REBALANCE_SESSION_ID: sessionId };
@@ -311,8 +343,9 @@ async function runRestore(root, requestId, sessionId) {
 
 export async function handlePrompt(input, overrides = {}) {
   const rootPath = overrides.repository ?? repository;
-  const recovery = selectRecoveryRequest(input, rootPath);
-  const selected = recovery ?? selectLaunchRequest(input, rootPath);
+  const sharedImport = selectShareImportRequest(input, rootPath);
+  const recovery = sharedImport ? null : selectRecoveryRequest(input, rootPath);
+  const selected = sharedImport ?? recovery ?? selectLaunchRequest(input, rootPath);
   if (!selected) return null;
   if (selected.blocked) return hookReply({ app: 'Rebalance', outcome: 'blocked', messages: [selected.blocked] });
   let phase = 'workspace';
@@ -321,6 +354,15 @@ export async function handlePrompt(input, overrides = {}) {
     const cwd = await realpath(selected.cwd);
     const child = relative(root, cwd);
     if (child === '..' || child.startsWith('../') || child.startsWith('..\\') || isAbsolute(child)) return null;
+    if (sharedImport) {
+      try {
+        const result = await (overrides.runSharePreview ?? runSharePreview)(root, selected);
+        return hookReply(await presentView(result, root, selected, overrides));
+      } catch {
+        return hookReply({ app: 'Rebalance', operation: 'share-import', outcome: 'blocked', applied: false,
+          messages: ['The shared strategy could not be previewed. Check the share code and selected portfolio; no targets or settings changed.'] });
+      }
+    }
     // Historical requests keep their original route. New app requests delegate
     // the eligible-wallet snapshot and deduplication to the restoration journal.
     phase = 'profile';

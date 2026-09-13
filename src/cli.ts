@@ -40,6 +40,23 @@ async function main() {
   const explicit = option(args, '--profile');
   const sessionId = sessionIdentity(option(args, '--session'));
   const root = portfolioRoot();
+  if (args[0] === 'share' && args[1] === 'preview') {
+    if (args.length !== 3) throw new Error('Use share preview <code> with optional --profile and --session; preview never applies changes.');
+    const { previewSharedCode } = await import('./share-preview.js');
+    if (process.env.REBALANCE_PROFILE_PINNED === '1') {
+      const pinnedWallet = walletIdentity(process.env.REBALANCE_PROFILE_WALLET);
+      if (explicit && walletIdentity(explicit) !== pinnedWallet) throw new Error('A pinned wallet worker cannot switch portfolios.');
+      const pinnedDirectory = resolve(process.env.REBALANCE_DATA_DIR || root);
+      print(await previewSharedCode(root, sessionId, args[2]!, pinnedWallet, {
+        resolve: async (directory, options) => {
+          const profile = await resolveProfile(directory, options);
+          if (profile.dataDir !== pinnedDirectory) throw new Error('The pinned portfolio directory changed.');
+          return profile;
+        },
+      }));
+    } else print(await previewSharedCode(root, sessionId, args[2]!, explicit));
+    return;
+  }
   if (args[0] === 'view') {
     if (args.length !== 1) throw new Error('Use view with optional --profile and --session.');
     const { prepareView } = await import('./view.js');

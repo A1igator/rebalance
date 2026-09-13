@@ -162,7 +162,7 @@ test('CLI configures the cycle interval without replacing targets, resetting cad
 test('share export prints only the strategy, and import previews before --apply saves it', async t => {
   const { directory, command } = await fixture(t);
   assert.deepEqual(JSON.parse((await command(['share', 'export'])).stdout),
-    { code: 'rebalance:v1 USDG=20,TSLA=20,AAPL=20,NVDA=20,AMZN=20 drift=5 interval=3600' });
+    { code: 'rebalance:v1 USDG=20,AAPL=20,AMZN=20,NVDA=20,TSLA=20 drift=5 interval=3600' });
   const code = 'rebalance:v1 USDG=5,AAPL=23.75,NVDA=23.75,MSFT=23.75,AMD=23.75 drift=2.5 interval=7200';
   const before = await readFile(join(directory, 'config.json'), 'utf8');
   const preview = JSON.parse((await command(['share', 'import', code])).stdout);

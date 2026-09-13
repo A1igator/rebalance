@@ -136,3 +136,7 @@ Missing native output alone does not prove hook trust state. A subsequent read-o
 The hook result now requires immediate browser presentation before the response, preserving the exact linked URL and any actual blocker. Codex Desktop's verified presentation path remains its native `open_in_codex` tool; there is no verified shell-to-Desktop-pane adapter in this installation. See [companion presentation and limits](COMPANION_VIEW.md#codex-desktop-presentation) and [prompt 086](prompts/086-deterministic-selector-presentation.md).
 
 The user subsequently completed review/trust through `/hooks`. A repeated read-only check using the bundled engine returned **enabled: true, trustStatus: trusted**, with no warnings/errors. No native launch was triggered during this verification; trust is established, while a fresh user-issued invocation remains the end-to-end native dispatch check.
+
+## Pasted strategy preview
+
+The exact whole native user request `rebalance:v1 ...` takes a separate read-only path before any startup routing. Codex's existing UserPromptSubmit script calls `share preview`; Claude adds a dedicated import-only UserPromptSubmit script while retaining its single launch UserPromptExpansion handler. Thus the earlier “no UserPromptSubmit launch” restriction remains intact. OpenCode checks one native user text part plus root Build/message identity before its ordinary command/notification path. No command marker or plain text gains launch authority. See [sharing](SHARING.md) and [prompt 087](prompts/087-deterministic-share.md).

@@ -6,6 +6,7 @@
   const byId = (id) => document.getElementById(id);
   const button = byId("share-code"), label = byId("share-code-label"), message = byId("control-message");
   let code = null, suspended = false, fallback = null, resetTimer = null;
+  let copying = false, feedbackGeneration = 0;
 
   function percent(bps) {
     const whole = Math.floor(bps / 100), fraction = bps % 100;
@@ -14,7 +15,8 @@
   function shareCode(config) {
     const targets = config?.targets;
     if (!targets || typeof targets !== "object" || Array.isArray(targets)) return null;
-    const entries = Object.entries(targets);
+    const entries = Object.entries(targets)
+      .sort(([left], [right]) => left === right ? 0 : left === "USDG" ? -1 : right === "USDG" ? 1 : left < right ? -1 : 1);
     const valid = entries.length === 5 && Object.hasOwn(targets, "USDG") &&
       entries.every(([id, bps]) => /^[A-Z]{1,10}$/.test(id) && Number.isInteger(bps) && bps >= 0 && bps <= 10000) &&
       entries.reduce((sum, [, bps]) => sum + bps, 0) === 10000;
@@ -24,38 +26,50 @@
     return `rebalance:v1 ${entries.map(([id, bps]) => `${id}=${percent(bps)}`).join(",")} drift=${percent(drift)} interval=${interval}`;
   }
   function render() {
-    button.disabled = suspended || !code;
+    button.disabled = suspended || copying || !code;
     button.title = code ? "Copy this portfolio's targets, drift trigger and cycle interval as a share code. It never includes the wallet address or holdings."
       : "Share code unavailable until the saved targets load.";
   }
   function update(snapshot, disconnected = false) {
-    code = !disconnected && snapshot?.chain?.id === 4663 ? shareCode(snapshot.config) : null;
-    render();
+    const next = !disconnected && snapshot?.chain?.id === 4663 ? shareCode(snapshot.config) : null;
+    if (next !== code) invalidateFeedback();
+    code = next; render();
   }
   function hideFallback() {
     if (fallback !== null && message.textContent === fallback) { message.textContent = ""; message.hidden = true; }
     fallback = null;
   }
+  function invalidateFeedback() {
+    feedbackGeneration++;
+    clearTimeout(resetTimer); resetTimer = null;
+    label.textContent = "Share"; hideFallback();
+  }
   button.addEventListener("click", async () => {
     if (button.disabled || !code) return;
-    const copied = code;
-    clearTimeout(resetTimer); label.textContent = "Share"; hideFallback();
+    invalidateFeedback();
+    const copied = code, generation = feedbackGeneration;
+    copying = true; render();
     try {
       if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
       await navigator.clipboard.writeText(copied);
+      if (generation !== feedbackGeneration || suspended) return;
       label.textContent = "Copied";
       resetTimer = setTimeout(() => { label.textContent = "Share"; }, 2000);
     } catch {
+      if (generation !== feedbackGeneration || suspended) return;
       // Embedded panes can deny clipboard writes; leave the code selectable instead.
       fallback = `Copy this share code: ${copied}`;
       message.textContent = fallback; message.hidden = false;
+    } finally {
+      // Even an obsolete result releases the single in-flight clipboard request.
+      copying = false; render();
     }
   });
 
   window.rebalanceShare = { update };
   window.addEventListener("pagehide", () => {
     suspended = true; code = null;
-    clearTimeout(resetTimer); label.textContent = "Share"; render();
+    invalidateFeedback(); render();
   });
   window.addEventListener("pageshow", () => { suspended = false; render(); });
   render();

@@ -206,7 +206,7 @@ test('dependency failures return fixed blocked context without entering the laun
 test('prepared Claude definition uses one native expansion event and changes no trust or approval policy', async () => {
   const settings = JSON.parse(await readFile(new URL('../.claude/settings.json', import.meta.url), 'utf8'));
   assert.deepEqual(Object.keys(settings), ['hooks']);
-  assert.deepEqual(Object.keys(settings.hooks), ['UserPromptExpansion']);
+  assert.deepEqual(Object.keys(settings.hooks), ['UserPromptExpansion', 'UserPromptSubmit']);
   assert.equal(settings.hooks.UserPromptExpansion.length, 1);
   const entry = settings.hooks.UserPromptExpansion[0];
   assert.equal(entry.matcher, '^rebalance$');

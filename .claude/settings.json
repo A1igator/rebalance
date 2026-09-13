@@ -14,6 +14,20 @@
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/scripts/rebalance-claude-share-hook.mjs"
+            ],
+            "timeout": 30
+          }
+        ]
+      }
     ]
   }
 }

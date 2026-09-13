@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { connectionPath, portfolioRoot, readProfiles, resolveProfile } from '../scripts/profile-routing.mjs';
 import { acquireLock, atomicWriteJson, readJson } from './storage.js';
 import { createOpenCodeNotifications } from './opencode-notifications.js';
+import { selectOpenCodeShareImportRequest } from '../scripts/rebalance-opencode-share-hook.mjs';
 
 const repository = fileURLToPath(new URL('..', import.meta.url));
 const sessionPattern = /^ses_[A-Za-z0-9]{1,128}$/;
@@ -34,6 +35,7 @@ type Hooks = {
 type Overrides = {
   repository?: string; rootDir?: string;
   launch?: (input: Record<string, unknown>, env: NodeJS.ProcessEnv) => Promise<unknown>;
+  sharePreview?: (input: Record<string, unknown>, env: NodeJS.ProcessEnv) => Promise<unknown>;
   notify?: typeof createOpenCodeNotifications;
   watchConnection?: (rootDir: string, changed: () => void) => () => void;
   now?: () => number;
@@ -54,6 +56,19 @@ function launchInNode(root: string, input: Record<string, unknown>, env: NodeJS.
     }, (error, stdout) => {
       if (error) { fail(new Error('The native launch result is unavailable; do not retry automatically.')); return; }
       try { done(JSON.parse(stdout)); } catch { fail(new Error('The native launch result could not be read.')); }
+    });
+    child.stdin?.on('error', () => {});
+    child.stdin?.end(JSON.stringify(input));
+  });
+}
+
+function previewShareInNode(root: string, input: Record<string, unknown>, env: NodeJS.ProcessEnv): Promise<unknown> {
+  return new Promise((done, fail) => {
+    const child = execFile('node', [resolve(root, 'scripts/rebalance-opencode-share-hook.mjs')], {
+      cwd: root, env, timeout: 30_000, maxBuffer: 1_048_576, killSignal: 'SIGTERM', encoding: 'utf8',
+    }, (error, stdout) => {
+      if (error) { fail(new Error('The strategy preview is unavailable.')); return; }
+      try { done(JSON.parse(stdout)); } catch { fail(new Error('The strategy preview could not be read.')); }
     });
     child.stdin?.on('error', () => {});
     child.stdin?.end(JSON.stringify(input));
@@ -239,6 +254,24 @@ export async function createRebalanceOpenCodePlugin(context: Context, overrides:
       if (!marked.length) {
         if (output.message.role === 'user' && output.message.sessionID === input.sessionID && messagePattern.test(output.message.id) &&
             (input.messageID === undefined || input.messageID === output.message.id)) {
+          const part = output.parts.length === 1 && output.parts[0]?.type === 'text' ? output.parts[0] : undefined;
+          const native = { hook_event_name: 'OpenCodeShareImport', prompt: part?.text, cwd: directory,
+            session_id: input.sessionID, message_id: output.message.id, agent: output.message.agent,
+            parent_session_id: null, direct_user_message: true };
+          const selected = selectOpenCodeShareImportRequest(native, root);
+          if (selected) {
+            try {
+              if (selected.blocked || !await verifiedSession(input.sessionID)) throw new Error('Unverified strategy preview session');
+              const result = await (overrides.sharePreview ?? ((value, env) => previewShareInNode(root, value, env)))(native, environment(input.sessionID));
+              const reply = result as { hookSpecificOutput?: { additionalContext?: unknown } } | null;
+              if (typeof reply?.hookSpecificOutput?.additionalContext !== 'string') throw new Error('Invalid preview response');
+              report(output, part!, reply.hookSpecificOutput.additionalContext);
+            } catch {
+              report(output, part!, 'Rebalance could not prepare the strategy preview in this root Build conversation. Nothing was applied; use the skill’s read-only share preview if needed.');
+            }
+            // A pasted strategy never starts or binds a runner/notification session.
+            return;
+          }
           await restoreSession(input.sessionID).catch(() => {});
         }
         return;

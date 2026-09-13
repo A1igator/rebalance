@@ -45,6 +45,8 @@ async function fixture(t: TestContext, options: { wallets?: string[]; nested?: b
   await atomicWriteJson(join(rootDir, 'portfolios.json'), { version: 1, profiles });
   for (const profile of profiles) await mkdir(join(rootDir, profile.directory), { recursive: true });
   const launches: { input: Record<string, unknown>; env: NodeJS.ProcessEnv }[] = [];
+  const previews: { input: Record<string, unknown>; env: NodeJS.ProcessEnv }[] = [];
+  let preview: (input: Record<string, unknown>, env: NodeJS.ProcessEnv) => Promise<unknown> = async () => assert.fail('unexpected preview');
   const notificationCalls: OpenCodeNotificationOptions[] = [];
   const notifications: { options: OpenCodeNotificationOptions; closes: number }[] = [];
   const connectionWatchers: { changed: () => void; closed: boolean }[] = [];
@@ -80,6 +82,7 @@ async function fixture(t: TestContext, options: { wallets?: string[]; nested?: b
     const plugin = await createRebalanceOpenCodePlugin({ directory, client }, {
       repository: root, rootDir, now: () => clock.time,
       launch: async (input, env) => { launches.push({ input, env }); return launch(input, env); },
+      sharePreview: async (input, env) => { previews.push({ input, env }); return preview(input, env); },
       notify: async options => { notificationCalls.push(options); return notify(options); },
       watchConnection: (observedRoot, changed) => {
         assert.equal(observedRoot, rootDir);
@@ -111,6 +114,7 @@ async function fixture(t: TestContext, options: { wallets?: string[]; nested?: b
     join(rootDir, 'opencode-sessions', `${digest(namespace(sessionId))}.json`));
   return { root, rootDir, directory, plugin, create, command, chat, invoke, launches, notificationCalls,
     notifications, connectionWatchers, connect, changed, binding, native, clock, persistRoute,
+    previews, setPreview(value: typeof preview) { preview = value; },
     setLaunch(value: typeof launch) { launch = value; }, setNotify(value: typeof notify) { notify = value; } };
 }
 
@@ -482,4 +486,61 @@ test('remembered app entry binds only restored wallets without choosing one for 
  assert.deepEqual((await f.binding())?.wallets,[walletA]);
  assert.deepEqual(f.notificationCalls.map(call=>call.wallet),[walletA]);
  assert.equal(await readJson(connectionPath(f.rootDir,namespace(sessionId))),null);
+});
+
+
+const pastedShare = 'rebalance:v1 USDG=5,AAPL=95 drift=5 interval=3600';
+const previewReply = { hookSpecificOutput: { additionalContext: 'Strategy preview; nothing applied.\n' + JSON.stringify({
+  app: 'Rebalance', operation: 'share-import', outcome: 'preview', code: pastedShare, applied: false,
+}) } };
+
+test('exact pasted strategy previews before model processing without launching or binding notifications', async t => {
+  const f = await fixture(t, { wallets: [walletA, walletB] });
+  await f.connect(walletB);
+  f.setPreview(async (input, env) => {
+    assert.equal(input.hook_event_name, 'OpenCodeShareImport');
+    assert.equal(input.prompt, pastedShare); assert.equal(input.direct_user_message, true);
+    assert.equal(env.REBALANCE_SESSION_ID, namespace(sessionId));
+    assert.equal((await resolveProfile(env.REBALANCE_ROOT_DIR!, { sessionId: env.REBALANCE_SESSION_ID })).wallet, walletB);
+    return previewReply;
+  });
+  const result = await f.chat([{ type: 'text', text: pastedShare }]);
+  assert.equal(result.parts[0]!.text, previewReply.hookSpecificOutput.additionalContext);
+  assert.equal(f.previews.length, 1); assert.equal(f.previews[0]!.input.message_id, result.message.id);
+  assert.equal(f.launches.length, 0); assert.equal(await f.binding(), null);
+  assert.deepEqual(f.notificationCalls, []); assert.deepEqual(f.connectionWatchers, []);
+  assert.deepEqual((await readdir(f.rootDir)).sort(), ['connections', 'portfolios.json', 'wallets']);
+});
+
+test('pasted-code preview requires one user text part and a verified root Build conversation', async t => {
+  const f = await fixture(t);
+  for (const text of [`"${pastedShare}"`, `Please import ${pastedShare}`, `$rebalance share`, 'ordinary text']) {
+    const result = await f.chat([{ type: 'text', text }]); assert.equal(result.parts[0]!.text, text);
+  }
+  for (const change of [{ role: 'assistant' }, { sessionID: otherSession }, { id: 'bad-id' }]) {
+    await f.chat([{ type: 'text', text: pastedShare }], change);
+  }
+  await f.chat([{ type: 'text', text: pastedShare }, { type: 'file', url: 'file:///fixture' }]);
+  await f.chat([{ type: 'text', text: pastedShare }], {}, f.plugin, { sessionID: sessionId, messageID: 'msg_other' });
+  for (const change of [{ agent: 'plan' }, { agent: 'custom' }]) {
+    assert.match((await f.chat([{ type: 'text', text: pastedShare }], change)).parts[0]!.text!, /Nothing was applied/);
+  }
+  f.native.info.parentID = otherSession;
+  assert.match((await f.chat([{ type: 'text', text: pastedShare }])).parts[0]!.text!, /Nothing was applied/);
+  assert.equal(f.previews.length, 0); assert.equal(f.launches.length, 0); assert.equal(await f.binding(), null);
+});
+
+test('preview selection and transport failure preserve no-apply semantics without notifications', async t => {
+  const f = await fixture(t);
+  const selector = { hookSpecificOutput: { additionalContext: 'Choose a portfolio to compare this strategy; nothing applied.' } };
+  f.setPreview(async () => selector);
+  assert.equal((await f.chat([{ type: 'text', text: pastedShare }])).parts[0]!.text, selector.hookSpecificOutput.additionalContext);
+  for (const failure of [async () => null, async () => { throw new Error('fixture-secret-preview'); }]) {
+    f.setPreview(failure);
+    const result = await f.chat([{ type: 'text', text: pastedShare }]);
+    assert.match(result.parts[0]!.text!, /Nothing was applied/);
+    assert.doesNotMatch(result.parts[0]!.text!, /fixture-secret|launch|trade/);
+  }
+  assert.equal(f.launches.length, 0); assert.equal(await f.binding(), null);
+  assert.deepEqual(f.notificationCalls, []); assert.deepEqual(f.connectionWatchers, []);
 });

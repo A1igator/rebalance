@@ -17,8 +17,19 @@ export function bpsToPercent(bps: number): string {
 }
 
 export function encodeShareCode(strategy: Strategy): string {
-  const targets = Object.entries(strategy.targets).map(([id, bps]) => `${id}=${bpsToPercent(bps)}`).join(',');
-  return `${SHARE_PREFIX} ${targets} drift=${bpsToPercent(strategy.driftThresholdBps)} interval=${strategy.rebalanceIntervalSeconds}`;
+  return encodeSharedStrategy(strategy);
+}
+
+/** Canonicalize a decoded code without inventing its optional settings. */
+export function encodeSharedStrategy(strategy: SharedStrategy): string {
+  // A stable code represents the strategy, regardless of config insertion order.
+  const targets = Object.entries(strategy.targets)
+    .sort(([left], [right]) => left === right ? 0 : left === 'USDG' ? -1 : right === 'USDG' ? 1 : left < right ? -1 : 1)
+    .map(([id, bps]) => `${id}=${bpsToPercent(bps)}`).join(',');
+  const fields = [SHARE_PREFIX, targets];
+  if (strategy.driftThresholdBps !== undefined) fields.push(`drift=${bpsToPercent(strategy.driftThresholdBps)}`);
+  if (strategy.rebalanceIntervalSeconds !== undefined) fields.push(`interval=${strategy.rebalanceIntervalSeconds}`);
+  return fields.join(' ');
 }
 
 export function decodeShareCode(input: string): SharedStrategy {

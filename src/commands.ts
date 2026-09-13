@@ -49,6 +49,7 @@ const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
   targets set AAPL 30                   Change one percentage; redistribute the rest
   targets replace <ASSET=percent,...>   Replace all five targets explicitly
   share export                         Print a share code: targets, drift trigger and cycle interval
+  share preview '<code>'               Parse a pasted code and compare with this chat's selected portfolio
   share import '<code>'                Preview a share code against this wallet; changes nothing
     [--apply [--settings]]             Save its targets; --settings also saves drift trigger/interval
   allocation preview <policy.json>      Calculate targets from explicit inputs; no changes

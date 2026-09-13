@@ -86,7 +86,7 @@ Call the subjective objective a user-risk score; standard Sharpe is a separate e
 | Read this wallet's risk policy and calculation | `npm run cli -- allocation status` |
 | Keep targets and return to manual allocation | `npm run cli -- allocation manual` |
 | Give the user this portfolio's share code | `npm run cli -- share export` |
-| Preview a share code the user pasted | `npm run cli -- share import '<code>'` |
+| Preview a share code the user pasted | `npm run cli -- share preview '<code>'` |
 | Adopt a previewed share code's targets | `npm run cli -- share import '<code>' --apply` |
 | Also adopt its drift trigger and cycle interval, when asked | `npm run cli -- share import '<code>' --apply --settings` |
 | Inspect current holdings and preview the deterministic plan | `npm run cli -- check` |
@@ -114,7 +114,11 @@ The numbers above are syntax examples, not recommendations or authorized allocat
 
 Changing the selected symbols replaces the tracked allocation; it does not liquidate removed tokens. Inspect holdings first and account for any held asset before removing it. Recheck the new selection through `check`; catalog listing alone does not prove route availability.
 
-A share code such as `rebalance:v1 USDG=5,AAPL=23.75,NVDA=23.75,MSFT=23.75,AMD=23.75 drift=5 interval=3600` carries only targets, the drift trigger and the cycle interval. It never carries a wallet address, signer, RPC, slippage or holdings. The chart's Share button copies the same text. When a user pastes one to import:
+Exact pasted `rebalance:v1 ...` text is handled as **data**, through a read-only native import preview before the model responds. Codex uses its existing UserPromptSubmit handler; Claude has a separate import-only UserPromptSubmit handler, and OpenCode handles one complete native user text part in its verified root Build session. These handlers never apply targets, start/restore a runner, or sign. Quoted/fenced examples and surrounding prose do not trigger the native parser. See [strategy sharing](../../docs/SHARING.md).
+
+If `operation: share-import` is already present from the native handler, use its parsed strategy and computed comparison without recalculating or rerunning it. For natural-language requests or absent native output, run `npm run cli -- share preview '<exact code>'` with the current native session (use a tool argument array or safe shell quoting). This command validates before reading wallet state. When no portfolio is selected, it returns the decoded strategy and linked selector; open that view, invite selection, and do not claim a comparison has occurred. Present actual target/setting differences concisely and use the returned canonical `code` verbatim. Pasting only requests preview, not application. After an explicit request to apply, the existing import command below performs the deterministic write; do not turn sharing into a notification or send the code to another person.
+
+A share code such as `rebalance:v1 USDG=5,AAPL=23.75,NVDA=23.75,MSFT=23.75,AMD=23.75 drift=5 interval=3600` carries only targets, the drift trigger and the cycle interval. It never carries a wallet address, signer, RPC, slippage or holdings. The chart's Share button copies the same canonical text: USDG first, then remaining symbols in alphabetical order. Clipboard handling stays local and obsolete copy feedback is discarded when the displayed strategy changes. When a user pastes one to import:
 
 1. Preview it and report the target and setting changes.
 2. If `untrackedAssets` is not empty, check holdings as for any symbol change before applying. Importing does not sell those assets.
