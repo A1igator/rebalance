@@ -35,10 +35,10 @@ async function fixture(t: TestContext, count: number) {
       return nextResolve(specifier, context);
     }, load(url, context, nextLoad) {
       if (url === view) return { format: 'module', shortCircuit: true, source:
-        "export async function restoreApp(root, session, options) { return { app: 'Rebalance', boundary: 'restore', outcome: 'ready', status: null, portfolios: [], messages: ['Choose a portfolio to open.'], view: { state: 'ready', url: 'http://127.0.0.1:4663/#view=' + 'a'.repeat(64), connected: Boolean(session) }, fixture: { root, session, options } }; }" };
+        "export async function restoreApp(root, session, options) { return { app: 'Rebalance', boundary: 'restore', outcome: 'ready', status: null, restorationResults: [], restoration: 'not-requested', messages: ['Choose a portfolio to open.'], view: { state: 'ready', url: 'http://127.0.0.1:4663/#view=' + 'a'.repeat(64), connected: Boolean(session) }, fixture: { root, session, options } }; }" };
       if (url === commands) return { format: 'module', shortCircuit: true, source:
         "process.stdout.write(JSON.stringify({ boundary: 'commands', args: process.argv.slice(2), wallet: process.env.REBALANCE_PROFILE_WALLET, dataDir: process.env.REBALANCE_DATA_DIR }));" };
-      if (url.includes('/src/') && url !== cli) throw new Error('Unexpected application import in isolated CLI routing fixture');
+      if (url.includes('/src/') && url !== cli && !url.endsWith('/src/view-error.ts')) throw new Error('Unexpected application import in isolated CLI routing fixture');
       return nextLoad(url, context);
     } });
   `);
@@ -113,4 +113,43 @@ test('restoration leaves chat attachment validation to the view while explicit a
     await assert.rejects(f.command(args));
   }
   await assert.rejects(f.command(['launch', '--restore'], { REBALANCE_PROFILE_PINNED: '1' }));
+});
+
+
+test('real view probes preserve EPERM and EACCES through app entry and the direct CLI sanitizer', async t => {
+ for (const code of ['EPERM', 'EACCES']) await t.test(code, async t => {
+  const f = await fixture(t, 2);
+  const preload = join(f.root, 'denied-network-fixture.mjs');
+  await writeFile(preload, `
+   import http from 'node:http';
+   import child from 'node:child_process';
+   import {EventEmitter} from 'node:events';
+   import {syncBuiltinESMExports} from 'node:module';
+   import {writeFileSync} from 'node:fs';
+   http.get = () => {
+    const request = new EventEmitter();
+    request.setTimeout = () => request;
+    request.destroy = () => request.emit('close');
+    process.nextTick(() => request.emit('error', Object.assign(new Error('fixture-private-network-payload'), {code:${JSON.stringify(code)}})));
+    return request;
+   };
+   child.execFile = () => {
+    writeFileSync(${JSON.stringify(join(f.root, 'unexpected-chart-spawn'))}, 'spawn attempted');
+    throw new Error('fixture unexpected child process');
+   };
+   syncBuiltinESMExports();
+  `);
+  const extra = {NODE_OPTIONS:`--import=${preload}`};
+  await assert.rejects(f.command(['view','--session',session],extra), error => {
+   const result = JSON.parse((error as {stderr:string}).stderr);
+   assert.deepEqual(result,{error:'This process cannot access the local chart listener.',code:'local-access-denied'});
+   return true;
+  });
+  const result = JSON.parse((await f.command(['launch','--setup-only','--session',session],extra)).stdout);
+  assert.equal(result.outcome,'partial'); assert.equal(result.restoration,'not-requested');
+  assert.deepEqual(result.restorationResults,[]); assert.equal('portfolios' in result,false);
+  assert.deepEqual(result.view,{state:'unavailable',code:'local-access-denied',message:'This process cannot access the local chart listener.'});
+  assert.deepEqual((await readdir(f.root)).sort(),['boundary-fixture.mjs','denied-network-fixture.mjs','portfolios.json']);
+  assert.equal((await readJson<{profiles:unknown[]}>(join(f.root,'portfolios.json')))!.profiles.length,2);
+ });
 });

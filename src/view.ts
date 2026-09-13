@@ -7,10 +7,12 @@ import { promisify } from 'node:util';
 import { readProfiles, resolveProfile, validateProfileDirectory, type RoutedProfile } from '../scripts/profile-routing.mjs';
 import { acquireLock, readJson } from './storage.js';
 import { issueView } from './view-session.js';
+import { ViewError } from './view-error.js';
 
 const repository = fileURLToPath(new URL('..', import.meta.url));
 const execute = promisify(execFile);
-type Probe = 'ready' | 'absent' | 'unavailable';
+type Probe = 'ready' | 'absent' | 'unavailable' | 'local-access-denied' | 'listener-incompatible';
+const accessDenied = (error: unknown) => ['EPERM', 'EACCES'].includes((error as NodeJS.ErrnoException | null)?.code ?? '');
 export type ViewDependencies = {
   probe: (profile: RoutedProfile) => Promise<Probe>;
   spawnChart: (profile: RoutedProfile) => Promise<void>;
@@ -24,18 +26,19 @@ const defaults: ViewDependencies = {
     const request = get(`http://127.0.0.1:${profile.chartPort}/api/view/identity`, response => {
       let body = '';
       response.setEncoding('utf8');
-      response.on('data', chunk => { body += chunk; if (body.length > 4096) request.destroy(); });
-      response.on('error', () => finish('unavailable'));
+      response.on('data', chunk => { body += chunk; if (body.length > 4096) { finish('listener-incompatible'); request.destroy(); } });
+      response.on('error', error => finish(accessDenied(error) ? 'local-access-denied' : 'unavailable'));
       response.on('end', () => {
         try {
           const value = JSON.parse(body);
           finish(response.statusCode === 200 && value.app === 'Rebalance' && value.viewVersion === 1 &&
-            value.scope === createHash('sha256').update(resolve(profile.dataDir)).digest('hex') ? 'ready' : 'unavailable');
-        } catch { finish('unavailable'); }
+            value.scope === createHash('sha256').update(resolve(profile.dataDir)).digest('hex') ? 'ready' : 'listener-incompatible');
+        } catch { finish('listener-incompatible'); }
       });
     });
     request.setTimeout(1000, () => request.destroy());
-    request.on('error', error => finish((error as NodeJS.ErrnoException).code === 'ECONNREFUSED' ? 'absent' : 'unavailable'));
+    request.on('error', error => finish(accessDenied(error) ? 'local-access-denied' :
+      (error as NodeJS.ErrnoException).code === 'ECONNREFUSED' ? 'absent' : 'unavailable'));
     request.on('close', () => finish('unavailable'));
   }),
   spawnChart: async profile => {
@@ -61,18 +64,21 @@ export async function ensurePortfolioChart(profile: RoutedProfile, overrides: Pa
     let spawned = false;
     for (let attempt = 0; attempt < 40; attempt++) {
       const lock = await readJson<{pid: number}>(resolve(profile.dataDir, 'chart.lock'));
-      if (lock !== null && (!Number.isSafeInteger(lock.pid) || lock.pid <= 0 || lock.pid > 2_147_483_647)) throw new Error('Chart ownership is unavailable.');
+      if (lock !== null && (!Number.isSafeInteger(lock.pid) || lock.pid <= 0 || lock.pid > 2_147_483_647)) throw new ViewError('ownership-unverified');
       const owned = lock !== null && deps.alive(lock.pid);
       const state = await deps.probe(profile);
       if (state === 'ready') {
-        if (!owned) throw new Error('The chart listener is not owned by this portfolio.');
+        if (!owned) throw new ViewError('ownership-unverified');
         return { state: 'ready' as const, url: `http://127.0.0.1:${profile.chartPort}/chart` };
       }
-      if (state === 'unavailable') throw new Error('The chart listener is unavailable or needs a view update.');
-      if (!owned && !spawned) { spawned = true; await deps.spawnChart(profile); }
+      if (state !== 'absent') throw new ViewError(state);
+      if (!owned && !spawned) {
+        spawned = true;
+        try { await deps.spawnChart(profile); } catch { throw new ViewError('startup-unverified'); }
+      }
       await deps.pause();
     }
-    throw new Error('Chart startup is not yet verified; no duplicate was started.');
+    throw new ViewError('startup-unverified');
   } finally { await release(); }
 }
 
@@ -92,7 +98,9 @@ export async function prepareView(rootDir: string, sessionId: string | undefined
       await validateProfileDirectory(rootDir, candidate.directory);
       const lock = await readJson<{ pid: number }>(resolve(candidate.dataDir, 'chart.lock'));
       if (lock === null || !Number.isSafeInteger(lock.pid) || lock.pid <= 0 || lock.pid > 2_147_483_647 || !deps.alive(lock.pid)) continue;
-      if (await deps.probe(candidate) === 'ready') { profile = candidate; break; }
+      const state = await deps.probe(candidate);
+      if (state === 'local-access-denied') throw new ViewError(state);
+      if (state === 'ready') { profile = candidate; break; }
     }
   }
   await ensurePortfolioChart(profile, overrides);

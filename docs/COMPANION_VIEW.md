@@ -8,6 +8,22 @@ A bare skill invocation opens the conversation-linked selector and restores save
 
 The selector can reuse any ready owned chart from the same portfolio registry, while preserving the conversation's view capability. The hosting chart's wallet is not selected by opening its grid. An obsolete or foreign default-port listener is never replaced or adopted; if no existing owned chart is ready, normal read-only root-chart preparation applies. No arbitrary localhost origin or visible browser URL supplies the conversation identity.
 
+## Codex Desktop presentation
+
+The linked selector is prepared deterministically by `view`/app entry. Codex Desktop currently opens that URL through its native `open_in_codex` tool with `placement: right`; this is a separate host UI operation. The native result explicitly makes that the next action before replying. Keep the complete fragment and the current conversation; never derive identity from ambient browser state. A successful command that returns a URL is not evidence that the pane opened. An already-opened native presentation should be reused, not duplicated.
+
+The installed CLI's `codex app` accepts a workspace path, not a browser URL/pane request. The public app-server protocol did not provide a native browser-opening method in the September 12 check. Its generic `mcpServer/tool/call` only applies to tools on an actual connected MCP server; it does not itself expose Desktop's browser bridge to shell hooks. Do not invent a deep link, scrape an app credential, or create a relay to claim automatic Desktop pane support. Claude/OpenCode's verified cmux shell adapter below is a different supported host path.
+
+A missing hook result says nothing by itself about trust. In the September 12 follow-up, read-only bundled `hooks/list` did establish `enabled: true` and `trustStatus: untrusted` for the current project path. The user can review the exact project handler with Codex CLI's `/hooks`; development must not silently trust or execute it. Earlier path-specific trust evidence in the launch history remains historical.
+
+Sources: [Codex hooks and review](https://learn.chatgpt.com/docs/hooks), [public app-server protocol](https://learn.chatgpt.com/docs/app-server), installed CLI help and read-only bundled hook discovery. See [prompt 086](prompts/086-deterministic-selector-presentation.md).
+
+## View access failures
+
+`local-access-denied` means this command process could not access the local listener (EPERM/EACCES). Retry only read-only `view` preparation through the host's approved permission mechanism; never reinterpret denial as a stopped server or rerun financial startup. `listener-incompatible`, `ownership-unverified`, `startup-unverified` and `unavailable` remain distinct, sanitized errors. The app preserves these codes and does not issue a view capability until identity and ownership are verified.
+
+App-entry `restorationResults` reports startup attempts, not wallet inventory. Setup-only and replay can have no new restoration results while several wallets exist. The selector or `wallet list` supplies actual inventory. A failed view preparation is not a ready selector.
+
 ## Claude Code in cmux
 
 The Claude slash-command wrapper supplies `openCompanionView` to the shared hook. After the shared handler has a view URL, the helper opens a cmux browser split beside the invoking terminal. It passes the inherited `CMUX_WORKSPACE_ID` and `CMUX_SURFACE_ID` explicitly and uses `--focus false`, so another focused workspace cannot redirect the opening and keyboard focus stays with the conversation.

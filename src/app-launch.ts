@@ -8,6 +8,7 @@ import { readAppEntryInputs } from '../scripts/app-entry-inputs.mjs';
 import { acquireLock, atomicWriteJson } from './storage.js';
 import { captureRunnerPreference, runnerPreferenceMatches, withRunnerControl } from './runner-preference.js';
 import { prepareView } from './view.js';
+import { publicViewFailure } from './view-error.js';
 
 type Entry = { profile: RoutedProfile; generation: string | null; expectedStop: string | null; problem?: string };
 type Journal = { version: 1; requestId: string; sessionId: string | null; entries: Entry[] };
@@ -64,10 +65,13 @@ export async function restoreApp(rootDir: string, sessionId: string | undefined,
   const deps = { ...defaults, ...overrides };
   const view = async () => {
     try { return await deps.view(root, session); }
-    catch { return { state: 'unavailable' as const, message: 'The portfolio selector could not be opened.' }; }
+    catch (error) { return publicViewFailure(error); }
   };
-  if (options.setupOnly) return { app: 'Rebalance', outcome: 'select-portfolio', status: null,
-    portfolios: [], restoration: 'not-requested', messages: [], view: await view() };
+  if (options.setupOnly) {
+    const viewResult = await view();
+    return { app: 'Rebalance', outcome: viewResult.state === 'ready' ? 'select-portfolio' : 'partial', status: null,
+      restorationResults: [], restoration: 'not-requested', messages: [], view: viewResult };
+  }
   const requestId = options.requestId ?? `app:${randomUUID()}`;
   if (!requestId || requestId.length > 2048 || /[\0\r\n]/.test(requestId)) throw new Error('Invalid app entry request.');
   const path = resolve(root, 'app-launch-requests', `${digest(requestId)}.json`);
@@ -107,10 +111,10 @@ export async function restoreApp(rootDir: string, sessionId: string | undefined,
       await atomicWriteJson(path, journal);
     }
   } finally { await release(); }
-  if (replay) return { app: 'Rebalance', outcome: 'already-handled', status: null, portfolios: [],
+  if (replay) return { app: 'Rebalance', outcome: 'already-handled', status: null, restorationResults: [],
     restoration: 'not-repeated', messages: [], view: await view() };
   const viewResult = await view();
-  const portfolios = await Promise.all(journal.entries.map(async entry => {
+  const restorationResults = await Promise.all(journal.entries.map(async entry => {
     const { profile } = entry;
     const result = (outcome: string, message?: string) => ({ wallet: profile.wallet, result: {
       app: 'Rebalance', outcome, status: null, messages: message ? [message] : [],
@@ -131,9 +135,9 @@ export async function restoreApp(rootDir: string, sessionId: string | undefined,
       return { wallet: profile.wallet, result: restored };
     } catch { return result('unknown', 'Portfolio startup could not be verified. Do not repeat this request.'); }
   }));
-  const pending = portfolios.some(p => ['starting', 'busy', 'unknown'].includes(p.result.outcome));
-  const blocked = portfolios.some(p =>
+  const pending = restorationResults.some(p => ['starting', 'busy', 'unknown'].includes(p.result.outcome));
+  const blocked = restorationResults.some(p =>
     (p.result.outcome !== 'not-requested' && p.result.status?.armed !== true) || p.result.status?.error);
   return { app: 'Rebalance', outcome: pending ? 'starting' : blocked || viewResult.state !== 'ready' ? 'partial' : 'ready',
-    status: null, portfolios, restoration: 'checked', messages: [], view: viewResult };
+    status: null, restorationResults, restoration: 'checked', messages: [], view: viewResult };
 }

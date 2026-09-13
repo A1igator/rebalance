@@ -10,7 +10,7 @@ import { captureAppEntryInputs, readAppEntryInputs } from '../scripts/app-entry-
 import { restoreApp } from '../src/app-launch.js';
 import { atomicWriteJson } from '../src/storage.js';
 
-const { handlePrompt, selectLaunchRequest } = await import(new URL('../scripts/rebalance-hook.mjs', import.meta.url).href);
+const { handlePrompt, selectLaunchRequest, hookReply } = await import(new URL('../scripts/rebalance-hook.mjs', import.meta.url).href);
 const sessionId = 'hook-selection-fixture';
 const walletA = `0x${'a'.repeat(40)}`, walletB = `0x${'b'.repeat(40)}`;
 const publicResult = (value: { hookSpecificOutput: { additionalContext: string } }) => {
@@ -127,7 +127,7 @@ test('new native entries restore saved running intent independently of wallet co
       runRestore: async (root: string, id: string, session: string) => {
         assert.equal(root, f.repository); assert.equal(session, sessionId);
         assert.equal(id, selectLaunchRequest(f.input, f.repository).requestId);
-        calls.push('restore'); return { app: 'Rebalance', outcome: 'ready', status: null, portfolios: [], view,
+        calls.push('restore'); return { app: 'Rebalance', outcome: 'ready', status: null, restorationResults: [], view,
           messages: ['Choose a portfolio to open.'] };
       },
       openView: async (request: { url: string; sessionId: string }) => {
@@ -154,7 +154,7 @@ test('new and replayed app requests keep the native identity and delegate durabl
     runLaunch: () => assert.fail('app restore is distinct from legacy per-wallet launch'),
     runRestore: async (_root: string, id: string, session: string) => {
       assert.equal(id, selected.requestId); assert.equal(session, sessionId);
-      return { app: 'Rebalance', outcome: 'already-handled', status: null, portfolios: [], messages: [] };
+      return { app: 'Rebalance', outcome: 'already-handled', status: null, restorationResults: [], messages: [] };
     },
   };
   assert.equal(publicResult(await handlePrompt(f.input, options)).outcome, 'already-handled');
@@ -172,7 +172,7 @@ test('restoration dispatch failure is uncertain and never leaks or falls back; p
   }));
   assert.equal(failed.outcome, 'starting'); assert.equal(failed.phase, 'restore'); assert.equal(failed.status, null);
   assert.doesNotMatch(JSON.stringify(failed), /fixture-secret|armed.*false/);
-  const result = { app: 'Rebalance', outcome: 'partial', status: null, portfolios: [], messages: ['One portfolio needs attention.'],
+  const result = { app: 'Rebalance', outcome: 'partial', status: null, restorationResults: [], messages: ['One portfolio needs attention.'],
     view: { state: 'ready', url: `http://127.0.0.1:4663/#view=${'a'.repeat(64)}` } };
   const presented = publicResult(await handlePrompt(f.input, { ...forbidden, runRestore: async () => result,
     openView: async () => { throw new Error('fixture-secret-host-error'); },
@@ -232,8 +232,8 @@ test('native bootstrap freezes eligible inputs before newly enabled, newly regis
   };
   const result = publicResult(await handlePrompt(f.input, options));
   assert.equal(result.outcome, 'ready'); assert.deepEqual(launched, [walletA]);
-  assert.deepEqual(result.portfolios.map((entry: {wallet: string}) => entry.wallet), [walletA, walletB, walletC]);
-  assert.deepEqual(result.portfolios.map((entry: {result: {outcome: string}}) => entry.result.outcome), ['armed', 'not-requested', 'not-requested']);
+  assert.deepEqual(result.restorationResults.map((entry: {wallet: string}) => entry.wallet), [walletA, walletB, walletC]);
+  assert.deepEqual(result.restorationResults.map((entry: {result: {outcome: string}}) => entry.result.outcome), ['armed', 'not-requested', 'not-requested']);
   assert.deepEqual(calls, ['snapshot', 'dependencies', 'restore']);
   assert.equal(publicResult(await handlePrompt(f.input, options)).outcome, 'already-handled');
   assert.deepEqual(launched, [walletA]); assert.equal(await readFile(snapshotPath, 'utf8'), frozen);
@@ -249,4 +249,25 @@ test('input snapshot failure blocks before dependency work, view preparation, or
   }));
   assert.equal(result.outcome, 'blocked'); assert.equal(result.phase, 'snapshot'); assert.equal(result.status, null);
   assert.match(result.messages[0], /no restoration was attempted/); assert.doesNotMatch(JSON.stringify(result), /fixture-secret/);
+});
+
+
+test('app handoff opens a ready linked view before replying and does not duplicate a native pane or reinterpret restoration as inventory', () => {
+  const view = { state: 'ready', url: `http://127.0.0.1:4663/#view=${'a'.repeat(64)}`, connected: true };
+  const result = { app: 'Rebalance', outcome: 'ready', restoration: 'checked', restorationResults: [], view };
+  const reply = hookReply(result);
+  assert.deepEqual(publicResult(reply), result);
+  assert.match(reply.hookSpecificOutput.additionalContext, /Before replying, open the exact returned view.url/);
+  assert.match(reply.hookSpecificOutput.additionalContext, /open_in_codex with placement right/);
+  assert.match(reply.hookSpecificOutput.additionalContext, /empty results array never establishes an empty registry/);
+  const opened = hookReply({ ...result, view: { ...view, presentation: { opened: true, host: 'fixture' } } });
+  assert.match(opened.hookSpecificOutput.additionalContext, /Reuse the browser pane already opened/);
+  assert.doesNotMatch(opened.hookSpecificOutput.additionalContext, /Before replying, open/);
+  const denied = { ...result, outcome: 'partial', view: { state: 'unavailable', code: 'local-access-denied' } };
+  const unavailable = hookReply(denied);
+  assert.deepEqual(publicResult(unavailable), denied);
+  assert.match(unavailable.hookSpecificOutput.additionalContext, /Retry only the read-only view command/);
+  assert.doesNotMatch(unavailable.hookSpecificOutput.additionalContext, /Before replying, open/);
+  const unknown = hookReply({ ...denied, view: { state: 'unavailable', code: 'unavailable' } });
+  assert.doesNotMatch(unknown.hookSpecificOutput.additionalContext, /Retry only the read-only view command/);
 });

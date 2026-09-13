@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { restoreApp, type AppLaunchDependencies } from '../src/app-launch.js';
 import { atomicWriteJson, readJson } from '../src/storage.js';
 import { captureRunnerPreference, withRunnerControl, writeRunnerPreference } from '../src/runner-preference.js';
+import { ViewError } from '../src/view-error.js';
 import { connectionPath, type RoutedProfile } from '../scripts/profile-routing.mjs';
 
 async function fixture(t: TestContext) {
@@ -40,7 +41,7 @@ test('app entry restores only remembered running portfolios and selection is ind
  const result=await restoreApp(f.root,'chat',{requestId:f.id},f.deps);
  assert.equal(result.outcome,'ready');assert.deepEqual(f.visits,[f.profiles[0]!.wallet]);
  assert.equal((await readJson<{wallet:string}>(connectionPath(f.root,'chat')))!.wallet,f.profiles[1]!.wallet);
- assert.deepEqual(result.portfolios.map(p=>p.result.outcome),['armed','not-requested','not-requested']);
+ assert.deepEqual(result.restorationResults.map(p=>p.result.outcome),['armed','not-requested','not-requested']);
  for(const file of ['pending.json','cycle.json','recovery.json'])assert.deepEqual(await readJson(join(f.profiles[0]!.dataDir,file)),{fixture:file});
 });
 
@@ -86,8 +87,8 @@ test('independent startups overlap and a failure does not stop another portfolio
   if(p.wallet===f.profiles[0]!.wallet){await gate;throw new Error('fixture-provider-secret');}
   release();return f.deps.launch!(p,...args);
  }});
- assert.equal(result.outcome,'starting');assert.equal(result.portfolios[0]!.result.outcome,'unknown');
- assert.equal(result.portfolios[1]!.result.status?.armed,true);assert.doesNotMatch(JSON.stringify(result),/fixture-provider-secret/);
+ assert.equal(result.outcome,'starting');assert.equal(result.restorationResults[0]!.result.outcome,'unknown');
+ assert.equal(result.restorationResults[1]!.result.status?.armed,true);assert.doesNotMatch(JSON.stringify(result),/fixture-provider-secret/);
 });
 
 test('unavailable selector does not duplicate or block eligible background startup',async t=>{
@@ -100,7 +101,7 @@ test('malformed preference stays stopped and does not hide healthy portfolios',a
  const f=await fixture(t);await f.remember(0,true);
  await atomicWriteJson(join(f.profiles[1]!.dataDir,'runner-preference.json'),{enabled:true,generation:randomUUID()});
  const result=await restoreApp(f.root,'chat',{requestId:f.id},f.deps);
- assert.equal(result.outcome,'partial');assert.deepEqual(f.visits,[f.profiles[0]!.wallet]);assert.equal(result.portfolios[1]!.result.outcome,'blocked');
+ assert.equal(result.outcome,'partial');assert.deepEqual(f.visits,[f.profiles[0]!.wallet]);assert.equal(result.restorationResults[1]!.result.outcome,'blocked');
 });
 
 test('a request cannot be replayed under another conversation identity',async t=>{
@@ -114,11 +115,43 @@ test('contradictory armed output stays unknown instead of claiming readiness', a
  const result=await restoreApp(f.root,'chat',{requestId:f.id},{...f.deps,launch:async p=>({
   app:'Rebalance',outcome:'armed',status:{armed:false,wallet:p.wallet,chain:{id:4663}}
  })});
- assert.equal(result.outcome,'starting');assert.equal(result.portfolios[0]!.result.outcome,'unknown');
+ assert.equal(result.outcome,'starting');assert.equal(result.restorationResults[0]!.result.outcome,'unknown');
 });
 
 test('a null app receipt is corruption rather than fresh startup authority', async t => {
  const f=await fixture(t);await f.remember(0,true);await atomicWriteJson(f.journal,null);
  await assert.rejects(restoreApp(f.root,'chat',{requestId:f.id},f.deps),/Invalid app entry record/);
  assert.deepEqual(f.visits,[]);assert.equal(await readFile(f.journal,'utf8'),'null\n');
+});
+
+
+test('setup-only view failure keeps its reason and never misrepresents three registered wallets as empty inventory', async t => {
+ const f = await fixture(t); await f.remember(0,true);
+ const registry = await readFile(join(f.root, 'portfolios.json'), 'utf8');
+ const preference = await readFile(join(f.profiles[0]!.dataDir, 'runner-preference.json'), 'utf8');
+ const result = await restoreApp(f.root, 'chat', {setupOnly:true,requestId:f.id}, {...f.deps,
+  capture:async()=>assert.fail('setup-only must not inspect running intent'),
+  view:async()=>{throw new ViewError('local-access-denied');},
+ });
+ assert.equal(result.outcome, 'partial'); assert.equal(result.restoration, 'not-requested');
+ assert.deepEqual(result.restorationResults, []); assert.equal('portfolios' in result, false);
+ assert.deepEqual(result.view, {state:'unavailable',code:'local-access-denied',message:'This process cannot access the local chart listener.'});
+ assert.deepEqual(f.visits, []); assert.equal(await readJson(f.journal), null);
+ assert.equal(await readFile(join(f.root,'portfolios.json'),'utf8'), registry);
+ assert.equal(await readFile(join(f.profiles[0]!.dataDir,'runner-preference.json'),'utf8'), preference);
+ assert.ok(!(await readdir(f.root)).includes('views'));
+ for(const p of f.profiles)for(const file of ['run.lock','stop.json','pending.json','cycle.json'])assert.equal(await readJson(join(p.dataDir,file)),null);
+});
+
+test('replayed restoration stays terminal even when read-only view preparation fails', async t => {
+ const f = await fixture(t); await f.remember(0,true);
+ await restoreApp(f.root,'chat',{requestId:f.id},f.deps);
+ const before = await readFile(f.journal, 'utf8');
+ const result = await restoreApp(f.root,'chat',{requestId:f.id},{...f.deps,
+  view:async()=>{throw new ViewError('local-access-denied');},
+ });
+ assert.equal(result.outcome,'already-handled'); assert.equal(result.restoration,'not-repeated');
+ assert.deepEqual(result.restorationResults,[]); assert.equal('portfolios' in result,false);
+ assert.deepEqual(result.view,{state:'unavailable',code:'local-access-denied',message:'This process cannot access the local chart listener.'});
+ assert.deepEqual(f.visits,[f.profiles[0]!.wallet]); assert.equal(await readFile(f.journal,'utf8'),before);
 });

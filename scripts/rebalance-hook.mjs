@@ -109,12 +109,22 @@ export async function recordHookObservation(input, root = repository) {
 }
 
 export function hookReply(result) {
-  const appEntry = Array.isArray(result?.portfolios) || result?.outcome === 'select-portfolio';
+  const appEntry = typeof result?.restoration === 'string' || Array.isArray(result?.restorationResults)
+    || Array.isArray(result?.portfolios) || result?.outcome === 'select-portfolio';
+  const view = result?.view;
+  const presentation = view?.state === 'ready' && typeof view.url === 'string'
+    ? view.presentation?.opened === true
+      ? 'Reuse the browser pane already opened by the handler; do not open a duplicate. '
+      : 'Before replying, open the exact returned view.url in this conversation’s persistent right browser pane, retaining its fragment. In Codex use open_in_codex with placement right. Browser presentation is the next action; do not run another launcher or wait for portfolio selection first. '
+    : view?.code === 'local-access-denied'
+      ? 'The command could not access localhost. Retry only the read-only view command through the host approval mechanism; never repeat restoration or start. '
+      : '';
   return {
     hookSpecificOutput: {
       hookEventName: 'UserPromptSubmit',
       additionalContext: 'The deterministic Rebalance command handler already handled this invocation. '
-        + (appEntry ? 'Briefly describe readiness in natural language, invite choosing a portfolio, and include any actual blockers; ' : 'Report the public result below; ')
+        + presentation
+        + (appEntry ? 'Restoration results are not wallet inventory; an empty results array never establishes an empty registry. Briefly describe readiness in natural language, invite choosing a portfolio when the view is ready, and include actual blockers; ' : 'Report the public result below; ')
         + 'do not repeat launch or start, or repeat recovery or restoration. An outcome is not a trade receipt.\n'
         + JSON.stringify(result),
     },

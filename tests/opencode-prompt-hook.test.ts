@@ -272,7 +272,7 @@ test('OpenCode new bare entry preserves native session identity through restore 
     ensureDependencies: async () => { calls.push('dependencies'); },
     runRestore: async (repository: string, id: string, session: string) => {
       assert.equal(repository, root); assert.equal(id, selected.requestId); assert.equal(session, selected.normalized.session_id);
-      calls.push('restore'); return { app: 'Rebalance', outcome: 'ready', status: null, portfolios: [], messages: [], view };
+      calls.push('restore'); return { app: 'Rebalance', outcome: 'ready', status: null, restorationResults: [], messages: [], view };
     },
     openView: async (request: {url: string; sessionId: string}) => {
       assert.equal(request.url, view.url); assert.equal(request.sessionId, selected.normalized.session_id);

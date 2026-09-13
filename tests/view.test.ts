@@ -6,6 +6,7 @@ import { test, type TestContext } from 'node:test';
 import { atomicWriteJson, readJson } from '../src/storage.js';
 import { ensurePortfolioChart, prepareView, type ViewDependencies } from '../src/view.js';
 import { portfolios } from '../src/profiles.js';
+import { ViewError, publicViewFailure } from '../src/view-error.js';
 import { connectionPath, type RoutedProfile } from '../scripts/profile-routing.mjs';
 const wallet = '0x0000000000000000000000000000000000000001';
 const config = { version:1, chainId:4663, wallet, mode:'private-key', targets:{USDG:500,AAPL:2375,NVDA:2375,MSFT:2375,AMD:2375},
@@ -86,4 +87,40 @@ test('selector never adopts an unowned wallet listener, and explicit views do no
  await assert.rejects(prepareView(f.root,'selector-chat',undefined,deps),/unavailable/);
  await assert.rejects(prepareView(f.root,'selector-chat',wallet,deps),/not owned/);
  assert.equal(spawned,0);assert.equal(await readJson(connectionPath(f.root,'selector-chat')),null);
+});
+
+
+test('access denial and incompatible listeners stay distinct and never create a capability or restart a chart', async t => {
+ for (const code of ['local-access-denied', 'listener-incompatible'] as const) {
+  const f = await fixture(t);
+  await assert.rejects(prepareView(f.root, 'fixture-chat', undefined, { ...f.deps, probe: async () => code }),
+   error => error instanceof ViewError && publicViewFailure(error).code === code);
+  assert.equal(f.started, 0);
+  assert.deepEqual(await readdir(f.root), []);
+ }
+});
+
+test('an access-denied owned candidate does not fall back to spawning at an absent default port', async t => {
+ const f = await fixture(t); const directory = `wallets/${wallet}`;
+ await atomicWriteJson(join(f.root, 'portfolios.json'), { version: 1, profiles: [{wallet, chainId:4663, directory, chartPort:4666}] });
+ await atomicWriteJson(join(f.root, directory, 'chart.lock'), {pid:123});
+ await assert.rejects(prepareView(f.root, 'fixture-chat', undefined, {...f.deps,
+  probe:async p => p.chartPort === 4666 ? 'local-access-denied' : 'absent',
+ }), error => error instanceof ViewError && error.code === 'local-access-denied');
+ assert.equal(f.started, 0);
+ assert.equal(await readJson(connectionPath(f.root, 'fixture-chat')), null);
+ assert.equal(await readJson(join(f.root, 'chart.lock')), null);
+ assert.ok(!(await readdir(f.root)).includes('views'));
+});
+
+test('public view failures expose only fixed allowlisted text', () => {
+ const error = new ViewError('local-access-denied');
+ error.message = 'fixture-provider-secret';
+ assert.deepEqual(publicViewFailure(error), {state:'unavailable',code:'local-access-denied',message:'This process cannot access the local chart listener.'});
+ assert.deepEqual(publicViewFailure(new Error('fixture-provider-secret')), {
+  state:'unavailable',code:'unavailable',message:'The portfolio selector is unavailable.',
+ });
+ Object.assign(error, {code:'fixture-provider-secret'});
+ assert.equal(publicViewFailure(error).code, 'unavailable');
+ assert.doesNotMatch(JSON.stringify(publicViewFailure(error)), /fixture-provider-secret/);
 });

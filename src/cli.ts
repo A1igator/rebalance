@@ -3,6 +3,7 @@
 import { execFile } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ViewError, publicViewFailure } from './view-error.js';
 import { portfolioRoot, readProfiles, resolveProfile, sessionIdentity, walletIdentity, type RoutedProfile } from '../scripts/profile-routing.mjs';
 
 const repository = fileURLToPath(new URL('..', import.meta.url));
@@ -99,6 +100,8 @@ async function main() {
   await import('./commands.js');
 }
 main().catch(error => {
-  process.stderr.write(JSON.stringify({ error: error instanceof Error && error.constructor === Error ? error.message : 'Wallet routing failed; existing portfolios were preserved.' }) + '\n');
+  const failure = error instanceof ViewError ? publicViewFailure(error) : null;
+  process.stderr.write(JSON.stringify(failure ? { error: failure.message, code: failure.code } :
+    { error: error instanceof Error && error.constructor === Error ? error.message : 'Wallet routing failed; existing portfolios were preserved.' }) + '\n');
   process.exitCode = 1;
 });

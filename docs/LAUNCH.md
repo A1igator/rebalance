@@ -126,3 +126,11 @@ Sources: [expansion hook](https://code.claude.com/docs/en/hooks#userpromptexpans
 ## OpenCode native entry — 2026-09-11
 
 OpenCode's project command and plugin reuse this launcher through a Node adapter. `command.execute.before` supplies a one-use marker; `chat.message` resolves the stable native user message ID and verifies a root Build session before dispatch. The request is namespaced by `opencode:<sessionID>`, preserving the existing wallet-route and newer-stop barriers. Plain text, skill loading, scoped requests, Plan/custom agents and child sessions do not dispatch. See [OpenCode integration](OPENCODE.md) for setup, notification controls, companion behavior and native fixture evidence.
+
+## Selector presentation follow-up — 2026-09-12
+
+The fresh **Open Rebalance selector** task failed inside a restricted command environment: localhost identity probes returned EPERM while the same bounded probes outside it returned HTTP 200 for all four existing chart services. The registry still contained three wallets. The old generic view error hid permission denial, and `portfolios: []` represented no restoration attempts rather than an empty registry. App entry now returns `restorationResults`, propagates fixed view failure codes, and reports a setup-only view failure as partial. Retry only read-only `view` through approved host permissions; no extra launch or restoration is warranted.
+
+Missing native output alone does not prove hook trust state. A subsequent read-only bundled `hooks/list` check found the current project hook enabled but untrusted. Earlier trust observations above apply to their original dates/paths. No trust setting was changed in this follow-up. Review/trust remains a user action through the documented `/hooks` interface.
+
+The hook result now requires immediate browser presentation before the response, preserving the exact linked URL and any actual blocker. Codex Desktop's verified presentation path remains its native `open_in_codex` tool; there is no verified shell-to-Desktop-pane adapter in this installation. See [companion presentation and limits](COMPANION_VIEW.md#codex-desktop-presentation) and [prompt 086](prompts/086-deterministic-selector-presentation.md).
