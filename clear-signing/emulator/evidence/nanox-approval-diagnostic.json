@@ -1,0 +1,133 @@
+{
+  "status": "blind-signing-refused",
+  "steps": [
+    "signer.eth.steps.parseTransaction",
+    "signer.eth.steps.getAddress",
+    "signer.eth.steps.buildContexts",
+    "signer.eth.steps.provideContexts",
+    "signer.eth.steps.signTransaction",
+    "signer.eth.steps.blindSignTransactionFallback"
+  ],
+  "events": [
+    "Ethereum | app is ready"
+  ],
+  "requests": [
+    {
+      "apduHeader": "B0010000",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b001000000",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e006000000",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e002000015",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e020000000",
+      "statusWord": "9000"
+    },
+    {
+      "path": "/cal/v1/dapps",
+      "output": "b2c,b2c_signatures,abis"
+    },
+    {
+      "path": "/v2/names/ethereum/4663/reverse/0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+      "output": null
+    },
+    {
+      "path": "/v1/ethereum/4663/contracts/0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168/plugin-selector/0x095ea7b3",
+      "output": null
+    },
+    {
+      "path": "/cal/v1/tokens",
+      "output": "descriptor"
+    },
+    {
+      "path": "/cal/v1/dapps",
+      "output": "descriptors_calldata"
+    },
+    {
+      "path": "/cal/v1/networks",
+      "output": "id,descriptors,icons"
+    },
+    {
+      "path": "/cal/v1/certificates",
+      "output": "descriptor"
+    },
+    {
+      "path": "/cal/v1/gated_dapps",
+      "output": "gated_descriptors,app,category"
+    },
+    {
+      "path": "/cal/v1/certificates",
+      "output": "descriptor"
+    },
+    {
+      "path": "/v2/ethereum/4663/contract/proxy/delegate",
+      "output": null
+    },
+    {
+      "apduHeader": "e00400017e",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b0060b009c",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e0260100d8",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010025",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801002f",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801002d",
+      "statusWord": "9000"
+    },
+    {
+      "path": "/cal/v1/tokens",
+      "output": "descriptor"
+    },
+    {
+      "path": "/cal/v1/certificates",
+      "output": "descriptor"
+    },
+    {
+      "apduHeader": "b00608009e",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e00a000068",
+      "statusWord": "6a80"
+    },
+    {
+      "apduHeader": "e028010043",
+      "statusWord": "6980"
+    },
+    {
+      "apduHeader": "e004000200",
+      "statusWord": "6980"
+    },
+    {
+      "apduHeader": "e00400007e",
+      "statusWord": "6a80"
+    }
+  ],
+  "scope": "Development-only synthetic USDG approval; Nano X; no production or EIP-7702 proxy proof",
+  "ethereumApp": "1.22.3",
+  "emulatorImage": "ghcr.io/ledgerhq/speculos@sha256:6ed9eefd51cddd862b746719af4cd7a3265fe43d0588c388359753cab8d46d11",
+  "result": "Incomplete: generic transaction metadata and its certificate accepted; token metadata rejected with 6a80, dependent amount field with 6980; blind fallback refused",
+  "clearSigningVerified": false
+}

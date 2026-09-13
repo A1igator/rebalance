@@ -234,3 +234,7 @@ Keep portfolio navigation on the page's validated loopback hostname and release 
 ## Ledger Clear Signing investigation — September 13
 
 [Prompt 105](docs/prompts/105-ledger-clear-signing.md) records the production enrollment gate and the separate ERC-7730/Speculos development path. Production implementation is deferred at the owner's direction because partner access is unavailable. Preserve working Simple7702/Uniswap execution and distinguish metadata-format tests, emulator test certificates and verified retail-device Clear Signing.
+
+## Clear Signing development preparation — September 13
+
+[Prompt 106](docs/prompts/106-ledger-clear-signing-development.md) resumes isolated descriptor and Speculos preparation for the current nested Simple7702/Uniswap batch. Validate actual decoded fields and preserve unknown-call warnings before considering production submission. Live wallet execution and retail-device trust remain unchanged.

@@ -1,0 +1,183 @@
+{
+  "scope": "Public-default-seed Nano X Speculos test only; no retail device or EIP-7702 delegation claim",
+  "fixture": "approval",
+  "ethereumVersion": "1.22.3",
+  "image": "ghcr.io/ledgerhq/speculos@sha256:6ed9eefd51cddd862b746719af4cd7a3265fe43d0588c388359753cab8d46d11",
+  "capturedOutcome": "signature-completed",
+  "signatureCompleted": true,
+  "screenAssertions": {
+    "passed": true,
+    "complete": true,
+    "expectedFieldCount": 6,
+    "observedFieldCount": 6,
+    "matchedFieldCount": 6,
+    "terminalSeen": true,
+    "failures": [],
+    "fields": [
+      {
+        "operation": "approval[0]",
+        "label": "Contract",
+        "value": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "index": 0,
+        "matched": true,
+        "observed": {
+          "label": "Contract",
+          "value": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+          "eventIndex": 2
+        }
+      },
+      {
+        "operation": "approval[0]",
+        "label": "Native value (wei)",
+        "value": "0",
+        "index": 1,
+        "matched": true,
+        "observed": {
+          "label": "Native value (wei)",
+          "value": "0",
+          "eventIndex": 3
+        }
+      },
+      {
+        "operation": "approval[0]",
+        "label": "Spender",
+        "value": "0xCaf681a66D020601342297493863E78C959E5cb2",
+        "index": 2,
+        "matched": true,
+        "observed": {
+          "label": "Spender",
+          "value": "0xCaf681a66D020601342297493863E78C959E5cb2",
+          "eventIndex": 4
+        }
+      },
+      {
+        "operation": "approval[0]",
+        "label": "Approval amount",
+        "value": "8 USDG",
+        "index": 3,
+        "matched": true,
+        "observed": {
+          "label": "Approval amount",
+          "value": "8USDG",
+          "eventIndex": 5
+        }
+      },
+      {
+        "operation": "transaction",
+        "label": "Network",
+        "value": "Robinhood Chain",
+        "index": 4,
+        "matched": true,
+        "observed": {
+          "label": "Network",
+          "value": "RobinhoodChain",
+          "eventIndex": 6
+        }
+      },
+      {
+        "operation": "transaction",
+        "label": "Max fees",
+        "value": "0.000000000001 ETH",
+        "index": 5,
+        "matched": true,
+        "observed": {
+          "label": "Max fees",
+          "value": "0.000000000001ETH",
+          "eventIndex": 7
+        }
+      }
+    ],
+    "scope": "Exact ordered synthetic Nano X display fields only; signature, production trust and EIP-7702 proxy support are separate"
+  },
+  "assertionsRecheckedFromCapturedScreens": true,
+  "syntheticDisplayVerified": true,
+  "steps": [
+    "signer.eth.steps.parseTransaction",
+    "signer.eth.steps.getAddress",
+    "signer.eth.steps.buildContexts",
+    "signer.eth.steps.provideContexts",
+    "signer.eth.steps.signTransaction",
+    "signer.eth.steps.detectBlindSigning"
+  ],
+  "screenTexts": [
+    "Ethereum | app is ready",
+    "Interaction with | Rebalance  | development",
+    "Contract | 0x5fc5360D0400a0Fd | 4f2af552ADD042D71 | 6F1d168",
+    "Native value (wei) | 0",
+    "Spender | 0xCaf681a66D020601 | 342297493863E78C95 | 9E5cb2",
+    "Approval amount | 8 USDG",
+    "Network | Robinhood Chain",
+    "Max fees | 0.000000000001 ETH",
+    "Sign transaction"
+  ],
+  "apduStatuses": [
+    {
+      "apduHeader": "B0010000",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b001000000",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e006000000",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e002000015",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e020000000",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b0060c009b",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e030010073",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e00400017e",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b0060b009c",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e0260100d8",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010025",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801002f",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801002d",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b00608009e",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e00a000068",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010043",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e004000200",
+      "statusWord": "9000"
+    }
+  ]
+}

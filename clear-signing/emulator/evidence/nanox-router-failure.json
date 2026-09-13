@@ -1,0 +1,948 @@
+{
+  "scope": "Public-default-seed Nano X Speculos test only; no retail device or EIP-7702 delegation claim",
+  "fixture": "router",
+  "ethereumVersion": "1.22.3",
+  "image": "ghcr.io/ledgerhq/speculos@sha256:6ed9eefd51cddd862b746719af4cd7a3265fe43d0588c388359753cab8d46d11",
+  "capturedOutcome": "blind-signing-refused",
+  "signatureCompleted": false,
+  "screenAssertions": {
+    "passed": false,
+    "complete": false,
+    "expectedFieldCount": 50,
+    "observedFieldCount": 0,
+    "matchedFieldCount": 0,
+    "terminalSeen": false,
+    "failures": [
+      {
+        "index": 0,
+        "operation": "router",
+        "label": "Contract",
+        "expected": "0xCaf681a66D020601342297493863E78C959E5cb2",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 1,
+        "operation": "router",
+        "label": "Router caller",
+        "expected": "0xDad77910DbDFdE764fC21FCD4E74D71bBACA6D8D",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 2,
+        "operation": "router",
+        "label": "Native value (wei)",
+        "expected": "0",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 3,
+        "operation": "router",
+        "label": "Deadline",
+        "expected": "2027-01-15 08:00:00 AM UTC",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 4,
+        "operation": "swap[0]",
+        "label": "Contract",
+        "expected": "0xCaf681a66D020601342297493863E78C959E5cb2",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 5,
+        "operation": "swap[0]",
+        "label": "Router caller",
+        "expected": "0xDad77910DbDFdE764fC21FCD4E74D71bBACA6D8D",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 6,
+        "operation": "swap[0]",
+        "label": "Native value (wei)",
+        "expected": "0",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 7,
+        "operation": "swap[0]",
+        "label": "Input token",
+        "expected": "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 8,
+        "operation": "swap[0]",
+        "label": "Output token",
+        "expected": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 9,
+        "operation": "swap[0]",
+        "label": "Input (0=router bal)",
+        "expected": "0.01 AAPL",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 10,
+        "operation": "swap[0]",
+        "label": "Minimum received",
+        "expected": "2 USDG",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 11,
+        "operation": "swap[0]",
+        "label": "Pool fee",
+        "expected": "0.3 %",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 12,
+        "operation": "swap[0]",
+        "label": "Recipient",
+        "expected": "0x1111111111111111111111111111111111111111",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 13,
+        "operation": "swap[0]",
+        "label": "Recipient flags",
+        "expected": "1=sender; 2=router",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 14,
+        "operation": "swap[0]",
+        "label": "Sqrt price limit X96",
+        "expected": "0",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 15,
+        "operation": "swap[1]",
+        "label": "Contract",
+        "expected": "0xCaf681a66D020601342297493863E78C959E5cb2",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 16,
+        "operation": "swap[1]",
+        "label": "Router caller",
+        "expected": "0xDad77910DbDFdE764fC21FCD4E74D71bBACA6D8D",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 17,
+        "operation": "swap[1]",
+        "label": "Native value (wei)",
+        "expected": "0",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 18,
+        "operation": "swap[1]",
+        "label": "Input token",
+        "expected": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 19,
+        "operation": "swap[1]",
+        "label": "Output token",
+        "expected": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 20,
+        "operation": "swap[1]",
+        "label": "Input (0=router bal)",
+        "expected": "0.02 NVDA",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 21,
+        "operation": "swap[1]",
+        "label": "Minimum received",
+        "expected": "3 USDG",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 22,
+        "operation": "swap[1]",
+        "label": "Pool fee",
+        "expected": "0.3 %",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 23,
+        "operation": "swap[1]",
+        "label": "Recipient",
+        "expected": "0x1111111111111111111111111111111111111111",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 24,
+        "operation": "swap[1]",
+        "label": "Recipient flags",
+        "expected": "1=sender; 2=router",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 25,
+        "operation": "swap[1]",
+        "label": "Sqrt price limit X96",
+        "expected": "0",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 26,
+        "operation": "swap[2]",
+        "label": "Contract",
+        "expected": "0xCaf681a66D020601342297493863E78C959E5cb2",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 27,
+        "operation": "swap[2]",
+        "label": "Router caller",
+        "expected": "0xDad77910DbDFdE764fC21FCD4E74D71bBACA6D8D",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 28,
+        "operation": "swap[2]",
+        "label": "Native value (wei)",
+        "expected": "0",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 29,
+        "operation": "swap[2]",
+        "label": "Input token",
+        "expected": "0xe93237C50D904957Cf27E7B1133b510C669c2e74",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 30,
+        "operation": "swap[2]",
+        "label": "Output token",
+        "expected": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 31,
+        "operation": "swap[2]",
+        "label": "Input (0=router bal)",
+        "expected": "0.03 MSFT",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 32,
+        "operation": "swap[2]",
+        "label": "Minimum received",
+        "expected": "4 USDG",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 33,
+        "operation": "swap[2]",
+        "label": "Pool fee",
+        "expected": "0.3 %",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 34,
+        "operation": "swap[2]",
+        "label": "Recipient",
+        "expected": "0x1111111111111111111111111111111111111111",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 35,
+        "operation": "swap[2]",
+        "label": "Recipient flags",
+        "expected": "1=sender; 2=router",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 36,
+        "operation": "swap[2]",
+        "label": "Sqrt price limit X96",
+        "expected": "0",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 37,
+        "operation": "swap[3]",
+        "label": "Contract",
+        "expected": "0xCaf681a66D020601342297493863E78C959E5cb2",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 38,
+        "operation": "swap[3]",
+        "label": "Router caller",
+        "expected": "0xDad77910DbDFdE764fC21FCD4E74D71bBACA6D8D",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 39,
+        "operation": "swap[3]",
+        "label": "Native value (wei)",
+        "expected": "0",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 40,
+        "operation": "swap[3]",
+        "label": "Input token",
+        "expected": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 41,
+        "operation": "swap[3]",
+        "label": "Output token",
+        "expected": "0x86923f96303D656E4aa86D9d42D1e57ad2023fdC",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 42,
+        "operation": "swap[3]",
+        "label": "Input (0=router bal)",
+        "expected": "8 USDG",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 43,
+        "operation": "swap[3]",
+        "label": "Minimum received",
+        "expected": "0.04 AMD",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 44,
+        "operation": "swap[3]",
+        "label": "Pool fee",
+        "expected": "0.3 %",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 45,
+        "operation": "swap[3]",
+        "label": "Recipient",
+        "expected": "0x1111111111111111111111111111111111111111",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 46,
+        "operation": "swap[3]",
+        "label": "Recipient flags",
+        "expected": "1=sender; 2=router",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 47,
+        "operation": "swap[3]",
+        "label": "Sqrt price limit X96",
+        "expected": "0",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 48,
+        "operation": "transaction",
+        "label": "Network",
+        "expected": "Robinhood Chain",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "index": 49,
+        "operation": "transaction",
+        "label": "Max fees",
+        "expected": "0.000000000001 ETH",
+        "observed": null,
+        "reason": "Missing, changed or out-of-order field"
+      },
+      {
+        "reason": "Field count differs",
+        "expected": 50,
+        "observed": 0
+      },
+      {
+        "reason": "Signing confirmation screen was not captured"
+      }
+    ],
+    "fields": [
+      {
+        "operation": "router",
+        "label": "Contract",
+        "value": "0xCaf681a66D020601342297493863E78C959E5cb2",
+        "index": 0,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "router",
+        "label": "Router caller",
+        "value": "0xDad77910DbDFdE764fC21FCD4E74D71bBACA6D8D",
+        "index": 1,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "router",
+        "label": "Native value (wei)",
+        "value": "0",
+        "index": 2,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "router",
+        "label": "Deadline",
+        "value": "2027-01-15 08:00:00 AM UTC",
+        "index": 3,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Contract",
+        "value": "0xCaf681a66D020601342297493863E78C959E5cb2",
+        "index": 4,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Router caller",
+        "value": "0xDad77910DbDFdE764fC21FCD4E74D71bBACA6D8D",
+        "index": 5,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Native value (wei)",
+        "value": "0",
+        "index": 6,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Input token",
+        "value": "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9",
+        "index": 7,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Output token",
+        "value": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "index": 8,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Input (0=router bal)",
+        "value": "0.01 AAPL",
+        "index": 9,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Minimum received",
+        "value": "2 USDG",
+        "index": 10,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Pool fee",
+        "value": "0.3 %",
+        "index": 11,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Recipient",
+        "value": "0x1111111111111111111111111111111111111111",
+        "index": 12,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Recipient flags",
+        "value": "1=sender; 2=router",
+        "index": 13,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Sqrt price limit X96",
+        "value": "0",
+        "index": 14,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[1]",
+        "label": "Contract",
+        "value": "0xCaf681a66D020601342297493863E78C959E5cb2",
+        "index": 15,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[1]",
+        "label": "Router caller",
+        "value": "0xDad77910DbDFdE764fC21FCD4E74D71bBACA6D8D",
+        "index": 16,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[1]",
+        "label": "Native value (wei)",
+        "value": "0",
+        "index": 17,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[1]",
+        "label": "Input token",
+        "value": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+        "index": 18,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[1]",
+        "label": "Output token",
+        "value": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "index": 19,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[1]",
+        "label": "Input (0=router bal)",
+        "value": "0.02 NVDA",
+        "index": 20,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[1]",
+        "label": "Minimum received",
+        "value": "3 USDG",
+        "index": 21,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[1]",
+        "label": "Pool fee",
+        "value": "0.3 %",
+        "index": 22,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[1]",
+        "label": "Recipient",
+        "value": "0x1111111111111111111111111111111111111111",
+        "index": 23,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[1]",
+        "label": "Recipient flags",
+        "value": "1=sender; 2=router",
+        "index": 24,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[1]",
+        "label": "Sqrt price limit X96",
+        "value": "0",
+        "index": 25,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[2]",
+        "label": "Contract",
+        "value": "0xCaf681a66D020601342297493863E78C959E5cb2",
+        "index": 26,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[2]",
+        "label": "Router caller",
+        "value": "0xDad77910DbDFdE764fC21FCD4E74D71bBACA6D8D",
+        "index": 27,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[2]",
+        "label": "Native value (wei)",
+        "value": "0",
+        "index": 28,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[2]",
+        "label": "Input token",
+        "value": "0xe93237C50D904957Cf27E7B1133b510C669c2e74",
+        "index": 29,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[2]",
+        "label": "Output token",
+        "value": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "index": 30,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[2]",
+        "label": "Input (0=router bal)",
+        "value": "0.03 MSFT",
+        "index": 31,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[2]",
+        "label": "Minimum received",
+        "value": "4 USDG",
+        "index": 32,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[2]",
+        "label": "Pool fee",
+        "value": "0.3 %",
+        "index": 33,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[2]",
+        "label": "Recipient",
+        "value": "0x1111111111111111111111111111111111111111",
+        "index": 34,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[2]",
+        "label": "Recipient flags",
+        "value": "1=sender; 2=router",
+        "index": 35,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[2]",
+        "label": "Sqrt price limit X96",
+        "value": "0",
+        "index": 36,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[3]",
+        "label": "Contract",
+        "value": "0xCaf681a66D020601342297493863E78C959E5cb2",
+        "index": 37,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[3]",
+        "label": "Router caller",
+        "value": "0xDad77910DbDFdE764fC21FCD4E74D71bBACA6D8D",
+        "index": 38,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[3]",
+        "label": "Native value (wei)",
+        "value": "0",
+        "index": 39,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[3]",
+        "label": "Input token",
+        "value": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "index": 40,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[3]",
+        "label": "Output token",
+        "value": "0x86923f96303D656E4aa86D9d42D1e57ad2023fdC",
+        "index": 41,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[3]",
+        "label": "Input (0=router bal)",
+        "value": "8 USDG",
+        "index": 42,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[3]",
+        "label": "Minimum received",
+        "value": "0.04 AMD",
+        "index": 43,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[3]",
+        "label": "Pool fee",
+        "value": "0.3 %",
+        "index": 44,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[3]",
+        "label": "Recipient",
+        "value": "0x1111111111111111111111111111111111111111",
+        "index": 45,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[3]",
+        "label": "Recipient flags",
+        "value": "1=sender; 2=router",
+        "index": 46,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "swap[3]",
+        "label": "Sqrt price limit X96",
+        "value": "0",
+        "index": 47,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "transaction",
+        "label": "Network",
+        "value": "Robinhood Chain",
+        "index": 48,
+        "matched": false,
+        "observed": null
+      },
+      {
+        "operation": "transaction",
+        "label": "Max fees",
+        "value": "0.000000000001 ETH",
+        "index": 49,
+        "matched": false,
+        "observed": null
+      }
+    ],
+    "scope": "Exact ordered synthetic Nano X display fields only; signature, production trust and EIP-7702 proxy support are separate"
+  },
+  "assertionsRecheckedFromCapturedScreens": true,
+  "syntheticDisplayVerified": false,
+  "steps": [
+    "signer.eth.steps.parseTransaction",
+    "signer.eth.steps.getAddress",
+    "signer.eth.steps.buildContexts",
+    "signer.eth.steps.provideContexts",
+    "signer.eth.steps.signTransaction",
+    "signer.eth.steps.blindSignTransactionFallback"
+  ],
+  "screenTexts": [
+    "Ethereum | app is ready"
+  ],
+  "apduStatuses": [
+    {
+      "apduHeader": "B0010000",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b001000000",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e006000000",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e002000015",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e020000000",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e020000000",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e020000000",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e020000000",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e020000000",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b0060c009b",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e030010073",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e0040001ff",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e0048001ff",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e0048001ff",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e0048001ff",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e0048001ff",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e0048001a5",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b0060b009c",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e0260100c8",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010025",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801002a",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801002f",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010031",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801005a",
+      "statusWord": "6a80"
+    },
+    {
+      "apduHeader": "e004000200",
+      "statusWord": "6980"
+    },
+    {
+      "apduHeader": "e0040000ff",
+      "blocked": "basic-signing-command"
+    }
+  ]
+}

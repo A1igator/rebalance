@@ -1,0 +1,68 @@
+{
+  "$schema": "https://raw.githubusercontent.com/ethereum/clear-signing-erc7730-registry/59caf861229afdc584767bb127eea9a6c8c729a6/specs/erc7730-v2.schema.json",
+  "context": {
+    "$id": "Simple7702Account",
+    "contract": {
+      "deployments": [
+        {
+          "chainId": 4663,
+          "address": "0x4Cd241E8d1510e30b2076397afc7508Ae59C66c9"
+        }
+      ]
+    }
+  },
+  "metadata": {
+    "owner": "Rebalance development",
+    "contractName": "Simple7702Account"
+  },
+  "display": {
+    "formats": {
+      "executeBatch((address target,uint256 value,bytes data)[] calls)": {
+        "intent": "Execute batch",
+        "fields": [
+          {
+            "path": "@.to",
+            "label": "Account",
+            "format": "raw",
+            "visible": "always"
+          },
+          {
+            "path": "@.value",
+            "label": "Native value (wei)",
+            "format": "raw",
+            "visible": "always"
+          },
+          {
+            "path": "calls.[]",
+            "iteration": "bundled",
+            "fields": [
+              {
+                "path": "target",
+                "label": "Call target",
+                "format": "raw",
+                "visible": "always"
+              },
+              {
+                "path": "value",
+                "label": "Call value (wei)",
+                "format": "raw",
+                "visible": "always"
+              },
+              {
+                "path": "data",
+                "label": "Action",
+                "format": "calldata",
+                "params": {
+                  "calleePath": "target",
+                  "amountPath": "value",
+                  "spenderPath": "@.to"
+                },
+                "visible": "always"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

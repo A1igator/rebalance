@@ -1,0 +1,86 @@
+{
+  "$schema": "https://raw.githubusercontent.com/ethereum/clear-signing-erc7730-registry/59caf861229afdc584767bb127eea9a6c8c729a6/specs/erc7730-v2.schema.json",
+  "context": {
+    "$id": "Rebalance asset approvals",
+    "contract": {
+      "deployments": [
+        {
+          "chainId": 4663,
+          "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168"
+        },
+        {
+          "chainId": 4663,
+          "address": "0x322F0929c4625eD5bAd873c95208D54E1c003b2d"
+        },
+        {
+          "chainId": 4663,
+          "address": "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9"
+        },
+        {
+          "chainId": 4663,
+          "address": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC"
+        },
+        {
+          "chainId": 4663,
+          "address": "0x12f190a9F9d7D37a250758b26824B97CE941bF54"
+        },
+        {
+          "chainId": 4663,
+          "address": "0x756Bc80af765C82da966a788858d65aDF14f3793"
+        },
+        {
+          "chainId": 4663,
+          "address": "0x43B07D15cE533bEc5476d70C22a78a1B2B662155"
+        },
+        {
+          "chainId": 4663,
+          "address": "0xe93237C50D904957Cf27E7B1133b510C669c2e74"
+        },
+        {
+          "chainId": 4663,
+          "address": "0x86923f96303D656E4aa86D9d42D1e57ad2023fdC"
+        }
+      ]
+    }
+  },
+  "metadata": {
+    "owner": "Rebalance development",
+    "contractName": "Rebalance asset approvals"
+  },
+  "display": {
+    "formats": {
+      "approve(address spender,uint256 amount)": {
+        "intent": "Approve token",
+        "fields": [
+          {
+            "path": "@.to",
+            "label": "Contract",
+            "format": "raw",
+            "visible": "always"
+          },
+          {
+            "path": "@.value",
+            "label": "Native value (wei)",
+            "format": "raw",
+            "visible": "always"
+          },
+          {
+            "path": "spender",
+            "label": "Spender",
+            "format": "raw",
+            "visible": "always"
+          },
+          {
+            "path": "amount",
+            "label": "Approval amount",
+            "format": "tokenAmount",
+            "params": {
+              "tokenPath": "@.to"
+            },
+            "visible": "always"
+          }
+        ]
+      }
+    }
+  }
+}

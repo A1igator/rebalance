@@ -1,0 +1,147 @@
+{
+  "$schema": "https://raw.githubusercontent.com/ethereum/clear-signing-erc7730-registry/59caf861229afdc584767bb127eea9a6c8c729a6/specs/erc7730-v2.schema.json",
+  "context": {
+    "$id": "SwapRouter02",
+    "contract": {
+      "deployments": [
+        {
+          "chainId": 4663,
+          "address": "0xCaf681a66D020601342297493863E78C959E5cb2"
+        }
+      ]
+    }
+  },
+  "metadata": {
+    "owner": "Rebalance development",
+    "contractName": "SwapRouter02"
+  },
+  "display": {
+    "formats": {
+      "multicall(uint256 deadline,bytes[] data)": {
+        "intent": "Swap batch",
+        "fields": [
+          {
+            "path": "@.to",
+            "label": "Contract",
+            "format": "raw",
+            "visible": "always"
+          },
+          {
+            "path": "@.from",
+            "label": "Router caller",
+            "format": "raw",
+            "visible": "always"
+          },
+          {
+            "path": "@.value",
+            "label": "Native value (wei)",
+            "format": "raw",
+            "visible": "always"
+          },
+          {
+            "path": "deadline",
+            "label": "Deadline",
+            "format": "date",
+            "params": {
+              "encoding": "timestamp"
+            },
+            "visible": "always"
+          },
+          {
+            "path": "data.[]",
+            "label": "Swap",
+            "format": "calldata",
+            "params": {
+              "calleePath": "@.to",
+              "amountPath": "@.value",
+              "spenderPath": "@.from"
+            },
+            "visible": "always"
+          }
+        ]
+      },
+      "exactInputSingle((address tokenIn,address tokenOut,uint24 fee,address recipient,uint256 amountIn,uint256 amountOutMinimum,uint160 sqrtPriceLimitX96) params)": {
+        "intent": "Swap exact input",
+        "fields": [
+          {
+            "path": "@.to",
+            "label": "Contract",
+            "format": "raw",
+            "visible": "always"
+          },
+          {
+            "path": "@.from",
+            "label": "Router caller",
+            "format": "raw",
+            "visible": "always"
+          },
+          {
+            "path": "@.value",
+            "label": "Native value (wei)",
+            "format": "raw",
+            "visible": "always"
+          },
+          {
+            "path": "params.tokenIn",
+            "label": "Input token",
+            "format": "raw",
+            "visible": "always"
+          },
+          {
+            "path": "params.tokenOut",
+            "label": "Output token",
+            "format": "raw",
+            "visible": "always"
+          },
+          {
+            "path": "params.amountIn",
+            "label": "Input (0=router bal)",
+            "format": "tokenAmount",
+            "params": {
+              "tokenPath": "params.tokenIn"
+            },
+            "visible": "always"
+          },
+          {
+            "path": "params.amountOutMinimum",
+            "label": "Minimum received",
+            "format": "tokenAmount",
+            "params": {
+              "tokenPath": "params.tokenOut"
+            },
+            "visible": "always"
+          },
+          {
+            "path": "params.fee",
+            "label": "Pool fee",
+            "format": "unit",
+            "params": {
+              "decimals": 4,
+              "base": "%",
+              "prefix": false
+            },
+            "visible": "always"
+          },
+          {
+            "path": "params.recipient",
+            "label": "Recipient",
+            "format": "raw",
+            "visible": "always"
+          },
+          {
+            "value": "1=sender; 2=router",
+            "label": "Recipient flags",
+            "format": "raw",
+            "visible": "always"
+          },
+          {
+            "path": "params.sqrtPriceLimitX96",
+            "label": "Sqrt price limit X96",
+            "format": "raw",
+            "visible": "always"
+          }
+        ]
+      }
+    }
+  }
+}

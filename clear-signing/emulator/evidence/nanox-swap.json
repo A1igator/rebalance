@@ -1,0 +1,315 @@
+{
+  "scope": "Public-default-seed Nano X Speculos test only; no retail device or EIP-7702 delegation claim",
+  "fixture": "swap",
+  "ethereumVersion": "1.22.3",
+  "image": "ghcr.io/ledgerhq/speculos@sha256:6ed9eefd51cddd862b746719af4cd7a3265fe43d0588c388359753cab8d46d11",
+  "capturedOutcome": "signature-completed",
+  "signatureCompleted": true,
+  "screenAssertions": {
+    "passed": true,
+    "complete": true,
+    "expectedFieldCount": 13,
+    "observedFieldCount": 13,
+    "matchedFieldCount": 13,
+    "terminalSeen": true,
+    "failures": [],
+    "fields": [
+      {
+        "operation": "swap[0]",
+        "label": "Contract",
+        "value": "0xCaf681a66D020601342297493863E78C959E5cb2",
+        "index": 0,
+        "matched": true,
+        "observed": {
+          "label": "Contract",
+          "value": "0xCaf681a66D020601342297493863E78C959E5cb2",
+          "eventIndex": 3
+        }
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Router caller",
+        "value": "0xDad77910DbDFdE764fC21FCD4E74D71bBACA6D8D",
+        "index": 1,
+        "matched": true,
+        "observed": {
+          "label": "Router caller",
+          "value": "0xDad77910DbDFdE764fC21FCD4E74D71bBACA6D8D",
+          "eventIndex": 4
+        }
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Native value (wei)",
+        "value": "0",
+        "index": 2,
+        "matched": true,
+        "observed": {
+          "label": "Native value (wei)",
+          "value": "0",
+          "eventIndex": 5
+        }
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Input token",
+        "value": "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9",
+        "index": 3,
+        "matched": true,
+        "observed": {
+          "label": "Input token",
+          "value": "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9",
+          "eventIndex": 6
+        }
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Output token",
+        "value": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "index": 4,
+        "matched": true,
+        "observed": {
+          "label": "Output token",
+          "value": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+          "eventIndex": 7
+        }
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Input (0=router bal)",
+        "value": "0.01 AAPL",
+        "index": 5,
+        "matched": true,
+        "observed": {
+          "label": "Input (0=router bal)",
+          "value": "0.01AAPL",
+          "eventIndex": 8
+        }
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Minimum received",
+        "value": "2 USDG",
+        "index": 6,
+        "matched": true,
+        "observed": {
+          "label": "Minimum received",
+          "value": "2USDG",
+          "eventIndex": 9
+        }
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Pool fee",
+        "value": "0.3 %",
+        "index": 7,
+        "matched": true,
+        "observed": {
+          "label": "Pool fee",
+          "value": "0.3%",
+          "eventIndex": 10
+        }
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Recipient",
+        "value": "0x1111111111111111111111111111111111111111",
+        "index": 8,
+        "matched": true,
+        "observed": {
+          "label": "Recipient",
+          "value": "0x1111111111111111111111111111111111111111",
+          "eventIndex": 11
+        }
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Recipient flags",
+        "value": "1=sender; 2=router",
+        "index": 9,
+        "matched": true,
+        "observed": {
+          "label": "Recipient flags",
+          "value": "1=sender;2=router",
+          "eventIndex": 12
+        }
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Sqrt price limit X96",
+        "value": "0",
+        "index": 10,
+        "matched": true,
+        "observed": {
+          "label": "Sqrt price limit X96",
+          "value": "0",
+          "eventIndex": 13
+        }
+      },
+      {
+        "operation": "transaction",
+        "label": "Network",
+        "value": "Robinhood Chain",
+        "index": 11,
+        "matched": true,
+        "observed": {
+          "label": "Network",
+          "value": "RobinhoodChain",
+          "eventIndex": 14
+        }
+      },
+      {
+        "operation": "transaction",
+        "label": "Max fees",
+        "value": "0.000000000001 ETH",
+        "index": 12,
+        "matched": true,
+        "observed": {
+          "label": "Max fees",
+          "value": "0.000000000001ETH",
+          "eventIndex": 15
+        }
+      }
+    ],
+    "scope": "Exact ordered synthetic Nano X display fields only; signature, production trust and EIP-7702 proxy support are separate"
+  },
+  "assertionsRecheckedFromCapturedScreens": true,
+  "syntheticDisplayVerified": true,
+  "steps": [
+    "signer.eth.steps.parseTransaction",
+    "signer.eth.steps.getAddress",
+    "signer.eth.steps.buildContexts",
+    "signer.eth.steps.provideContexts",
+    "signer.eth.steps.signTransaction",
+    "signer.eth.steps.detectBlindSigning"
+  ],
+  "screenTexts": [
+    "Ethereum | app is ready",
+    "Review transaction to  | Swap exact input",
+    "Interaction with | Rebalance  | development",
+    "Contract | 0xCaf681a66D020601 | 342297493863E78C95 | 9E5cb2",
+    "Router caller | 0xDad77910DbDFdE7 | 64fC21FCD4E74D71b | BACA6D8D",
+    "Native value (wei) | 0",
+    "Input token | 0xaF3D76f1834A1d4 | 25780943C99Ea8A608 | f8a93f9",
+    "Output token | 0x5fc5360D0400a0Fd | 4f2af552ADD042D71 | 6F1d168",
+    "Input (0=router bal) | 0.01 AAPL",
+    "Minimum received | 2 USDG",
+    "Pool fee | 0.3 %",
+    "Recipient | 0x11111111111111111 | 1111111111111111111 | 1111",
+    "Recipient flags | 1=sender; 2=router",
+    "Sqrt price limit X96 | 0",
+    "Network | Robinhood Chain",
+    "Max fees | 0.000000000001 ETH",
+    "Sign transaction"
+  ],
+  "apduStatuses": [
+    {
+      "apduHeader": "B0010000",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b001000000",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e006000000",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e002000015",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e020000000",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b0060c009b",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e030010073",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e0040001ff",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e004800120",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b0060b009c",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e0260100cd",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010025",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801002a",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801002f",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010031",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010032",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b00608009e",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e00a000069",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010051",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b00608009e",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e00a000068",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801004d",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010037",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801002f",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801003d",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801003a",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e004000200",
+      "statusWord": "9000"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "scope": "Public test emulator startup only; no descriptor display, hardware approval, EIP-7702 proxy or production compatibility verification",
+  "model": "apex_p",
+  "ethereumVersion": "1.22.3",
+  "image": "ghcr.io/ledgerhq/speculos@sha256:6ed9eefd51cddd862b746719af4cd7a3265fe43d0588c388359753cab8d46d11",
+  "appSha256": "d55b73fa82a1ab8b63d9d57a6e4993e6236b8eb7f6dce78c5437e225e783b88d",
+  "appReady": true,
+  "imageReady": true,
+  "clearSigningVerified": false,
+  "outcome": "emulator-startup-verified",
+  "statusWord": "9000",
+  "screenTexts": [],
+  "screenshot": "apex_p-startup.png",
+  "screenshotSha256": "73f5703623c1c15df3eb156ef2913cad73f79896549176b20e2d4532da6e506b"
+}

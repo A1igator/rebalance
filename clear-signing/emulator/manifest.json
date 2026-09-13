@@ -1,0 +1,61 @@
+{
+  "scope": "development-only public test emulator; no production clear-signing approval",
+  "speculos": {
+    "source": "https://github.com/LedgerHQ/speculos",
+    "license": "Apache-2.0",
+    "image": "ghcr.io/ledgerhq/speculos@sha256:6ed9eefd51cddd862b746719af4cd7a3265fe43d0588c388359753cab8d46d11"
+  },
+  "ethereumApp": {
+    "source": "https://github.com/LedgerHQ/app-ethereum/releases/tag/1.22.3",
+    "license": "Apache-2.0",
+    "version": "1.22.3",
+    "nanox": {
+      "file": "app-1.22.3-nanox.elf",
+      "sha256": "47705998a0419df75959f46faf2c4a214846f61943fd15d3708b92caf2a3559f"
+    },
+    "apex_p": {
+      "file": "app-1.22.3-apex_p.elf",
+      "sha256": "d55b73fa82a1ab8b63d9d57a6e4993e6236b8eb7f6dce78c5437e225e783b88d"
+    }
+  },
+  "testConverter": {
+    "source": "https://github.com/LedgerHQ/device-sdk-ts/blob/21debb71425117964b8c7001070a6ca8d1a9b2da/apps/sample/api/index.py",
+    "license": "Apache-2.0",
+    "erc7730": "1.0.10",
+    "eip712-clearsign": "4.1.0",
+    "Flask": "3.1.2",
+    "requests": "2.32.5",
+    "ecdsa": "0.19.1",
+    "note": "The converter's public test signing keys and test PKI belong only in Speculos. They are not partner credentials or retail-device trust roots."
+  },
+  "observedResults": {
+    "nanox": {
+      "startup": "verified",
+      "approval": {
+        "syntheticSignature": "completed",
+        "orderedFields": "6/6",
+        "evidence": "evidence/nanox-approval.json"
+      },
+      "directSwap": {
+        "syntheticSignature": "completed",
+        "orderedFields": "13/13",
+        "evidence": "evidence/nanox-swap.json"
+      },
+      "routerMulticall": {
+        "syntheticSignature": "not completed",
+        "nestedFieldStatus": "6a80",
+        "fallback": "refused",
+        "evidence": "evidence/nanox-router-failure.json"
+      },
+      "simple7702Batch": "not tested"
+    },
+    "apex_p": {
+      "startup": "verified",
+      "evidence": "evidence/apex_p-smoke.json",
+      "transactionDisplay": "not tested"
+    },
+    "productionMetadataTrust": "not verified",
+    "retailDeviceCompatibility": "not verified",
+    "eip7702WalletProxyResolution": "not verified"
+  }
+}
