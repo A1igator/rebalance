@@ -74,3 +74,8 @@ A bare native `/rebalance` reuses the cmux helper above when OpenCode was starte
 ## Selected notification scope
 
 Card selection and agent wallet connection remain non-trading operations. For Codex, an attached running wallet now prepares event delivery automatically; opening the selector with no attachment does not select or subscribe any wallet. The current view session is passed through UI Start to the notification setup step. A stopped/deselected wallet is quiet, explicit notification Pause stays off, and ordinary view opening cannot transfer another chat's destination. See [selected-running notifications](NOTIFICATIONS.md#selected-running-portfolio).
+
+
+## Returning to the selector
+
+The chart’s Portfolios link explicitly detaches that displayed wallet from the capability-bound chat before opening the grid. A stale chart cannot detach a different selected wallet. This suspends that chat’s portfolio notifications and leaves its runners, settings and notification Pause preference untouched. The chart also follows a streamed detach back to the grid. Generic view reads and background grid pages never clear a newer attachment; an already-open old grid can still show a remembered “This chat” connection until explicit Back/deselection or a new choice. See [prompt 090](prompts/090-selector-deselection.md).
