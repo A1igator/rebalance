@@ -4,7 +4,7 @@
 // This verifies the recorded display only, independently of signature success.
 // It does not establish production metadata trust or EIP-7702 proxy support.
 const LABELS = [
-  'Account', 'Native value (wei)', 'Call target', 'Call value (wei)',
+  'Transaction type', 'Account', 'Native value (wei)', 'Call target', 'Call value (wei)',
   'Contract', 'Router caller', 'Deadline', 'Input token', 'Output token',
   'Input (0=router bal)', 'Minimum received', 'Pool fee', 'Recipient',
   'Recipient flags', 'Sqrt price limit X96', 'Spender', 'Approval amount',
@@ -47,6 +47,7 @@ function expectedFields({ fixture: f, fixtureName, signerAddress }) {
     return `${decimal(value, metadata.decimals)} ${metadata.symbol}`;
   };
   const approval = (symbol, value, operation) => {
+    if (fixtureName === 'batch') add(operation, 'Transaction type', 'Approve token');
     address(operation, 'Contract', f.tokens[symbol].address);
     add(operation, 'Native value (wei)', 0);
     address(operation, 'Spender', f.router);
@@ -54,6 +55,7 @@ function expectedFields({ fixture: f, fixtureName, signerAddress }) {
   };
   const swap = (params, index, caller) => {
     const operation = `swap[${index}]`;
+    if (fixtureName === 'router' || fixtureName === 'batch') add(operation, 'Transaction type', 'Swap exact input');
     address(operation, 'Contract', f.router);
     address(operation, 'Router caller', caller);
     add(operation, 'Native value (wei)', 0);
@@ -67,6 +69,7 @@ function expectedFields({ fixture: f, fixtureName, signerAddress }) {
     add(operation, 'Sqrt price limit X96', params.sqrtPriceLimitX96);
   };
   const router = caller => {
+    if (fixtureName === 'batch') add('router', 'Transaction type', 'Swap batch');
     address('router', 'Contract', f.router);
     address('router', 'Router caller', caller);
     add('router', 'Native value (wei)', 0);
@@ -119,7 +122,7 @@ function assertScreens(args) {
     } else if (text === 'Signtransaction') {
       if (terminalSeen) failures.push({ eventIndex, reason: 'Repeated signing confirmation screen' });
       terminalSeen = true;
-    } else if (args.fixtureName === 'swap' && text === 'ReviewtransactiontoSwapexactinput' &&
+    } else if (text === ({swap:'ReviewtransactiontoSwapexactinput',router:'ReviewtransactiontoSwapbatch',batch:'ReviewtransactiontoExecutebatch'})[args.fixtureName] &&
       !introSeen && !terminalSeen && observed.length === 0) {
       // Captured on Nano X; app-ethereum 1.22.3 src/nbgl/ui_gcs.c:416.
       // An exact fixture intent is allowed once, before any transaction fields.

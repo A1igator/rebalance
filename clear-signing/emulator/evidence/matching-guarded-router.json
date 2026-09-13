@@ -1,0 +1,1127 @@
+{
+  "scope": "Nano X1.22.3 Speculos/public test seed/test certificates only; no retail trust or EIP7702 proxy proof; batch targets implementation directly",
+  "variant": "fixed per-index context with signed MUST_BE array-length guards",
+  "sourceCaptureId": "cIvLx8",
+  "ethereumVersion": "1.22.3",
+  "capturedStatus": "signature-completed",
+  "signatureCompleted": true,
+  "signerAddress": "0xDad77910DbDFdE764fC21FCD4E74D71bBACA6D8D",
+  "screenAssertions": {
+    "passed": true,
+    "complete": true,
+    "expectedFieldCount": 54,
+    "observedFieldCount": 54,
+    "matchedFieldCount": 54,
+    "terminalSeen": true,
+    "failures": [],
+    "fields": [
+      {
+        "operation": "router",
+        "label": "Contract",
+        "value": "0xCaf681a66D020601342297493863E78C959E5cb2",
+        "index": 0,
+        "matched": true,
+        "observed": {
+          "label": "Contract",
+          "value": "0xCaf681a66D020601342297493863E78C959E5cb2",
+          "eventIndex": 3
+        }
+      },
+      {
+        "operation": "router",
+        "label": "Router caller",
+        "value": "0xDad77910DbDFdE764fC21FCD4E74D71bBACA6D8D",
+        "index": 1,
+        "matched": true,
+        "observed": {
+          "label": "Router caller",
+          "value": "0xDad77910DbDFdE764fC21FCD4E74D71bBACA6D8D",
+          "eventIndex": 4
+        }
+      },
+      {
+        "operation": "router",
+        "label": "Native value (wei)",
+        "value": "0",
+        "index": 2,
+        "matched": true,
+        "observed": {
+          "label": "Native value (wei)",
+          "value": "0",
+          "eventIndex": 5
+        }
+      },
+      {
+        "operation": "router",
+        "label": "Deadline",
+        "value": "2027-01-15 08:00:00 AM UTC",
+        "index": 3,
+        "matched": true,
+        "observed": {
+          "label": "Deadline",
+          "value": "2027-01-1508:00:00AMUTC",
+          "eventIndex": 6
+        }
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Transaction type",
+        "value": "Swap exact input",
+        "index": 4,
+        "matched": true,
+        "observed": {
+          "label": "Transaction type",
+          "value": "Swapexactinput",
+          "eventIndex": 7
+        }
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Contract",
+        "value": "0xCaf681a66D020601342297493863E78C959E5cb2",
+        "index": 5,
+        "matched": true,
+        "observed": {
+          "label": "Contract",
+          "value": "0xCaf681a66D020601342297493863E78C959E5cb2",
+          "eventIndex": 8
+        }
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Router caller",
+        "value": "0xDad77910DbDFdE764fC21FCD4E74D71bBACA6D8D",
+        "index": 6,
+        "matched": true,
+        "observed": {
+          "label": "Router caller",
+          "value": "0xDad77910DbDFdE764fC21FCD4E74D71bBACA6D8D",
+          "eventIndex": 9
+        }
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Native value (wei)",
+        "value": "0",
+        "index": 7,
+        "matched": true,
+        "observed": {
+          "label": "Native value (wei)",
+          "value": "0",
+          "eventIndex": 10
+        }
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Input token",
+        "value": "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9",
+        "index": 8,
+        "matched": true,
+        "observed": {
+          "label": "Input token",
+          "value": "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9",
+          "eventIndex": 11
+        }
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Output token",
+        "value": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "index": 9,
+        "matched": true,
+        "observed": {
+          "label": "Output token",
+          "value": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+          "eventIndex": 12
+        }
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Input (0=router bal)",
+        "value": "0.01 AAPL",
+        "index": 10,
+        "matched": true,
+        "observed": {
+          "label": "Input (0=router bal)",
+          "value": "0.01AAPL",
+          "eventIndex": 13
+        }
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Minimum received",
+        "value": "2 USDG",
+        "index": 11,
+        "matched": true,
+        "observed": {
+          "label": "Minimum received",
+          "value": "2USDG",
+          "eventIndex": 14
+        }
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Pool fee",
+        "value": "0.3 %",
+        "index": 12,
+        "matched": true,
+        "observed": {
+          "label": "Pool fee",
+          "value": "0.3%",
+          "eventIndex": 15
+        }
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Recipient",
+        "value": "0x1111111111111111111111111111111111111111",
+        "index": 13,
+        "matched": true,
+        "observed": {
+          "label": "Recipient",
+          "value": "0x1111111111111111111111111111111111111111",
+          "eventIndex": 16
+        }
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Recipient flags",
+        "value": "1=sender; 2=router",
+        "index": 14,
+        "matched": true,
+        "observed": {
+          "label": "Recipient flags",
+          "value": "1=sender;2=router",
+          "eventIndex": 17
+        }
+      },
+      {
+        "operation": "swap[0]",
+        "label": "Sqrt price limit X96",
+        "value": "0",
+        "index": 15,
+        "matched": true,
+        "observed": {
+          "label": "Sqrt price limit X96",
+          "value": "0",
+          "eventIndex": 18
+        }
+      },
+      {
+        "operation": "swap[1]",
+        "label": "Transaction type",
+        "value": "Swap exact input",
+        "index": 16,
+        "matched": true,
+        "observed": {
+          "label": "Transaction type",
+          "value": "Swapexactinput",
+          "eventIndex": 19
+        }
+      },
+      {
+        "operation": "swap[1]",
+        "label": "Contract",
+        "value": "0xCaf681a66D020601342297493863E78C959E5cb2",
+        "index": 17,
+        "matched": true,
+        "observed": {
+          "label": "Contract",
+          "value": "0xCaf681a66D020601342297493863E78C959E5cb2",
+          "eventIndex": 20
+        }
+      },
+      {
+        "operation": "swap[1]",
+        "label": "Router caller",
+        "value": "0xDad77910DbDFdE764fC21FCD4E74D71bBACA6D8D",
+        "index": 18,
+        "matched": true,
+        "observed": {
+          "label": "Router caller",
+          "value": "0xDad77910DbDFdE764fC21FCD4E74D71bBACA6D8D",
+          "eventIndex": 21
+        }
+      },
+      {
+        "operation": "swap[1]",
+        "label": "Native value (wei)",
+        "value": "0",
+        "index": 19,
+        "matched": true,
+        "observed": {
+          "label": "Native value (wei)",
+          "value": "0",
+          "eventIndex": 22
+        }
+      },
+      {
+        "operation": "swap[1]",
+        "label": "Input token",
+        "value": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+        "index": 20,
+        "matched": true,
+        "observed": {
+          "label": "Input token",
+          "value": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+          "eventIndex": 23
+        }
+      },
+      {
+        "operation": "swap[1]",
+        "label": "Output token",
+        "value": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "index": 21,
+        "matched": true,
+        "observed": {
+          "label": "Output token",
+          "value": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+          "eventIndex": 24
+        }
+      },
+      {
+        "operation": "swap[1]",
+        "label": "Input (0=router bal)",
+        "value": "0.02 NVDA",
+        "index": 22,
+        "matched": true,
+        "observed": {
+          "label": "Input (0=router bal)",
+          "value": "0.02NVDA",
+          "eventIndex": 25
+        }
+      },
+      {
+        "operation": "swap[1]",
+        "label": "Minimum received",
+        "value": "3 USDG",
+        "index": 23,
+        "matched": true,
+        "observed": {
+          "label": "Minimum received",
+          "value": "3USDG",
+          "eventIndex": 26
+        }
+      },
+      {
+        "operation": "swap[1]",
+        "label": "Pool fee",
+        "value": "0.3 %",
+        "index": 24,
+        "matched": true,
+        "observed": {
+          "label": "Pool fee",
+          "value": "0.3%",
+          "eventIndex": 27
+        }
+      },
+      {
+        "operation": "swap[1]",
+        "label": "Recipient",
+        "value": "0x1111111111111111111111111111111111111111",
+        "index": 25,
+        "matched": true,
+        "observed": {
+          "label": "Recipient",
+          "value": "0x1111111111111111111111111111111111111111",
+          "eventIndex": 28
+        }
+      },
+      {
+        "operation": "swap[1]",
+        "label": "Recipient flags",
+        "value": "1=sender; 2=router",
+        "index": 26,
+        "matched": true,
+        "observed": {
+          "label": "Recipient flags",
+          "value": "1=sender;2=router",
+          "eventIndex": 29
+        }
+      },
+      {
+        "operation": "swap[1]",
+        "label": "Sqrt price limit X96",
+        "value": "0",
+        "index": 27,
+        "matched": true,
+        "observed": {
+          "label": "Sqrt price limit X96",
+          "value": "0",
+          "eventIndex": 30
+        }
+      },
+      {
+        "operation": "swap[2]",
+        "label": "Transaction type",
+        "value": "Swap exact input",
+        "index": 28,
+        "matched": true,
+        "observed": {
+          "label": "Transaction type",
+          "value": "Swapexactinput",
+          "eventIndex": 31
+        }
+      },
+      {
+        "operation": "swap[2]",
+        "label": "Contract",
+        "value": "0xCaf681a66D020601342297493863E78C959E5cb2",
+        "index": 29,
+        "matched": true,
+        "observed": {
+          "label": "Contract",
+          "value": "0xCaf681a66D020601342297493863E78C959E5cb2",
+          "eventIndex": 32
+        }
+      },
+      {
+        "operation": "swap[2]",
+        "label": "Router caller",
+        "value": "0xDad77910DbDFdE764fC21FCD4E74D71bBACA6D8D",
+        "index": 30,
+        "matched": true,
+        "observed": {
+          "label": "Router caller",
+          "value": "0xDad77910DbDFdE764fC21FCD4E74D71bBACA6D8D",
+          "eventIndex": 33
+        }
+      },
+      {
+        "operation": "swap[2]",
+        "label": "Native value (wei)",
+        "value": "0",
+        "index": 31,
+        "matched": true,
+        "observed": {
+          "label": "Native value (wei)",
+          "value": "0",
+          "eventIndex": 34
+        }
+      },
+      {
+        "operation": "swap[2]",
+        "label": "Input token",
+        "value": "0xe93237C50D904957Cf27E7B1133b510C669c2e74",
+        "index": 32,
+        "matched": true,
+        "observed": {
+          "label": "Input token",
+          "value": "0xe93237C50D904957Cf27E7B1133b510C669c2e74",
+          "eventIndex": 35
+        }
+      },
+      {
+        "operation": "swap[2]",
+        "label": "Output token",
+        "value": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "index": 33,
+        "matched": true,
+        "observed": {
+          "label": "Output token",
+          "value": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+          "eventIndex": 36
+        }
+      },
+      {
+        "operation": "swap[2]",
+        "label": "Input (0=router bal)",
+        "value": "0.03 MSFT",
+        "index": 34,
+        "matched": true,
+        "observed": {
+          "label": "Input (0=router bal)",
+          "value": "0.03MSFT",
+          "eventIndex": 37
+        }
+      },
+      {
+        "operation": "swap[2]",
+        "label": "Minimum received",
+        "value": "4 USDG",
+        "index": 35,
+        "matched": true,
+        "observed": {
+          "label": "Minimum received",
+          "value": "4USDG",
+          "eventIndex": 38
+        }
+      },
+      {
+        "operation": "swap[2]",
+        "label": "Pool fee",
+        "value": "0.3 %",
+        "index": 36,
+        "matched": true,
+        "observed": {
+          "label": "Pool fee",
+          "value": "0.3%",
+          "eventIndex": 39
+        }
+      },
+      {
+        "operation": "swap[2]",
+        "label": "Recipient",
+        "value": "0x1111111111111111111111111111111111111111",
+        "index": 37,
+        "matched": true,
+        "observed": {
+          "label": "Recipient",
+          "value": "0x1111111111111111111111111111111111111111",
+          "eventIndex": 40
+        }
+      },
+      {
+        "operation": "swap[2]",
+        "label": "Recipient flags",
+        "value": "1=sender; 2=router",
+        "index": 38,
+        "matched": true,
+        "observed": {
+          "label": "Recipient flags",
+          "value": "1=sender;2=router",
+          "eventIndex": 41
+        }
+      },
+      {
+        "operation": "swap[2]",
+        "label": "Sqrt price limit X96",
+        "value": "0",
+        "index": 39,
+        "matched": true,
+        "observed": {
+          "label": "Sqrt price limit X96",
+          "value": "0",
+          "eventIndex": 42
+        }
+      },
+      {
+        "operation": "swap[3]",
+        "label": "Transaction type",
+        "value": "Swap exact input",
+        "index": 40,
+        "matched": true,
+        "observed": {
+          "label": "Transaction type",
+          "value": "Swapexactinput",
+          "eventIndex": 43
+        }
+      },
+      {
+        "operation": "swap[3]",
+        "label": "Contract",
+        "value": "0xCaf681a66D020601342297493863E78C959E5cb2",
+        "index": 41,
+        "matched": true,
+        "observed": {
+          "label": "Contract",
+          "value": "0xCaf681a66D020601342297493863E78C959E5cb2",
+          "eventIndex": 44
+        }
+      },
+      {
+        "operation": "swap[3]",
+        "label": "Router caller",
+        "value": "0xDad77910DbDFdE764fC21FCD4E74D71bBACA6D8D",
+        "index": 42,
+        "matched": true,
+        "observed": {
+          "label": "Router caller",
+          "value": "0xDad77910DbDFdE764fC21FCD4E74D71bBACA6D8D",
+          "eventIndex": 45
+        }
+      },
+      {
+        "operation": "swap[3]",
+        "label": "Native value (wei)",
+        "value": "0",
+        "index": 43,
+        "matched": true,
+        "observed": {
+          "label": "Native value (wei)",
+          "value": "0",
+          "eventIndex": 46
+        }
+      },
+      {
+        "operation": "swap[3]",
+        "label": "Input token",
+        "value": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "index": 44,
+        "matched": true,
+        "observed": {
+          "label": "Input token",
+          "value": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+          "eventIndex": 47
+        }
+      },
+      {
+        "operation": "swap[3]",
+        "label": "Output token",
+        "value": "0x86923f96303D656E4aa86D9d42D1e57ad2023fdC",
+        "index": 45,
+        "matched": true,
+        "observed": {
+          "label": "Output token",
+          "value": "0x86923f96303D656E4aa86D9d42D1e57ad2023fdC",
+          "eventIndex": 48
+        }
+      },
+      {
+        "operation": "swap[3]",
+        "label": "Input (0=router bal)",
+        "value": "8 USDG",
+        "index": 46,
+        "matched": true,
+        "observed": {
+          "label": "Input (0=router bal)",
+          "value": "8USDG",
+          "eventIndex": 49
+        }
+      },
+      {
+        "operation": "swap[3]",
+        "label": "Minimum received",
+        "value": "0.04 AMD",
+        "index": 47,
+        "matched": true,
+        "observed": {
+          "label": "Minimum received",
+          "value": "0.04AMD",
+          "eventIndex": 50
+        }
+      },
+      {
+        "operation": "swap[3]",
+        "label": "Pool fee",
+        "value": "0.3 %",
+        "index": 48,
+        "matched": true,
+        "observed": {
+          "label": "Pool fee",
+          "value": "0.3%",
+          "eventIndex": 51
+        }
+      },
+      {
+        "operation": "swap[3]",
+        "label": "Recipient",
+        "value": "0x1111111111111111111111111111111111111111",
+        "index": 49,
+        "matched": true,
+        "observed": {
+          "label": "Recipient",
+          "value": "0x1111111111111111111111111111111111111111",
+          "eventIndex": 52
+        }
+      },
+      {
+        "operation": "swap[3]",
+        "label": "Recipient flags",
+        "value": "1=sender; 2=router",
+        "index": 50,
+        "matched": true,
+        "observed": {
+          "label": "Recipient flags",
+          "value": "1=sender;2=router",
+          "eventIndex": 53
+        }
+      },
+      {
+        "operation": "swap[3]",
+        "label": "Sqrt price limit X96",
+        "value": "0",
+        "index": 51,
+        "matched": true,
+        "observed": {
+          "label": "Sqrt price limit X96",
+          "value": "0",
+          "eventIndex": 54
+        }
+      },
+      {
+        "operation": "transaction",
+        "label": "Network",
+        "value": "Robinhood Chain",
+        "index": 52,
+        "matched": true,
+        "observed": {
+          "label": "Network",
+          "value": "RobinhoodChain",
+          "eventIndex": 55
+        }
+      },
+      {
+        "operation": "transaction",
+        "label": "Max fees",
+        "value": "0.000000000001 ETH",
+        "index": 53,
+        "matched": true,
+        "observed": {
+          "label": "Max fees",
+          "value": "0.000000000001ETH",
+          "eventIndex": 56
+        }
+      }
+    ],
+    "scope": "Exact ordered synthetic Nano X display fields only; signature, production trust and EIP-7702 proxy support are separate"
+  },
+  "events": [
+    "Ethereum | app is ready",
+    "Review transaction to  | Swap batch",
+    "Interaction with | Rebalance  | development",
+    "Contract | 0xCaf681a66D020601 | 342297493863E78C95 | 9E5cb2",
+    "Router caller | 0xDad77910DbDFdE7 | 64fC21FCD4E74D71b | BACA6D8D",
+    "Native value (wei) | 0",
+    "Deadline | 2027-01-15 | 08:00:00 AM UTC",
+    "Transaction type | Swap exact input",
+    "Contract | 0xCaf681a66D020601 | 342297493863E78C95 | 9E5cb2",
+    "Router caller | 0xDad77910DbDFdE7 | 64fC21FCD4E74D71b | BACA6D8D",
+    "Native value (wei) | 0",
+    "Input token | 0xaF3D76f1834A1d4 | 25780943C99Ea8A608 | f8a93f9",
+    "Output token | 0x5fc5360D0400a0Fd | 4f2af552ADD042D71 | 6F1d168",
+    "Input (0=router bal) | 0.01 AAPL",
+    "Minimum received | 2 USDG",
+    "Pool fee | 0.3 %",
+    "Recipient | 0x11111111111111111 | 1111111111111111111 | 1111",
+    "Recipient flags | 1=sender; 2=router",
+    "Sqrt price limit X96 | 0",
+    "Transaction type | Swap exact input",
+    "Contract | 0xCaf681a66D020601 | 342297493863E78C95 | 9E5cb2",
+    "Router caller | 0xDad77910DbDFdE7 | 64fC21FCD4E74D71b | BACA6D8D",
+    "Native value (wei) | 0",
+    "Input token | 0xd0601CE157Db5bd | C3162BbaC2a2C8aF53 | 20D9EEC",
+    "Output token | 0x5fc5360D0400a0Fd | 4f2af552ADD042D71 | 6F1d168",
+    "Input (0=router bal) | 0.02 NVDA",
+    "Minimum received | 3 USDG",
+    "Pool fee | 0.3 %",
+    "Recipient | 0x11111111111111111 | 1111111111111111111 | 1111",
+    "Recipient flags | 1=sender; 2=router",
+    "Sqrt price limit X96 | 0",
+    "Transaction type | Swap exact input",
+    "Contract | 0xCaf681a66D020601 | 342297493863E78C95 | 9E5cb2",
+    "Router caller | 0xDad77910DbDFdE7 | 64fC21FCD4E74D71b | BACA6D8D",
+    "Native value (wei) | 0",
+    "Input token | 0xe93237C50D904957 | Cf27E7B1133b510C66 | 9c2e74",
+    "Output token | 0x5fc5360D0400a0Fd | 4f2af552ADD042D71 | 6F1d168",
+    "Input (0=router bal) | 0.03 MSFT",
+    "Minimum received | 4 USDG",
+    "Pool fee | 0.3 %",
+    "Recipient | 0x11111111111111111 | 1111111111111111111 | 1111",
+    "Recipient flags | 1=sender; 2=router",
+    "Sqrt price limit X96 | 0",
+    "Transaction type | Swap exact input",
+    "Contract | 0xCaf681a66D020601 | 342297493863E78C95 | 9E5cb2",
+    "Router caller | 0xDad77910DbDFdE7 | 64fC21FCD4E74D71b | BACA6D8D",
+    "Native value (wei) | 0",
+    "Input token | 0x5fc5360D0400a0Fd | 4f2af552ADD042D71 | 6F1d168",
+    "Output token | 0x86923f96303D656E | 4aa86D9d42D1e57ad | 2023fdC",
+    "Input (0=router bal) | 8 USDG",
+    "Minimum received | 0.04 AMD",
+    "Pool fee | 0.3 %",
+    "Recipient | 0x11111111111111111 | 1111111111111111111 | 1111",
+    "Recipient flags | 1=sender; 2=router",
+    "Sqrt price limit X96 | 0",
+    "Network | Robinhood Chain",
+    "Max fees | 0.000000000001 ETH",
+    "Sign transaction"
+  ],
+  "steps": [
+    "signer.eth.steps.parseTransaction",
+    "signer.eth.steps.getAddress",
+    "signer.eth.steps.buildContexts",
+    "signer.eth.steps.provideContexts",
+    "signer.eth.steps.signTransaction",
+    "signer.eth.steps.detectBlindSigning"
+  ],
+  "requests": [
+    {
+      "apduHeader": "B0010000",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b001000000",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e006000000",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e002000015",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e020000000",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e020000000",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e020000000",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e020000000",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e020000000",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b0060c009b",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e030010073",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e0040001ff",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e0048001ff",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e0048001ff",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e0048001ff",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e0048001ff",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e0048001a5",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b0060b009c",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e0260100c8",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801005e",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010025",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801002a",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801002f",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010031",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010062",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b0060b009c",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e0260100cd",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010025",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801002a",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801002f",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010031",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010032",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b00608009e",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e00a000069",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010051",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b00608009e",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e00a000068",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801004d",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010037",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801002f",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801003d",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801003a",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010062",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b0060b009c",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e0260100cd",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010025",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801002a",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801002f",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010031",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010032",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b00608009e",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e00a000067",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010051",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b00608009e",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e00a000068",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801004d",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010037",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801002f",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801003d",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801003a",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010062",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b0060b009c",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e0260100cd",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010025",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801002a",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801002f",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010031",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010032",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b00608009e",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e00a000068",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010051",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b00608009e",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e00a000068",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801004d",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010037",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801002f",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801003d",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801003a",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010062",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b0060b009c",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e0260100cd",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010025",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801002a",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801002f",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010031",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010032",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b00608009e",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e00a000068",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010051",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "b00608009e",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e00a000067",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801004d",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e028010037",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801002f",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801003d",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e02801003a",
+      "statusWord": "9000"
+    },
+    {
+      "apduHeader": "e004000200",
+      "statusWord": "9000"
+    }
+  ]
+}

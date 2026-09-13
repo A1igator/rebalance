@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import checker from '../emulator/assert-screens.cjs';
 import * as fixture from '../fixtures.mjs';
 
@@ -25,7 +26,7 @@ const check = (events, fixtureName = 'approval', signerAddress) =>
 const approvalLegs = [
   ['AAPL', '0.01 AAPL'], ['NVDA', '0.02 NVDA'], ['MSFT', '0.03 MSFT'], ['USDG', '8 USDG'],
 ].map(([symbol, amount]) => [
-  `Call target | ${fixture.tokens[symbol].address}`, 'Call value (wei) | 0',
+  `Call target | ${fixture.tokens[symbol].address}`, 'Call value (wei) | 0', 'Transaction type | Approve token',
   `Contract | ${fixture.tokens[symbol].address}`, 'Native value (wei) | 0',
   `Spender | ${fixture.router}`, `Approval amount | ${amount}`,
 ]);
@@ -35,6 +36,7 @@ const swapLegs = [
   ['MSFT', 'USDG', '0.03 MSFT', '4 USDG'],
   ['USDG', 'AMD', '8 USDG', '0.04 AMD'],
 ].map(([input, output, amount, minimum]) => [
+  'Transaction type | Swap exact input',
   `Contract | ${fixture.router}`, `Router caller | ${fixture.implementation}`,
   'Native value (wei) | 0', `Input token | ${fixture.tokens[input].address}`,
   `Output token | ${fixture.tokens[output].address}`, `Input (0=router bal) | ${amount}`,
@@ -44,7 +46,7 @@ const swapLegs = [
 const batchScreens = (approvals = approvalLegs, swaps = swapLegs) => [
   'Ethereum | app is ready', 'Interaction with | Rebalance | development',
   `Account | ${fixture.implementation}`, 'Native value (wei) | 0',
-  ...approvals.flat(), `Call target | ${fixture.router}`, 'Call value (wei) | 0',
+  ...approvals.flat(), `Call target | ${fixture.router}`, 'Call value (wei) | 0', 'Transaction type | Swap batch',
   `Contract | ${fixture.router}`, `Router caller | ${fixture.implementation}`,
   'Native value (wei) | 0', 'Deadline | 2027-01-15 | 08:00:00 AM UTC',
   ...swaps.flat(), 'Network | Robinhood Chain', 'Max fees | 0.000000000001 ETH',
@@ -87,9 +89,9 @@ test('approval rejects omissions, reordered fields, repeats, unknown screens and
 test('synthetic batch transcript covers every nested field in exact operation order', () => {
   const result = check(batchScreens(), 'batch');
   assert.equal(result.passed, true, JSON.stringify(result.failures));
-  assert.equal(result.expectedFieldCount, 78);
-  assert.equal(result.observedFieldCount, 78);
-  assert.equal(result.matchedFieldCount, 78);
+  assert.equal(result.expectedFieldCount, 87);
+  assert.equal(result.observedFieldCount, 87);
+  assert.equal(result.matchedFieldCount, 87);
 });
 
 test('batch rejects missing, duplicated or swapped approval and swap calls', () => {
@@ -103,7 +105,7 @@ test('batch rejects missing, duplicated or swapped approval and swap calls', () 
 
 test('batch rejects same global amounts assigned to the wrong swap and every altered security field', () => {
   const swappedMinima = swapLegs.map(leg => [...leg]);
-  [swappedMinima[0][6], swappedMinima[1][6]] = [swappedMinima[1][6], swappedMinima[0][6]];
+  [swappedMinima[0][7], swappedMinima[1][7]] = [swappedMinima[1][7], swappedMinima[0][7]];
   assert.equal(check(batchScreens(approvalLegs, swappedMinima), 'batch').passed, false);
   for (const [prefix, replacement] of [
     ['Call target |', `Call target | ${fixture.wallet}`], ['Call value (wei)', 'Call value (wei) | 1'],
@@ -161,3 +163,37 @@ test('actual direct swap capture accepts only its exact pre-field review introdu
   assert.equal(check(late, 'swap', publicEmulatorAddress).passed, false);
   assert.equal(check([intro, ...approvalScreens]).passed, false);
 });
+
+
+test('nested transaction-type sections must match the expected operation and order exactly', () => {
+  const valid=batchScreens();
+  const first=valid.findIndex(s=>s==='Transaction type | Approve token');
+  for(const replacement of ['Transaction type | Transfer tokens','Transaction type | Swap exact input']) {
+    const wrong=[...valid];wrong[first]=replacement;
+    assert.equal(check(wrong,'batch').passed,false);
+  }
+  const duplicate=[...valid];duplicate.splice(first,0,valid[first]);
+  assert.equal(check(duplicate,'batch').passed,false);
+  const moved=[...valid];const [section]=moved.splice(first,1);moved.splice(first+2,0,section);
+  assert.equal(check(moved,'batch').passed,false);
+  assert.equal(check(valid.filter((_,index)=>index!==first),'batch').passed,false);
+  const intro='Review transaction to | Execute batch';
+  assert.equal(check([intro,...valid],'batch').passed,true);
+  assert.equal(check([intro,intro,...valid],'batch').passed,false);
+  assert.equal(check(['Review transaction to | Swap batch',...valid],'batch').passed,false);
+});
+
+
+for (const [name,count] of [['router',54],['batch',87]]) {
+  test(`actual guarded ${name} capture verifies every ordered field and section`,()=>{
+    const capture=JSON.parse(readFileSync(new URL(`../emulator/evidence/matching-guarded-${name}.json`,import.meta.url),'utf8'));
+    assert.equal(capture.signatureCompleted,true);
+    const result=check(capture.events,name,capture.signerAddress);
+    assert.equal(result.passed,true,JSON.stringify(result.failures));
+    assert.equal(result.expectedFieldCount,count);
+    assert.equal(result.matchedFieldCount,count);
+    const typeIndex=capture.events.findIndex(s=>s.startsWith('Transaction type'));
+    const changed=[...capture.events];changed[typeIndex]='Transaction type | Unknown action';
+    assert.equal(check(changed,name,capture.signerAddress).passed,false);
+  });
+}

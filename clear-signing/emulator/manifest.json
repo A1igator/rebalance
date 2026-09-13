@@ -41,13 +41,40 @@
         "orderedFields": "13/13",
         "evidence": "evidence/nanox-swap.json"
       },
-      "routerMulticall": {
-        "syntheticSignature": "not completed",
-        "nestedFieldStatus": "6a80",
-        "fallback": "refused",
-        "evidence": "evidence/nanox-router-failure.json"
+      "originalArrayDescriptors": {
+        "routerMulticall": {
+          "syntheticSignature": "not completed",
+          "nestedFieldStatus": "6a80",
+          "fallback": "refused",
+          "evidence": "evidence/nanox-router-failure.json"
+        },
+        "simple7702Batch": "not tested"
       },
-      "simple7702Batch": "not tested"
+      "matchingContext": {
+        "scope": "fixed synthetic counts; custom binary protocol extension; emulator test signatures only",
+        "protocol": "rebalance-fixed-array-context-v1",
+        "router": {
+          "calls": 4,
+          "signature": "completed",
+          "orderedFields": "54/54",
+          "evidence": "evidence/matching-guarded-router.json"
+        },
+        "simple7702Batch": {
+          "calls": 5,
+          "target": "implementation address, not delegated EOA",
+          "signature": "completed",
+          "orderedFields": "87/87",
+          "evidence": "evidence/matching-guarded-batch.json"
+        },
+        "negativeCounts": {
+          "routerMissing3": "SDK context-build refusal",
+          "routerExtra5": "device count-guard6a80",
+          "accountMissing4": "SDK context-build refusal",
+          "accountExtra6": "device count-guard6a80",
+          "reviewOrSignature": "none",
+          "evidence": "evidence/matching-count-refusals.json"
+        }
+      }
     },
     "apex_p": {
       "startup": "verified",
@@ -57,5 +84,14 @@
     "productionMetadataTrust": "not verified",
     "retailDeviceCompatibility": "not verified",
     "eip7702WalletProxyResolution": "not verified"
+  },
+  "matchingCompiler": {
+    "source": "compile-matching.py",
+    "documentation": "MATCHING_CONTEXT.md",
+    "appParserCommit": "bc637f8986b3b1ec7e044daf7ecb3e832f24258b",
+    "erc7730ConverterSha256": "e406c78a39a95410e03d51e1391ef38dce698521fe920c35ec8e6fb2565bb139",
+    "profile": "abi-array-length-must-be-v1",
+    "newDependency": false,
+    "productionRuntimeEnabled": false
   }
 }

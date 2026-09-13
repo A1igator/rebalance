@@ -64,10 +64,41 @@ The initial [Nano X diagnostic](evidence/nanox-approval-diagnostic.json) records
 
 For an interactive screenshot session, append `--manual-review` to the injector invocation. This mode captures screens but never presses an emulator button automatically. Use the loopback Speculos viewer to navigate the public synthetic fixture. Review expires after ten minutes, or press Ctrl-C to cancel sooner; automatic tests have a four-minute limit. Cancellation and incomplete manual reviews exit nonzero and retain their captured evidence. Never enable blind signing to bypass a failed fixture.
 
-## Observed results
+## Original array-descriptor results
 
 With Ethereum 1.22.3 on the pinned Nano X emulator, the synthetic USDG approval completed generic signing and passed all six ordered fields. The direct AAPL-to-USDG swap completed generic signing and passed all thirteen ordered fields. These checks used the emulator’s public default seed and locally test-signed metadata, including Robinhood network metadata; they establish synthetic device display behavior only. The saved swap capture was rechecked after teaching the validator the exact “Swap exact input” introduction screen.
 
 Actual screenshots: [8 USDG approval](evidence/nanox-approval-amount.png), [0.01 AAPL swap input](evidence/nanox-swap-input.png), and [2 USDG minimum received](evidence/nanox-swap-minimum.png). Sanitized [approval evidence](evidence/nanox-approval.json) and [swap evidence](evidence/nanox-swap.json) retain ordered screen checks and protocol status words, without signature payloads.
 
-The four-swap router multicall did not reach review or produce a signature. Its nested calldata field returned `6a80`, generic review start returned `6980`, and the harness refused blind-signing fallback. See the [actual failure evidence](evidence/nanox-router-failure.json) and [source-level nested-array limitation](evidence/nested-array-limitation.md). The full Simple7702 batch was not subsequently tested. Production metadata trust, retail-device display, and actual EIP-7702 wallet/proxy resolution remain unverified; no runtime Clear Signing capability is enabled by these results.
+The four-swap router multicall did not reach review or produce a signature. Its nested calldata field returned `6a80`, generic review start returned `6980`, and the harness refused blind-signing fallback. See the [actual failure evidence](evidence/nanox-router-failure.json) and [source-level nested-array limitation](evidence/nested-array-limitation.md). The full Simple7702 batch was not tested with that original array-descriptor variant. The separate matching-context experiment below subsequently verified a guarded fixed-count variant. Production metadata trust, retail-device display, and actual EIP-7702 wallet/proxy resolution remain unverified; no runtime Clear Signing capability is enabled by these results.
+
+## Verified fixed matching-context experiment
+
+The user's matching-context proposal resolved the nested cardinality failure for the fixed public fixture. A separate [development compiler](compile-matching.py) emits one context per indexed call, then adds a signed binary `MUST_BE` guard requiring exactly four router swaps and five outer account calls. Every original target, value, caller, amount, minimum, fee, recipient and expiry field remains. This is a custom compiler extension using the pinned app's existing protocol; the original ERC-7730 descriptors and production signer stay unchanged. See [protocol details, pins and limitations](MATCHING_CONTEXT.md).
+
+Actual Nano X results with the public default seed and test certificates:
+
+| Fixed fixture | Observed outcome |
+| --- | --- |
+| Router, four swaps | Generic signature completed; all **54** ordered fields and transaction-type sections verified |
+| Simple7702, five calls including that router | Both count guards accepted; generic signature completed; all **87** ordered fields and sections verified |
+| Router, three swaps; account, four calls | Rejected during SDK context construction, before transaction context was sent; no review or signature |
+| Router, five swaps; account, six calls | First signed count-guard field rejected by device (`6a80`); generic start rejected (`6980`), blind fallback refused; no review or signature |
+
+The [guarded router capture](evidence/matching-guarded-router.json), [guarded batch capture](evidence/matching-guarded-batch.json), and [four negative captures](evidence/matching-count-refusals.json) preserve actual screen text and APDU headers/statuses, without raw transaction or signature payloads. Actual batch PNGs show [the batch introduction](evidence/matching-batch-intro.png), [8 USDG approval](evidence/matching-batch-usdg-approval.png), [implementation caller](evidence/matching-batch-router-caller.png), and [0.04 AMD minimum](evidence/matching-batch-amd-minimum.png). The prior unguarded indexed captures retain their original checker failures; [separate derived checks](evidence/matching-indexed-checks.json) verify the newly observed transaction-type sections without rewriting that history.
+
+After the ordinary compiler has created `compiled-test-context.json`, use the same isolated work directory and exact owned Nano X container:
+
+```sh
+"$emulator_dir/python/bin/python" clear-signing/emulator/compile-matching.py \
+  "$emulator_dir/device-sdk-ts" "$emulator_dir"
+node clear-signing/emulator/inject.cjs --work-dir "$emulator_dir" \
+  --container-id "$container_id" --speculos-url http://127.0.0.1:19501 \
+  --fixture batch --matching-context
+```
+
+Restart only that exact container between cases. Positive fixture names are `router` and `batch`; negative fixture names are `router-missing-call`, `router-extra-call`, `batch-missing-call`, and `batch-extra-call`. Negatives require `--matching-context`, use only fixed synthetic calldata, and cannot use manual review. Their exit code is zero only when the expected rejection boundary is observed with no review or signature; the result retains its refusal status and distinguishes SDK rejection from device guard enforcement. A successful generic signing APDU can never count as a passed negative test. Positive/manual runs retain the usual signature and complete-display requirements.
+
+Run the offline regressions with `node --test clear-signing/test/*.test.mjs` and `python3 clear-signing/emulator/test_matching.py`. These include replay of both actual guarded positive captures, all four negative captures, altered/reordered section checks and independent ABI/count-guard tests.
+
+Only the fixed four-swap/five-call variants are packaged. General batch-length variant selection, authenticated EIP-7702 resolution, Ledger production metadata approval/distribution, and physical-device display remain unverified. The batch addresses the implementation directly; its displayed implementation caller must not be presented as proof of a real delegated-wallet path. No runtime Clear Signing feature is enabled.

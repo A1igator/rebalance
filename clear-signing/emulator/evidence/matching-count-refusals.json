@@ -1,0 +1,410 @@
+{
+  "scope": "Nano X1.22.3 Speculos/public test seed/test certificates only; no retail trust or EIP7702 proxy proof; batch targets implementation directly",
+  "note": "Missing-count fixtures stop at SDK context construction; extra-count fixtures fail the first signed device guard. No negative case reaches review or completes a signature.",
+  "cases": [
+    {
+      "fixtureCase": "router-missing-call",
+      "sourceCaptureId": "8fD2UT",
+      "status": "device-error",
+      "errorCode": "Error",
+      "signatureCompleted": false,
+      "steps": [
+        "signer.eth.steps.parseTransaction",
+        "signer.eth.steps.getAddress",
+        "signer.eth.steps.buildContexts"
+      ],
+      "events": [
+        "Ethereum | app is ready"
+      ],
+      "requests": [
+        {
+          "apduHeader": "B0010000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "b001000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e006000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e002000015",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e020000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e020000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e020000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e020000000",
+          "statusWord": "9000"
+        }
+      ],
+      "observedRefusal": {
+        "expected": true,
+        "passed": true,
+        "boundary": "sdk-context-build",
+        "noReview": true,
+        "noBasicResponse": true,
+        "noCompletedSigningApdu": true,
+        "signatureCompleted": false,
+        "scope": "Observed rejection of the fixed synthetic negative fixture only; no production or general ABI coverage claim"
+      }
+    },
+    {
+      "fixtureCase": "router-extra-call",
+      "sourceCaptureId": "pGe0Gl",
+      "status": "blind-signing-refused",
+      "signatureCompleted": false,
+      "steps": [
+        "signer.eth.steps.parseTransaction",
+        "signer.eth.steps.getAddress",
+        "signer.eth.steps.buildContexts",
+        "signer.eth.steps.provideContexts",
+        "signer.eth.steps.signTransaction",
+        "signer.eth.steps.blindSignTransactionFallback"
+      ],
+      "events": [
+        "Ethereum | app is ready"
+      ],
+      "requests": [
+        {
+          "apduHeader": "B0010000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "b001000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e006000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e002000015",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e020000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e020000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e020000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e020000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e020000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "b0060c009b",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e030010073",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e0040001ff",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e0048001ff",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e0048001ff",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e0048001ff",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e0048001ff",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e0048001ff",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e0048001e6",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "b0060b009c",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e0260100c8",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e02801005e",
+          "statusWord": "6a80"
+        },
+        {
+          "apduHeader": "e004000200",
+          "statusWord": "6980"
+        },
+        {
+          "apduHeader": "e0040000ff",
+          "blocked": "basic-signing-command"
+        }
+      ],
+      "observedRefusal": {
+        "expected": true,
+        "passed": true,
+        "boundary": "device-count-guard",
+        "noReview": true,
+        "noBasicResponse": true,
+        "noCompletedSigningApdu": true,
+        "signatureCompleted": false,
+        "scope": "Observed rejection of the fixed synthetic negative fixture only; no production or general ABI coverage claim"
+      }
+    },
+    {
+      "fixtureCase": "batch-missing-call",
+      "sourceCaptureId": "ETTLQ6",
+      "status": "device-error",
+      "errorCode": "Error",
+      "signatureCompleted": false,
+      "steps": [
+        "signer.eth.steps.parseTransaction",
+        "signer.eth.steps.getAddress",
+        "signer.eth.steps.buildContexts"
+      ],
+      "events": [
+        "Ethereum | app is ready"
+      ],
+      "requests": [
+        {
+          "apduHeader": "B0010000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "b001000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e006000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e002000015",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e020000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e020000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e020000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e020000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e020000000",
+          "statusWord": "9000"
+        }
+      ],
+      "observedRefusal": {
+        "expected": true,
+        "passed": true,
+        "boundary": "sdk-context-build",
+        "noReview": true,
+        "noBasicResponse": true,
+        "noCompletedSigningApdu": true,
+        "signatureCompleted": false,
+        "scope": "Observed rejection of the fixed synthetic negative fixture only; no production or general ABI coverage claim"
+      }
+    },
+    {
+      "fixtureCase": "batch-extra-call",
+      "sourceCaptureId": "T49Ycy",
+      "status": "blind-signing-refused",
+      "signatureCompleted": false,
+      "steps": [
+        "signer.eth.steps.parseTransaction",
+        "signer.eth.steps.getAddress",
+        "signer.eth.steps.buildContexts",
+        "signer.eth.steps.provideContexts",
+        "signer.eth.steps.signTransaction",
+        "signer.eth.steps.blindSignTransactionFallback"
+      ],
+      "events": [
+        "Ethereum | app is ready"
+      ],
+      "requests": [
+        {
+          "apduHeader": "B0010000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "b001000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e006000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e002000015",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e020000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e020000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e020000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e020000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e020000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e020000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e020000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e020000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e020000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e020000000",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "b0060c009b",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e030010073",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e0040001ff",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e0048001ff",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e0048001ff",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e0048001ff",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e0048001ff",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e0048001ff",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e0048001ff",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e0048001ff",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e0048001ff",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e0048001ff",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e0048001ff",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e0048001ab",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "b0060b009c",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e0260100cf",
+          "statusWord": "9000"
+        },
+        {
+          "apduHeader": "e02801005e",
+          "statusWord": "6a80"
+        },
+        {
+          "apduHeader": "e004000200",
+          "statusWord": "6980"
+        },
+        {
+          "apduHeader": "e0040000ff",
+          "blocked": "basic-signing-command"
+        }
+      ],
+      "observedRefusal": {
+        "expected": true,
+        "passed": true,
+        "boundary": "device-count-guard",
+        "noReview": true,
+        "noBasicResponse": true,
+        "noCompletedSigningApdu": true,
+        "signatureCompleted": false,
+        "scope": "Observed rejection of the fixed synthetic negative fixture only; no production or general ABI coverage claim"
+      }
+    }
+  ]
+}

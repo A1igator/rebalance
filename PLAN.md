@@ -238,3 +238,8 @@ Keep portfolio navigation on the page's validated loopback hostname and release 
 ## Clear Signing development preparation — September 13
 
 [Prompt 106](docs/prompts/106-ledger-clear-signing-development.md) resumes isolated descriptor and Speculos preparation for the current nested Simple7702/Uniswap batch. Validate actual decoded fields and preserve unknown-call warnings before considering production submission. Live wallet execution and retail-device trust remain unchanged.
+
+
+## Matching nested Clear Signing contexts — September 13
+
+[Prompt108](docs/prompts/108-matching-clear-signing-context.md) investigates per-call indexed contexts with firmware-enforced array-count guards in isolated Speculos. Preserve every original call field and production behavior; validate complete ordered displays and rejection of extra/missing calls. Fixed-count test-signed variants are development evidence, not production metadata enrollment or actual delegated-account resolution. Universal Router/v4 work in this prompt is read-only feasibility and liquidity research, not a runtime migration.

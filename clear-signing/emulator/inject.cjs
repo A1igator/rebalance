@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { parseArgs } = require('node:util');
 const { execFileSync } = require('node:child_process');
-const { values: options } = parseArgs({ options: { 'work-dir': { type: 'string' }, 'container-id': { type: 'string' }, 'speculos-url': { type: 'string' }, fixture: { type: 'string', default: 'approval' }, 'manual-review': { type: 'boolean', default: false } } });
+const { values: options } = parseArgs({ options: { 'work-dir': { type: 'string' }, 'container-id': { type: 'string' }, 'speculos-url': { type: 'string' }, fixture: { type: 'string', default: 'approval' }, 'manual-review': { type: 'boolean', default: false }, 'matching-context': { type: 'boolean', default: false } } });
 const tempRoot = fs.realpathSync('/tmp');
 if (!options['work-dir'] || !path.isAbsolute(options['work-dir'])) throw new Error('Explicit absolute /tmp work directory is required');
 const work = fs.realpathSync(options['work-dir']);
@@ -18,7 +18,11 @@ const mappings = Object.entries(inspected.NetworkSettings?.Ports || {}).flatMap(
 if (inspected.HostConfig?.Privileged || inspected.HostConfig?.CapAdd?.length || inspected.HostConfig?.DeviceRequests?.length || ['host'].includes(inspected.HostConfig?.NetworkMode) || mappings.length !== 1 || mappings[0].port !== '5000/tcp' || mappings[0].HostIp !== '127.0.0.1' || mappings[0].HostPort !== emulator.port || inspected.Config?.Image !== 'ghcr.io/ledgerhq/speculos@sha256:6ed9eefd51cddd862b746719af4cd7a3265fe43d0588c388359753cab8d46d11' || !inspected.Config?.Cmd?.includes('nanox') || inspected.Config?.Labels?.['rebalance.emulator'] !== 'public-test-only' || inspected.HostConfig?.Devices?.length || inspected.Mounts?.length || !inspected.NetworkSettings?.Ports?.['5000/tcp']?.some(p => p.HostIp === '127.0.0.1' && p.HostPort === emulator.port)) throw new Error('Container must be an owned emulator with no mounts/devices and a loopback-only API');
 const expectedCommand = ['--display', 'headless', '--api-port', '5000', '--model', 'nanox', '/speculos/rebalance-app.elf'];
 if (JSON.stringify(inspected.Config?.Cmd) !== JSON.stringify(expectedCommand) || (inspected.Config?.Env || []).some(entry => /seed|mnemonic|private.?key/i.test(entry.split('=')[0]))) throw new Error('Only the pinned public-default-seed emulator command is supported');
-if (!['approval','swap','router','batch'].includes(options.fixture)) throw new Error('Unknown synthetic fixture');
+const fixtureCases = { approval:'approval',swap:'swap',router:'router',batch:'batch',
+  'router-missing-call':'router','router-extra-call':'router','batch-missing-call':'batch','batch-extra-call':'batch' };
+if (!Object.hasOwn(fixtureCases,options.fixture)) throw new Error('Unknown synthetic fixture');
+const fixtureName=fixtureCases[options.fixture];
+if (options.fixture !== fixtureName && (!options['matching-context'] || options['manual-review'])) throw new Error('Fixed negative cases require matching context and automatic test mode');
 const http = require('node:http');
 const { createRequire } = require('node:module');
 const req = createRequire(path.join(work, 'package.json'));
@@ -28,8 +32,16 @@ const { ContextModuleBuilder, ContextModuleChainID } = req('@ledgerhq/context-mo
 const { speculosTransportFactory, speculosIdentifier } = req('@ledgerhq/device-transport-kit-speculos');
 const { firstValueFrom, timeout } = req('rxjs');
 const { assertScreens } = require('./assert-screens.cjs');
+const { assertExpectedRefusal } = require('./assert-refusal.cjs');
 const { serializeTransaction, hexToBytes } = createRequire(path.join(__dirname, '../../package.json'))('viem');
-const contextData = JSON.parse(fs.readFileSync(path.join(work, 'compiled-test-context.json')));
+const contextFile=options['matching-context'] ? 'matching-test-context.json' : 'compiled-test-context.json';
+const contextPath=path.join(work,contextFile);
+if (!fs.lstatSync(contextPath).isFile()) throw new Error('Context must be a regular file in the isolated work directory');
+const contextData = JSON.parse(fs.readFileSync(contextPath));
+if (options['matching-context']) {
+  const marker=contextData.matchingContext;
+  if (marker?.version!==1 || marker.routerCallCount!==4 || marker.accountCallCount!==5 || marker.guardType!=='abi-array-length-must-be-v1') throw new Error('Matching context must declare the supported fixed-count guard profile');
+}
 const out = fs.mkdtempSync(path.join(work, 'injection-result-'));
 const originalFetch = globalThis.fetch;
 let metadataUrl;
@@ -114,7 +126,9 @@ async function main() {
       getTypedDataFilters:context.getTypedDataFilters.bind(context), report:async()=>{}, signReport:async()=>{},
     }).build();
     fixture = await import(require('node:url').pathToFileURL(path.join(__dirname, '../fixtures.mjs')).href);
-    const tx = options.fixture === 'approval' ? fixture.direct(fixture.approval('USDG',8000000n)) : options.fixture === 'swap' ? fixture.direct({ target:fixture.router, value:0n, data:fixture.swapData(fixture.swapParams[0]) }) : options.fixture === 'router' ? fixture.direct(fixture.routerCall()) : { ...fixture.batch(), to:fixture.implementation };
+    const routerParams=options.fixture==='router-missing-call' ? fixture.swapParams.slice(0,3) : options.fixture==='router-extra-call' ? [...fixture.swapParams,fixture.swapParams[0]] : fixture.swapParams;
+    const accountCalls=options.fixture==='batch-missing-call' ? fixture.calls.slice(0,4) : options.fixture==='batch-extra-call' ? [...fixture.calls,fixture.calls[0]] : fixture.calls;
+    const tx = fixtureName === 'approval' ? fixture.direct(fixture.approval('USDG',8000000n)) : fixtureName === 'swap' ? fixture.direct({ target:fixture.router, value:0n, data:fixture.swapData(fixture.swapParams[0]) }) : fixtureName === 'router' ? fixture.direct(fixture.routerCall(routerParams)) : { ...fixture.batch(accountCalls), to:fixture.implementation };
     // Direct implementation binding tests its descriptors. It does not emulate
     // EIP-7702 proxy discovery or assert an account delegation exists.
     const unsigned = serializeTransaction({chainId:4663, type:'legacy', to:tx.to, value:0n,
@@ -159,12 +173,13 @@ async function main() {
     catch(error) { if(status==='running') {status='cleanup-error';errorCode=error.name;} }
     server.close();process.removeListener('SIGINT',stop);process.removeListener('SIGTERM',stop);
     const signatureCompleted = status === 'signature-completed';
-    const screenAssertions = assertScreens({events,fixture,fixtureName:options.fixture,signerAddress});
+    const screenAssertions = assertScreens({events,fixture,fixtureName,signerAddress});
     const emulatorScreenAssertionsPassed = screenAssertions.passed;
-    const success = signatureCompleted && emulatorScreenAssertionsPassed;
+    const expectedRefusal=assertExpectedRefusal({fixtureCase:options.fixture,status,steps,events,requests,signatureCompleted});
+    const success = expectedRefusal.expected ? expectedRefusal.passed : signatureCompleted && emulatorScreenAssertionsPassed;
     process.exitCode = success ? 0 : 1;
-    fs.writeFileSync(`${out}/result.json`,JSON.stringify({status,errorCode,signatureCompleted,emulatorScreenAssertionsPassed,screenAssertions,signerAddress,manualReview:options['manual-review'],steps,events,requests,fixture:options.fixture,scope:'Synthetic Nano X descriptor test only; batch targets implementation directly; not EIP-7702 proxy or production approval'},null,2),{flag:'wx',mode:0o600});
-    console.log(JSON.stringify({status,errorCode,signatureCompleted,emulatorScreenAssertionsPassed,screens:events.length,resultDirectory:out}));
+    fs.writeFileSync(`${out}/result.json`,JSON.stringify({status,errorCode,signatureCompleted,emulatorScreenAssertionsPassed,screenAssertions,expectedRefusal,matchingContext:Boolean(options['matching-context']),signerAddress,manualReview:options['manual-review'],steps,events,requests,fixture:options.fixture,scope:'Synthetic Nano X descriptor test only; batch targets implementation directly; not EIP-7702 proxy or production approval'},null,2),{flag:'wx',mode:0o600});
+    console.log(JSON.stringify({status,errorCode,signatureCompleted,emulatorScreenAssertionsPassed,expectedRefusal,matchingContext:Boolean(options['matching-context']),screens:events.length,resultDirectory:out}));
   }
 }
 main().catch(error=>{console.log(JSON.stringify({fatal:error.message}));server.close();process.exitCode=1;});
