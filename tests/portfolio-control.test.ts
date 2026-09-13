@@ -290,19 +290,21 @@ async function retryFixture(t: TestContext, outcome = 'cancelled') {
   await atomicWriteJson(join(f.root, 'status.json'), { wallet: walletA, armed: true });
   const request = await requestLedgerRebalance(randomUUID(), options);
   const execution = new LedgerExecution(options);
-  await execution.prepare(validateConfig(configuration(walletA, 'ledger'))); await execution.finish(outcome);
+  await execution.prepare(validateConfig(await readJson(join(f.root, 'config.json')))); await execution.finish(outcome);
   return { ...f, options, request, input: () => ({ token: f.token, wallet: walletA, requestId: randomUUID(), retryOf: request.id }) };
 }
 
 test('Ledger Retry queues only the displayed running wallet, without launching or touching transaction state', async t => {
   const f = await retryFixture(t), input = f.input();
   await atomicWriteJson(join(f.root, 'cycle.json'), { fixture: 'existing cadence' });
-  const before = await Promise.all(['config.json', 'cycle.json', 'run.lock'].map(file => readFile(join(f.root, file), 'utf8')));
+  const beforeConfig = validateConfig(await readJson(join(f.root, 'config.json')));
+  const before = await Promise.all(['cycle.json', 'run.lock'].map(file => readFile(join(f.root, file), 'utf8')));
   assert.deepEqual(await f.controls.retry(input), { wallet: walletA, requestId: input.requestId, retryOf: f.request.id, outcome: 'requested' });
   assert.equal((await readLedgerRequest(f.options))?.id, input.requestId);
   assert.equal((await readLedgerRequest(f.options))?.state, 'requested');
   assert.equal(f.calls.length, 0); assert.equal(await readJson(join(f.other, 'ledger-request.json')), null);
-  assert.deepEqual(await Promise.all(['config.json', 'cycle.json', 'run.lock'].map(file => readFile(join(f.root, file), 'utf8'))), before);
+  assert.deepEqual(await readJson(join(f.root, 'config.json')), { ...beforeConfig, rebalanceRequestId: input.requestId });
+  assert.deepEqual(await Promise.all(['cycle.json', 'run.lock'].map(file => readFile(join(f.root, file), 'utf8'))), before);
   await assert.rejects(f.controls.retry(input), /changed or cannot be retried/);
   await assert.rejects(f.controls.retry(f.input()), /changed or cannot be retried/);
   assert.equal((await readLedgerRequest(f.options))?.id, input.requestId, 'a second UUID from stale status cannot replace the accepted request');

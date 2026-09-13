@@ -477,3 +477,39 @@ test('standalone Calibur CLI is explicit and rejects unrelated flags before any 
   }
   assert.deepEqual(await readJson(join(directory, 'config.json')), config);
 });
+
+
+test('explicit target and share applies mint one fresh intent while settings and previews preserve it', { timeout: 60_000 }, async t => {
+  const f = await fixture(t), path = join(f.directory, 'config.json');
+  const request = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  const saved = () => readJson<Record<string, any>>(path);
+  await f.command(['configure', '--slippage', '0.75']);
+  assert.equal((await saved())!.rebalanceRequestId, undefined, 'a settings-only change cannot create rebalance intent');
+  let previous = '11111111-1111-4111-8111-111111111111';
+  await atomicWriteJson(path, { ...await saved(), rebalanceRequestId: previous });
+  const fixed = { 'cycle.json': { fixture: 'old cooldown' }, 'stop.json': { fixture: 'preserved stop' }, 'pending.json': { fixture: 'preserved pending' } };
+  for (const [name, value] of Object.entries(fixed)) await atomicWriteJson(join(f.directory, name), value);
+  const equalTargets = 'USDG=20,TSLA=20,AAPL=20,NVDA=20,AMZN=20';
+  for (const args of [['configure', '--targets', equalTargets], ['targets', 'set', 'AAPL', '20'], ['targets', 'replace', equalTargets]]) {
+    await f.command(args);
+    const current = (await saved())!;
+    assert.match(current.rebalanceRequestId, request, args.join(' '));
+    assert.notEqual(current.rebalanceRequestId, previous, 'explicit equal targets still express new intent');
+    assert.deepEqual(current.targets, targets); previous = current.rebalanceRequestId;
+  }
+  await f.command(['configure', '--poll', '15']);
+  assert.equal((await saved())!.rebalanceRequestId, previous, 'configure reconstructs public settings without dropping the marker');
+  const code = JSON.parse((await f.command(['share', 'export'])).stdout).code;
+  await f.command(['share', 'import', code]);
+  assert.equal((await saved())!.rebalanceRequestId, previous, 'share preview/export cannot create intent');
+  assert.ok(!code.includes(previous), 'the wallet-local execution marker is absent from strategy codes');
+  for (const extra of [[], ['--settings']]) {
+    await f.command(['share', 'import', code, '--apply', ...extra]);
+    const current = (await saved())!;
+    assert.match(current.rebalanceRequestId, request); assert.notEqual(current.rebalanceRequestId, previous);
+    assert.deepEqual(current.targets, targets); previous = current.rebalanceRequestId;
+  }
+  for (const [name, value] of Object.entries(fixed)) assert.deepEqual(await readJson(join(f.directory, name)), value);
+  assert.equal(existsSync(join(f.directory, 'unexpected-network')), false);
+  assert.equal(existsSync(join(f.directory, 'run.lock')), false);
+});

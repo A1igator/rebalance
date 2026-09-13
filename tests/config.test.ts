@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseRebalanceFeeTargetUsd, parseTargets, percentToBps, validateConfig } from '../src/config.js';
+import { parseRebalanceFeeTargetUsd, parseTargets, percentToBps, validateConfig, withUserRebalanceRequest } from '../src/config.js';
 
 const config = {
   version: 1, chainId: 4663, wallet: '0x0000000000000000000000000000000000000001',
@@ -105,4 +105,17 @@ test('Simple7702 is explicit, Ledger-only and preserves legacy Calibur identity'
     for (const mode of ['private-key', 'privy']) assert.throws(() => validateConfig({ ...config, mode, execution }), /requires the Ledger/);
   }
   assert.equal(validateConfig(config).execution, undefined);
+});
+
+
+test('explicit rebalance IDs are fresh validated metadata and never mutate the input', () => {
+  const original = validateConfig(config), first = withUserRebalanceRequest(original), second = withUserRebalanceRequest(first);
+  assert.match(first.rebalanceRequestId!, /^[a-f0-9-]{36}$/);
+  assert.notEqual(first.rebalanceRequestId, second.rebalanceRequestId);
+  assert.equal(original.rebalanceRequestId, undefined);
+  const { rebalanceRequestId, ...unchanged } = first; assert.deepEqual(unchanged, original);
+  assert.equal(withUserRebalanceRequest(original, rebalanceRequestId).rebalanceRequestId, rebalanceRequestId);
+  for (const bad of [null, 1, '', 'x', rebalanceRequestId!.toUpperCase(), '../request']) {
+    assert.throws(() => validateConfig({ ...original, rebalanceRequestId: bad }), /Invalid rebalanceRequestId/);
+  }
 });

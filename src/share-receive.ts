@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { connectionPath, readRoutingJson, resolveProfile, sessionIdentity, walletIdentity, type RoutedProfile } from '../scripts/profile-routing.mjs';
 import { withoutAllocation } from './allocation-management.js';
-import { validateConfig } from './config.js';
+import { validateConfig, withUserRebalanceRequest } from './config.js';
 import { acquireConfigLock } from './config-lock.js';
 import { decodeShareCode, encodeShareCode, encodeSharedStrategy, sharePreview, type SharedStrategy } from './share.js';
 import { acquireLock, atomicWriteJson, readJson } from './storage.js';
@@ -130,7 +130,7 @@ export async function receiveSharedCode(rootDir: string, sessionId: string | und
     try {
       const config = validateConfig(await deps.config(profile));
       if (walletIdentity(config.wallet) !== route.wallet || config.chainId !== profile.chainId) throw new Error('Configuration identity changed');
-      const next = validateConfig({...withoutAllocation(config), targets: shared.targets,
+      const next = withUserRebalanceRequest({...withoutAllocation(config), targets: shared.targets,
         ...(shared.driftThresholdBps === undefined ? {} : {driftThresholdBps: shared.driftThresholdBps}),
         ...(shared.rebalanceIntervalSeconds === undefined ? {} : {rebalanceIntervalSeconds: shared.rebalanceIntervalSeconds}),
       });

@@ -9,7 +9,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { type Hex } from 'viem';
 import { ASSETS } from './assets.js';
 import { createChain, ROBINHOOD } from './chain.js';
-import { CONFIG_PATH, DATA, PENDING_PATH, createWallet, loadConfig, parseRebalanceFeeTargetUsd, parseTargets, percentToBps, validateConfig, type Config } from './config.js';
+import { CONFIG_PATH, DATA, PENDING_PATH, createWallet, loadConfig, parseRebalanceFeeTargetUsd, parseTargets, percentToBps, validateConfig, withUserRebalanceRequest, type Config } from './config.js';
 import { redistributeTargets } from './core.js';
 import { acquireConfigLock, ConfigLockBusyError } from './config-lock.js';
 import { allocationStatus, previewAllocation, readAllocationInput, withAllocation, withoutAllocation } from './allocation-management.js';
@@ -403,9 +403,9 @@ async function main() {
           await atomicWriteJson(CONFIG_PATH, manual);
           print(allocationStatus(manual)); return;
         }
-        const next = validateConfig(withAllocation(config, input));
+        const next = withUserRebalanceRequest(withAllocation(config, input));
         await atomicWriteJson(CONFIG_PATH, next);
-        print({ ...allocationStatus(next), effective: 'next graph evaluation; existing cycle timing is preserved' });
+        print({ ...allocationStatus(next), effective: 'next graph evaluation; this explicit request bypasses cooldown once, after pending transactions settle' });
       }); return;
     }
     case 'configure':
@@ -425,7 +425,7 @@ async function main() {
           if (releaseSignerChange && await readJson(PENDING_PATH)) throw new Error('Reconcile the pending operation before changing the signing or account execution mode.');
           const wallet = await readJson<{ address: string }>(resolve(DATA, 'wallet.json'));
           if (values.targets === undefined && !previous) throw new Error('Specify the target percentages');
-          const config = validateConfig({ version: 1, chainId: 4663,
+          let config = validateConfig({ version: 1, chainId: 4663,
             wallet: values.wallet ?? previous?.wallet ?? wallet?.address,
             mode: values.mode ?? previous?.mode ?? 'private-key',
             ...(values.execution !== undefined || previous?.execution !== undefined
@@ -434,6 +434,7 @@ async function main() {
             targets: values.targets !== undefined ? parseTargets(values.targets) : previous?.targets,
             ...(values.targets === undefined && previous?.allocation ? { allocation: previous.allocation } : {}),
             ...(previous?.rebalanceFeeTargetUsdE8 === undefined ? {} : { rebalanceFeeTargetUsdE8: previous.rebalanceFeeTargetUsdE8 }),
+            ...(previous?.rebalanceRequestId === undefined ? {} : { rebalanceRequestId: previous.rebalanceRequestId }),
             driftThresholdBps: values.threshold ? percentToBps(values.threshold) : previous?.driftThresholdBps ?? 500,
             slippageBps: values.slippage ? percentToBps(values.slippage) : previous?.slippageBps ?? 50,
             deadlineSeconds: values.deadline !== undefined ? Number(values.deadline) : previous?.deadlineSeconds ?? 120,
@@ -444,6 +445,7 @@ async function main() {
           if (process.env.REBALANCE_PROFILE_WALLET && config.wallet.toLowerCase() !== process.env.REBALANCE_PROFILE_WALLET.toLowerCase()) {
             throw new Error('Configuration wallet differs from this pinned portfolio; no other wallet was selected.');
           }
+          if (values.targets !== undefined) config = withUserRebalanceRequest(config);
           await atomicWriteJson(CONFIG_PATH, config);
           print({ wallet: config.wallet, mode: config.mode, execution: config.execution ?? 'direct', targets: config.targets, chainId: 4663,
             driftThresholdBps: config.driftThresholdBps, slippageBps: config.slippageBps, deadlineSeconds: config.deadlineSeconds,
@@ -457,7 +459,7 @@ async function main() {
         if (args[1] === 'set' && args[2] && args[3]) targets = redistributeTargets(config.targets, args[2], percentToBps(args[3]));
         else if (args[1] === 'replace' && args[2]) targets = parseTargets(args[2]);
         else throw new Error('Use targets set AAPL 30 or targets replace with all five percentages');
-        await atomicWriteJson(CONFIG_PATH, validateConfig({ ...withoutAllocation(config), targets }));
+        await atomicWriteJson(CONFIG_PATH, withUserRebalanceRequest({ ...withoutAllocation(config), targets }));
         print({ targets, effective: 'next graph evaluation; an already-broadcast transaction still settles' });
       }); return;
     case 'share': {
@@ -483,7 +485,7 @@ async function main() {
           ...(shared.driftThresholdBps === undefined ? {} : { driftThresholdBps: shared.driftThresholdBps }),
           ...(shared.rebalanceIntervalSeconds === undefined ? {} : { rebalanceIntervalSeconds: shared.rebalanceIntervalSeconds }),
         };
-        const next = validateConfig({ ...withoutAllocation(config), targets: shared.targets, ...settings });
+        const next = withUserRebalanceRequest({ ...withoutAllocation(config), targets: shared.targets, ...settings });
         await atomicWriteJson(CONFIG_PATH, next);
         print({ ...sharePreview(config, shared), applied: true, settingsApplied: values.settings, targets: next.targets,
           driftThresholdBps: next.driftThresholdBps, rebalanceIntervalSeconds: next.rebalanceIntervalSeconds,

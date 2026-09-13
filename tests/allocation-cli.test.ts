@@ -74,10 +74,18 @@ test('allocation preview is read-only and set persists policy with its exact tar
   assert.equal(stored.allocation.version, 1); assert.equal(typeof stored.allocation.policyHash, 'string');
   assert.ok(Number.isFinite(Date.parse(stored.allocation.computedAt)));
   assert.deepEqual(stored.allocation.result.targets, stored.targets);
+  assert.match(stored.rebalanceRequestId, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  await f.command(['allocation', 'preview', path]);
+  assert.equal((await f.saved())!.rebalanceRequestId, stored.rebalanceRequestId);
+  await f.command(['allocation', 'set', path]);
+  const repeated = (await f.saved())!;
+  assert.notEqual(repeated.rebalanceRequestId, stored.rebalanceRequestId, 'an explicit repeated allocation policy creates a fresh request');
+  assert.deepEqual(repeated.targets, stored.targets);
   assert.equal(Object.values(stored.targets as Record<string, number>).reduce((sum, value) => sum + value, 0), 10_000);
   const status = JSON.parse((await f.command(['allocation', 'status'])).stdout);
   assert.equal(status.mode, 'managed'); assert.deepEqual(status.targets, stored.targets);
-  assert.deepEqual(status.allocation, stored.allocation);
+  assert.deepEqual(status.allocation, repeated.allocation);
+  assert.equal((await f.saved())!.rebalanceRequestId, repeated.rebalanceRequestId, 'allocation status does not mint intent');
   assert.deepEqual(await readJson(join(f.root, 'stop.json')), stop);
   assert.equal(await readJson(join(f.root, 'pending.json')), null); f.isolated();
 });
@@ -90,10 +98,12 @@ test('unrelated configuration preserves allocation while all explicit manual tar
   await f.command(['configure', '--rebalance-interval-seconds', '7200', '--slippage', '0.75']);
   const unrelated = (await f.saved())!;
   assert.deepEqual(unrelated.allocation, managed.allocation); assert.deepEqual(unrelated.targets, managed.targets);
+  assert.equal(unrelated.rebalanceRequestId, managed.rebalanceRequestId);
   assert.equal(unrelated.rebalanceIntervalSeconds, 7200); assert.equal(unrelated.slippageBps, 75);
   const manual = JSON.parse((await f.command(['allocation', 'manual'])).stdout);
   assert.equal(manual.mode, 'manual'); assert.deepEqual(manual.targets, managed.targets);
   assert.equal(manual.allocation, null); assert.equal((await f.saved())!.allocation, undefined);
+  assert.equal((await f.saved())!.rebalanceRequestId, managed.rebalanceRequestId, 'removing automation while retaining targets does not mint intent');
   for (const args of [
     ['targets', 'set', 'AAPL', '30'], ['targets', 'replace', targetArgument], ['configure', '--targets', targetArgument],
   ]) {

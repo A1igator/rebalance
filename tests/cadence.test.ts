@@ -12,10 +12,10 @@ const directory = await mkdtemp(join(tmpdir(), 'rebalance-cadence-test-'));
 assertTemporaryTestDirectory(directory);
 process.env.REBALANCE_DATA_DIR = directory;
 delete process.env.REBALANCE_PRIVATE_KEY;
-const { DATA, validateConfig } = await import('../src/config.js');
+const { DATA, validateConfig, withUserRebalanceRequest } = await import('../src/config.js');
 assert.equal(DATA, directory, 'captured DATA must belong to this disposable fixture');
 const { CYCLE_PATH, beginRebalanceCycle, finishRebalanceCycle, noteSuccessfulSwap, readCycle,
-  rebalanceInterval } = await import('../src/cadence.js');
+  rebalanceInterval, publicCycle, hasUserRebalanceRequest } = await import('../src/cadence.js');
 assert.equal(CYCLE_PATH, join(directory, 'cycle.json'));
 const wallet = '0x0000000000000000000000000000000000000001';
 const config = validateConfig({ version: 1, chainId: 4663, wallet, mode: 'ledger', rpcUrl: 'http://fixture.invalid',
@@ -174,4 +174,60 @@ test('normal receipt reconciliation marks success before clearing pending, and m
       .map(name => new URL(`../src/${name}.ts`, import.meta.url).href), JSON.stringify(config)],
   { env: { ...process.env, REBALANCE_DATA_DIR: directory }, timeout: 10_000 });
   assert.deepEqual(JSON.parse(result.stdout), { outcome: 'marker-before-pending-clear' });
+});
+
+
+test('a new user request bypasses a completed cycle once and restart preserves consumption', async t => {
+  let now = start; t.mock.method(Date, 'now', () => now);
+  await beginRebalanceCycle(config); await noteSuccessfulSwap(swap()); await finishRebalanceCycle();
+  now += 600_000; assert.equal((await rebalanceInterval(config)).operation?.status, 'cooling-down');
+  const manual = withUserRebalanceRequest(config);
+  assert.equal((await rebalanceInterval(manual)).operation, null);
+  const next = await beginRebalanceCycle(manual);
+  assert.equal(Date.parse(next.startedAt), now); assert.equal((await readCycle())!.rebalanceRequestId, manual.rebalanceRequestId);
+  await noteSuccessfulSwap(swap(now)); now += 1000; await finishRebalanceCycle(manual);
+  assert.equal((await rebalanceInterval(manual)).operation?.status, 'cooling-down');
+  const observed = await promisify(execFile)(process.execPath, ['--import','tsx','--input-type=module','-e', `
+    const cadence=await import(process.argv[1]); Date.now=()=>Number(process.argv[2]);
+    process.stdout.write(JSON.stringify(await cadence.rebalanceInterval(JSON.parse(process.argv[3]))));
+  `,'--',new URL('../src/cadence.ts',import.meta.url).href,String(now),JSON.stringify(manual)],
+    { env: {...process.env,REBALANCE_DATA_DIR:directory}, timeout:10_000 });
+  assert.equal(JSON.parse(observed.stdout).operation.status,'cooling-down');
+  const fresh = withUserRebalanceRequest(manual); assert.equal((await rebalanceInterval(fresh)).operation,null);
+});
+
+test('a new user request supersedes an active cycle without inheriting old success evidence', async t => {
+  let now=start; t.mock.method(Date,'now',()=>now);
+  const first=withUserRebalanceRequest(config); await beginRebalanceCycle(first); await noteSuccessfulSwap(swap());
+  now+=10_000; const second=withUserRebalanceRequest(first); await beginRebalanceCycle(second);
+  assert.equal((await readCycle())!.startedAt,now); assert.equal((await readCycle())!.swapConfirmed,false);
+  await noteSuccessfulSwap(swap()); assert.equal((await readCycle())!.swapConfirmed,false);
+});
+
+test('no-trade user intent preserves an existing hourly deadline and consumes the marker', async t => {
+  let now=start; t.mock.method(Date,'now',()=>now); await beginRebalanceCycle(config); await noteSuccessfulSwap(swap());
+  await finishRebalanceCycle(); now+=700_000; const before=await readCycle(), manual=withUserRebalanceRequest(config);
+  await finishRebalanceCycle(manual); const after=await readCycle();
+  assert.deepEqual(after,{...before,rebalanceRequestId:manual.rebalanceRequestId});
+  assert.equal(hasUserRebalanceRequest(manual,after),false); assert.equal((await rebalanceInterval(manual)).operation?.status,'cooling-down');
+});
+
+test('initial no-trade request receipt neither fabricates a cycle nor delays later automatic drift', async t => {
+  let now=start; t.mock.method(Date,'now',()=>now); const manual=withUserRebalanceRequest(config);
+  await finishRebalanceCycle(manual); const receipt=await readCycle(); assert.equal(receipt!.requestOnly,true);
+  assert.equal(publicCycle(receipt),null); assert.equal(hasUserRebalanceRequest(manual,receipt),false);
+  assert.equal((await rebalanceInterval(manual)).operation,null);
+  now+=1000; await finishRebalanceCycle(manual); assert.deepEqual(await readCycle(),receipt);
+  const actual=await beginRebalanceCycle(manual); assert.equal(Date.parse(actual.startedAt),now); assert.equal((await readCycle())!.requestOnly,undefined);
+  await noteSuccessfulSwap(swap(now)); await finishRebalanceCycle(manual);
+  assert.equal((await rebalanceInterval(manual)).operation?.status,'cooling-down');
+});
+
+test('corrupt request markers or request-only records fail closed', async () => {
+  const id=withUserRebalanceRequest(config).rebalanceRequestId;
+  const base={wallet,startedAt:start,activeUntil:start,nextEligibleAt:start+1,swapConfirmed:false,requestOnly:true,rebalanceRequestId:id};
+  await atomicWriteJson(CYCLE_PATH,null); await assert.rejects(readCycle(),/Invalid rebalance cycle/);
+  for(const patch of [{rebalanceRequestId:null},{rebalanceRequestId:'invalid'},{requestOnly:false},{rebalanceRequestId:undefined},{activeUntil:start+1},{swapConfirmed:true}]) {
+    await atomicWriteJson(CYCLE_PATH,{...base,...patch}); await assert.rejects(readCycle(),/Invalid rebalance cycle/);
+  }
 });

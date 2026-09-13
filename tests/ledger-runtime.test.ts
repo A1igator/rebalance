@@ -49,7 +49,7 @@ mock.module(path('signers'), { namedExports: { loadSigner: async config => {
 configModule = await import(path('config')); storage = await import(path('storage'));
 runtime = await import(path('runtime'));
 const request = await import(path('ledger-request'));
-const { evaluatePortfolio } = await import(path('core'));
+const { RebalanceNotRequiredError, evaluatePortfolio } = await import(path('core'));
 const { events, acknowledgeEvent } = await import(path('events'));
 const targets = { USDG: 2000, AAPL: 2000, NVDA: 2000, MSFT: 2000, AMD: 2000 };
 const config = configModule.validateConfig({ version:1, wallet:account.address, mode:'ledger', chainId:4663,
@@ -95,24 +95,25 @@ const chain = {
  },
  quote:async()=>{quotes++; if(scenario==='quote-failed') throw new Error('Quote fixture failed'); if(scenario==='config-changed') await storage.atomicWriteJson(configModule.CONFIG_PATH,{...config,slippageBps:75}); return {amountOut:1n,minimumOut:1n,fee:500,blockNumber:102n};},
  transaction:async()=>({to:account.address,data:approvalDone?'0x02':'0x01',value:0n,kind:approvalDone?'swap':'approval'}),
- quoteBatch:async plan=>({quotes:await Promise.all(plan.trades.map(trade=>chain.quote(trade))),blockNumber:102n}),
+ quoteBatch:async plan=>{if(scenario==='manual-quote-on-target') throw new RebalanceNotRequiredError(); return {quotes:await Promise.all(plan.trades.map(trade=>chain.quote(trade))),blockNumber:102n};},
  transactionBatch:async(plan,batch)=>({...await chain.transaction(plan.trades[0],batch.quotes[0]),swapCount:plan.trades.length,approvalCount:approvalDone?0:1}),
 };
 let ledger=new request.LedgerExecution();
 const presence={connected:scenario!=='disconnected',revision:1};
-const automaticScenarios=['automatic-sequence','automatic-fees','disconnected','automatic-read-only','reconnect-retry','explicit-retry','cooling-down','pending-barrier'];
+const automaticScenarios=['automatic-sequence','automatic-fees','disconnected','automatic-read-only','reconnect-retry','explicit-retry','cooling-down','pending-barrier','target-edit-cooling','target-edit-pending'];
 try {
  if(!automaticScenarios.includes(scenario)) await request.requestLedgerRebalance(randomUUID());
- if(scenario==='cooling-down') await storage.atomicWriteJson(runtime.CYCLE_PATH,{wallet:account.address,
+ if(['cooling-down','manual-cooling','target-edit-cooling','target-edit-pending','manual-quote-on-target'].includes(scenario)) await storage.atomicWriteJson(runtime.CYCLE_PATH,{wallet:account.address,
    startedAt:now-600000,activeUntil:now-1,nextEligibleAt:now+3000000,swapConfirmed:true});
- if(scenario==='pending-barrier') await storage.atomicWriteJson(configModule.PENDING_PATH,{chainId:4663,wallet:account.address,
+ if(['pending-barrier','target-edit-pending'].includes(scenario)) await storage.atomicWriteJson(configModule.PENDING_PATH,{chainId:4663,wallet:account.address,
    hash:'0x'+'a2'.repeat(32),nonce:0,kind:'swap',createdAt:new Date(now).toISOString(),status:'unknown'});
+ if(scenario.startsWith('target-edit-')) await storage.atomicWriteJson(configModule.CONFIG_PATH,configModule.withUserRebalanceRequest(config));
  if(['read-only-intent','automatic-read-only'].includes(scenario)) {
   const state=await runtime.tick(false,()=>chain,ledger,undefined,presence);
   assert.equal(state.operation.status,'needs-rebalance');
   assert.equal((await request.readLedgerRequest())?.state,scenario==='read-only-intent'?'requested':undefined);
  } else if(scenario==='restart') {
-  await ledger.prepare(config); ledger=new request.LedgerExecution();
+  await ledger.prepare(await configModule.loadConfig()); ledger=new request.LedgerExecution();
   const state=await runtime.tick(true,()=>chain,ledger,undefined,presence);
   assert.equal((await request.readLedgerRequest()).state,'finished'); assert.equal(state.ledgerPrompt.suspended,true);
  } else {
@@ -147,12 +148,32 @@ try {
     assert.equal(signatures,3); assert.equal(sends,3);
     assert.notEqual((await request.readLedgerRequest()).id,firstId);
    }
+  } else if(['manual-cooling','target-edit-cooling'].includes(scenario)) {
+   assert.equal(first.operation.status,'pending'); assert.equal(signatures,1);
+   const saved=await configModule.loadConfig(), cycle=await storage.readJson(runtime.CYCLE_PATH);
+   assert.equal(cycle.rebalanceRequestId,saved.rebalanceRequestId); assert.equal(cycle.startedAt,now);
+   await runtime.tick(true,()=>chain,ledger,undefined,presence);
+   await runtime.tick(true,()=>chain,ledger,undefined,presence);
+   swapDone=false;
+   const again=await runtime.tick(true,()=>chain,ledger,undefined,presence);
+   assert.equal(again.operation.status,'cooling-down'); assert.equal(signatures,2,'unchanged manual intent cannot open a second cycle');
+  } else if(scenario==='manual-quote-on-target') {
+   assert.equal(first.operation.status,'observation-changed'); assert.equal(signatures,0);
+   const saved=await configModule.loadConfig(), cycle=await storage.readJson(runtime.CYCLE_PATH);
+   assert.equal(cycle.rebalanceRequestId,saved.rebalanceRequestId); assert.equal(cycle.nextEligibleAt,now+3000000);
+   const again=await runtime.tick(true,()=>chain,ledger,undefined,presence);
+   assert.equal(again.operation.status,'cooling-down'); assert.equal(signatures,0);
+  } else if(scenario==='target-edit-pending') {
+   assert.equal(first.operation.status,'unresolved'); assert.equal(signatures,0); assert.equal(snapshots,0);
+   assert.equal((await storage.readJson(runtime.CYCLE_PATH)).rebalanceRequestId,undefined,'pending receipt must precede request consumption');
+   assert.ok((await configModule.loadConfig()).rebalanceRequestId);
   } else if(scenario==='unexecutable-drift') {
    assert.equal(first.operation.status,'observation-changed');
    assert.match(first.operation.message,/outside the drift threshold/);
    assert.equal((await request.readLedgerRequest()).outcome,'observation-changed');
    assert.equal(first.proposal,undefined); assert.equal(signatures,0); assert.equal(sends,0);
-   assert.equal(await storage.readJson(runtime.CYCLE_PATH),null,'no false cycle completion');
+   assert.equal((await storage.readJson(runtime.CYCLE_PATH)).requestOnly,true,'only an intent receipt, no false execution cycle');
+   assert.equal(first.cycle,null);
    assert.equal((await events()).filter(e=>e.type==='rebalance-completed').length,0);
   } else if(scenario==='unknown-send') {
    assert.equal(first.operation.status,'unresolved'); assert.equal(ledger.active,false);
@@ -180,7 +201,7 @@ try {
    assert.equal(first.operation.status,scenario==='disconnected'?'waiting-ledger':scenario==='cooling-down'?'cooling-down':'unresolved');
    assert.equal(await request.readLedgerRequest(),null); assert.equal(signatures,0);
    assert.equal((await events()).filter(e=>e.type==='ledger-rebalance-needed').length,0);
-   if(scenario==='pending-barrier') assert.equal(snapshots,0, 'pending receipts remain ahead of automatic request creation');
+   if(['pending-barrier','target-edit-pending'].includes(scenario)) assert.equal(snapshots,0, 'pending receipts remain ahead of automatic request creation');
   } else {
    assert.equal(ledger.active,false); assert.equal((await request.readLedgerRequest()).state,'finished');
    if(['rejected','unavailable','timeout','unsupported','discovery-error-restart'].includes(scenario)) {
@@ -204,7 +225,7 @@ try {
   }
  }
  if(['rejected','unavailable','timeout','unsupported','discovery-error-restart','stopped-during-sign','expired-during-sign'].includes(scenario)) assert.equal(signatures,1);
- if(!['sequence','automatic-sequence','automatic-fees','unknown-send','reconnect-retry','explicit-retry','pending-barrier'].includes(scenario)) {
+ if(!['sequence','automatic-sequence','automatic-fees','unknown-send','reconnect-retry','explicit-retry','pending-barrier','manual-cooling','target-edit-cooling','target-edit-pending'].includes(scenario)) {
   assert.equal(sends,0); assert.equal(await storage.readJson(configModule.PENDING_PATH),null);
  }
  if(['disconnected','read-only-intent','automatic-read-only','restart','config-changed','quote-failed','cooling-down','pending-barrier'].includes(scenario)) assert.equal(signatures,0);
@@ -214,7 +235,7 @@ try {
 
 for (const scenario of ['sequence', 'automatic-sequence', 'automatic-fees', 'disconnected', 'read-only-intent', 'automatic-read-only',
   'restart', 'config-changed', 'rejected', 'discovery-error-restart', 'unavailable', 'timeout', 'unsupported', 'reconnect-retry', 'explicit-retry',
-  'quote-failed', 'stopped-during-sign', 'expired-during-sign', 'unknown-send', 'cooling-down', 'pending-barrier', 'unexecutable-drift']) {
+  'quote-failed', 'stopped-during-sign', 'expired-during-sign', 'unknown-send', 'cooling-down', 'pending-barrier', 'unexecutable-drift', 'manual-cooling', 'target-edit-cooling', 'target-edit-pending', 'manual-quote-on-target']) {
   test(`Ledger runtime: ${scenario}`, async () => {
     const directory = await mkdtemp(join(tmpdir(), 'rebalance-ledger-runtime-'));
     try {

@@ -9,7 +9,7 @@ import { allocationSummary } from './allocation-management.js';
 import { planRebalance, RebalanceNotRequiredError, RebalanceInputLimitError, type Portfolio, type TradePlan, type RebalancePlan } from './core.js';
 import { attentionCondition, ledgerCondition, rebalanceCompleted, transactionRecovered, type FailurePhase, type RebalanceAttention } from './events.js';
 import { automaticRecovery } from './recovery.js';
-import { CYCLE_PATH, ACTIVE_CYCLE_SECONDS, readCycle, publicCycle, rebalanceInterval, beginRebalanceCycle, finishRebalanceCycle, type RebalanceCycle } from './cadence.js';
+import { CYCLE_PATH, ACTIVE_CYCLE_SECONDS, readCycle, publicCycle, rebalanceInterval, beginRebalanceCycle, finishRebalanceCycle, hasUserRebalanceRequest, type RebalanceCycle } from './cadence.js';
 export { CYCLE_PATH, ACTIVE_CYCLE_SECONDS, rebalanceInterval, beginRebalanceCycle, finishRebalanceCycle };
 export type { RebalanceCycle };
 import { runGraph, type GraphState } from './graph.js';
@@ -253,7 +253,7 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
         if (portfolio.totalUsdE8 > 0n && !withinRebalanceThreshold(portfolio, config.driftThresholdBps)) {
           throw new NoExecutableRebalanceError();
         }
-        await withCurrentConfig(() => finishRebalanceCycle());
+        await withCurrentConfig(() => finishRebalanceCycle(config));
         state.cycle = publicCycle(await readCycle());
       }
       return proposal;
@@ -355,8 +355,12 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
       await atomicWriteJson(STATE_PATH, state);
     },
   }).catch(async error => {
-    if (error instanceof RebalanceInputLimitError) {
-      try { await withCurrentConfig(() => finishRebalanceCycle()); }
+    if (error instanceof NoExecutableRebalanceError) {
+      try { await withCurrentConfig(async () => { if (hasUserRebalanceRequest(config, await readCycle())) await finishRebalanceCycle(config); }); }
+      catch (boundaryError) { error = boundaryError; }
+    }
+    if (error instanceof RebalanceInputLimitError || error instanceof RebalanceNotRequiredError) {
+      try { await withCurrentConfig(() => finishRebalanceCycle(config)); }
       catch (boundaryError) { error = boundaryError; }
     }
     if (error instanceof RebalanceNotRequiredError) {

@@ -1,7 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
-import { DATA, validateConfig, type Config } from './config.js';
+import { readFile } from 'node:fs/promises';
+import { DATA, validateConfig, withUserRebalanceRequest, type Config } from './config.js';
 import { acquireLock, atomicWriteJson, readJson } from './storage.js';
+import { acquireConfigLock } from './config-lock.js';
+import { withRunnerControl } from './runner-preference.js';
 
 const QUEUE_MS = 120_000;
 const EXECUTION_MS = 600_000;
@@ -97,9 +100,11 @@ class RequestStore {
   path(name: string) { return resolve(this.directory, name); }
   async journal(): Promise<Journal> {
     let value: Journal | null;
-    try { value = await readJson<Journal>(this.path('ledger-request.json')); }
-    catch { throw new Error('Ledger request journal is unavailable or invalid; signing remains unavailable'); }
-    if (value === null) return { version: 1, records: [] };
+    try { value = JSON.parse(await readFile(this.path('ledger-request.json'), 'utf8')); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: 1, records: [] };
+      throw new Error('Ledger request journal is unavailable or invalid; signing remains unavailable');
+    }
     if (!value || Object.keys(value).some(field => !['version', 'records', 'suspension'].includes(field)) ||
         value.version !== 1 || !Array.isArray(value.records) || !value.records.every(validRecord) ||
         new Set(value.records.map(record => record.id)).size !== value.records.length ||
@@ -143,8 +148,12 @@ class RequestStore {
     return this.alive(value.pid) ? value : null;
   }
   async stopped() {
-    try { return (await readJson(this.path('stop.json'))) !== null; }
-    catch { throw new Error('Ledger stop state is unavailable or invalid'); }
+    try { const value = JSON.parse(await readFile(this.path('stop.json'), 'utf8'));
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid Stop'); return true; }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw new Error('Ledger stop state is unavailable or invalid');
+    }
   }
   async write(journal: Journal) { await atomicWriteJson(this.path('ledger-request.json'), journal); }
   async locked<T>(work: () => Promise<T>): Promise<T> {
@@ -182,7 +191,8 @@ export async function requestLedgerRebalance(requestId: string = randomUUID(), o
   if (options.retryOf !== undefined && !UUID.test(options.retryOf)) throw new Error('Ledger retry source must be a UUID');
   const id = requestId.toLowerCase();
   const store = new RequestStore(options);
-  return store.locked(async () => {
+  const releaseConfig = await acquireConfigLock(store.directory);
+  try { return await withRunnerControl(store.directory, () => store.locked(async () => {
     const journal = await store.journal();
     if (journal.records.some(record => record.id === id)) throw new Error('Ledger request ID was already used; a replay cannot authorize signing');
     if (options.retryOf !== undefined) {
@@ -211,12 +221,16 @@ export async function requestLedgerRebalance(requestId: string = randomUUID(), o
     if (await store.stopped()) throw new Error('Portfolio has a stop request; no Ledger signing request queued');
     const runner = await store.runner();
     if (!runner) throw new Error('Start this Ledger portfolio monitor before requesting a rebalance');
-    const record = store.record(config, runner, id);
+    const requestedConfig = withUserRebalanceRequest(config, id);
+    const record = store.record(requestedConfig, runner, id);
     journal.records.push(record);
     journal.suspension = null; // Only an accepted explicit retry clears a failure.
+    // Journal first: an interrupted configuration commit never permits this ID
+    // to be replayed as a new cooldown bypass. Both are behind the request lock.
     await store.write(journal);
+    await atomicWriteJson(store.path('config.json'), requestedConfig);
     return { ...record };
-  });
+  })); } finally { await releaseConfig(); }
 }
 
 /** Public local journal projection only; this does not consume queued intent. */
@@ -312,7 +326,14 @@ export class LedgerExecution {
       const record = journal.records.at(-1);
       if (!record || record.state === 'finished') return;
       let reason: string | null;
-      try { reason = await this.store.invalidReason(record, config, true); }
+      try {
+        // A graph can capture config before an explicit request commits. Defer
+        // that newer request until a fresh graph, preserving corruption refusal.
+        const savedConfig = await this.store.config();
+        if (record.state === 'requested' && savedConfig.rebalanceRequestId === record.id &&
+            config.rebalanceRequestId !== record.id && ledgerConfigFingerprint(savedConfig) === record.configFingerprint) return;
+        reason = await this.store.invalidReason(record, config, true);
+      }
       catch (error) {
         this.store.terminal(journal, record, 'invalidated', this.connected === false);
         await this.store.write(journal);

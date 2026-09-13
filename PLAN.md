@@ -214,3 +214,7 @@ Keep portfolio navigation on the page's validated loopback hostname and release 
 ## Verified combined Ledger outcome — September 13
 
 [Prompt094](docs/prompts/094-ledger-combined-evidence-and-approval-batching.md) records a bounded public audit of nonces21–23: one AAPL approval, one USDG approval and one four-leg sales-and-purchases multicall. The final transaction succeeded at 05:24:24 UTC in block61705868; public app status recorded completion at 05:24:28.752 UTC with outcome on-target. [Sanitized evidence](docs/evidence/ledger-combined-rebalance-2026-09-13.json) supersedes current claims that combined execution is unverified, while retaining earlier sequential and phase-batch milestones as history. Device review-screen count, Clear Signing and explicit rejection remain separate questions. No implementation or live operation is part of this documentation correction.
+
+## Explicit rebalance requests — September 13
+
+[Prompt 101](docs/prompts/101-explicit-rebalance-cadence.md) separates user intent from automatic cadence. Explicit target, allocation, shared strategy and Ledger rebalance requests save a unique request identity atomically with configuration. The backend handles that request without waiting for automatic cooldown, consumes it once on dispatch or a fresh no-trade result, and preserves pending receipt, Stop, fee, replay and physical confirmation checks. Automatic cycles keep their normal timing. Stopped portfolios remain stopped; routine target changes on the updated runner need no restart.

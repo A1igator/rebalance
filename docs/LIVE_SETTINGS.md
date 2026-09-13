@@ -20,7 +20,9 @@ Writers briefly serialize and calculate against the latest saved configuration. 
 
 A superseded unbroadcast plan or signature is discarded. The final local preparation/send-invocation boundary serializes with edits so either the edit wins and prevents the stale send, or an already initiated send retains its original hash and receipt barrier. Changing settings cannot cancel a transaction already submitted. Ledger configuration changes also end the current explicit signing request; a subsequent Ledger rebalance requires its normal fresh request and physical confirmation.
 
-Targets, allocation policy, trigger, slippage, deadline, fee target, RPC URL and polling changes affect subsequent work. New cycle intervals apply when the next cycle is created. Existing cycle deadlines and successful-swap cooldowns remain recorded; an edit does not erase them. Pending and recovery identities are retained and reconciled first.
+Explicit target changes, allocation applications and shared strategy applications also save a unique rebalance request. The running backend handles that request immediately after pending receipts reconcile, without waiting for the automatic interval. Starting its cycle or observing that no trade is needed consumes the request once; restarting or replaying a native share receipt does not create another bypass. A deliberate resubmission of the same targets is a new request.
+
+Settings-only edits do not create a rebalance request. New cycle intervals apply when the next cycle is created, and automatic cycles retain recorded timing. Trigger, slippage, deadline, fee target, RPC URL and polling changes affect subsequent work. Stop, pending/recovery identities, fees and physical Ledger confirmation still apply. See [explicit request cadence](prompts/101-explicit-rebalance-cadence.md).
 
 Wallet identity is fixed per portfolio. Changing the signer mode requires a stopped runner and no pending transaction, because it changes who signs rather than a portfolio setting. Create/connect a separate portfolio to use another wallet.
 

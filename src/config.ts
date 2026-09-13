@@ -1,6 +1,6 @@
 import { assertTestStorageEnvironment } from './test-isolation.js';
 import { constants } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { chmod, lstat, open } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { getAddress, isAddress, type Address, type Hex } from 'viem';
@@ -34,8 +34,17 @@ export type Config = {
   deadlineSeconds: number;
   pollSeconds: number;
   rebalanceIntervalSeconds: number;
+  /** One explicit target/rebalance request, consumed by durable cycle state. */
+  rebalanceRequestId?: string;
   rebalanceFeeTargetUsdE8?: string;
 };
+
+export const REBALANCE_REQUEST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** Explicit user target writers call this inside their existing atomic config commit. */
+export function withUserRebalanceRequest(config: Config, requestId: string = randomUUID()): Config {
+  return validateConfig({ ...config, rebalanceRequestId: requestId });
+}
 
 /** Exactly USDG plus four manifest stocks, as integer basis points totalling 100%. */
 export function validateTargets(targets: unknown): asserts targets is Record<string, number> {
@@ -75,6 +84,9 @@ export function validateConfig(value: unknown): Config {
     ['rebalanceIntervalSeconds', 1, 604800],
   ] as const) {
     if (!Number.isInteger(c[name]) || c[name] < min || c[name] > max) throw new Error(`Invalid ${name} (${min}–${max})`);
+  }
+  if (c.rebalanceRequestId !== undefined && (typeof c.rebalanceRequestId !== 'string' || !REBALANCE_REQUEST_ID.test(c.rebalanceRequestId))) {
+    throw new Error('Invalid rebalanceRequestId: use a canonical lowercase UUID');
   }
   if (c.rebalanceFeeTargetUsdE8 !== undefined && (typeof c.rebalanceFeeTargetUsdE8 !== 'string' ||
       !/^(0|[1-9][0-9]{0,19})$/.test(c.rebalanceFeeTargetUsdE8))) {

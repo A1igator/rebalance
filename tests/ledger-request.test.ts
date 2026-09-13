@@ -21,17 +21,18 @@ async function fixture(t: TestContext) {
   await atomicWriteJson(path('config.json'), config);
   await atomicWriteJson(path('run.lock'), runner);
   return { config, runner, options, path, advance: (ms: number) => { now += ms; },
-    request: (id?: string) => requestLedgerRebalance(id, options),
+    request: async (id?: string) => { const result = await requestLedgerRebalance(id, options); Object.assign(config, await readJson(path('config.json'))); return result; },
     read: () => readLedgerRequest(options), execution: () => new LedgerExecution(options) };
 }
 
-test('request queues public runner-bound intent, without modifying execution or wallet files', async t => {
+test('request atomically marks user cadence intent while preserving execution and wallet files', async t => {
   const f = await fixture(t);
-  const preserved = ['config.json', 'run.lock', 'pending.json', 'cycle.json', 'status.json', 'wallet.json'];
-  for (const file of preserved.slice(2)) await atomicWriteJson(f.path(file), { fixture: file });
+  const preserved = ['run.lock', 'pending.json', 'cycle.json', 'status.json', 'wallet.json'];
+  for (const file of preserved.slice(1)) await atomicWriteJson(f.path(file), { fixture: file });
   const before = await Promise.all(preserved.map(file => readFile(f.path(file), 'utf8')));
   const id = randomUUID(), record = await f.request(id);
   assert.equal(record.id, id); assert.equal(record.state, 'requested');
+  assert.equal(f.config.rebalanceRequestId, id);
   assert.equal(record.runnerPid, f.runner.pid); assert.equal(record.runnerToken, f.runner.token);
   assert.equal(record.configFingerprint, ledgerConfigFingerprint(f.config));
   assert.equal(record.queueExpiresAt - record.createdAt, 120_000);
@@ -430,7 +431,7 @@ test('a chart retry is atomically bound to one suspended request and never repla
   await atomicWriteJson(f.path('pending.json'), { fixture: 'unknown transaction' });
   await assert.rejects(retry(), /pending transaction/);
   await rm(f.path('pending.json'));
-  const accepted = await retry();
+  const accepted = await retry(); Object.assign(f.config, await readJson(f.path('config.json')));
   await assert.rejects(retry(), /no longer available/);
   await execution.prepare(f.config); await execution.finish('cancelled');
   await assert.rejects(retry(), /no longer available/, 'a previous failed request cannot authorize another retry after a newer failure');
@@ -462,4 +463,31 @@ test('a changed observation ends the old request without claiming completion or 
   await restarted.observePresence(true);
   assert.equal(await restarted.prepareAutomatic(f.config), true);
   assert.notEqual((await f.read())?.id, first?.id, 'fresh evaluation receives a new bounded request');
+});
+
+
+test('explicit ID replay preserves the later config and automatic preparation never mints a marker', async t => {
+  const f=await fixture(t), execution=f.execution(); const original=await f.request();
+  await execution.prepare(f.config); await execution.finish('completed');
+  const later={...f.config,slippageBps:75}; await atomicWriteJson(f.path('config.json'),later);
+  await assert.rejects(f.request(original.id),/already used/); assert.deepEqual(await readJson(f.path('config.json')),later);
+  const fresh=await fixture(t), automatic=fresh.execution(); await automatic.observePresence(true);
+  assert.equal(await automatic.prepareAutomatic(fresh.config),true);
+  assert.equal((await readJson<any>(fresh.path('config.json'))).rebalanceRequestId,undefined);
+});
+
+
+test('a graph with the pre-request config defers the newly committed intent until a fresh graph', async t => {
+  const f=await fixture(t), old=structuredClone(f.config), execution=f.execution(), request=await f.request();
+  await execution.prepare(old); assert.equal(execution.active,false); assert.equal((await f.read())?.state,'requested');
+  await execution.prepare(f.config); assert.equal(execution.active,true); assert.equal((await f.read())?.id,request.id);
+});
+
+
+test('JSON-null request or Stop records never become absent state or permit a cadence marker', async t => {
+  for(const file of ['ledger-request.json','stop.json']) {
+    const f=await fixture(t), before=await readFile(f.path('config.json'),'utf8');
+    await writeFile(f.path(file),'null'); await assert.rejects(f.request());
+    assert.equal(await readFile(f.path('config.json'),'utf8'),before);
+  }
 });

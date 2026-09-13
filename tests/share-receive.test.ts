@@ -60,7 +60,9 @@ test('receive applies included settings to captured wallet, preserving unrelated
  assert.equal(result.applied,true);assert.equal(result.wallet,f.profiles[0]!.wallet);assert.equal(result.chainId,4663);
  assert.equal(result.code,canonical);assert.deepEqual(result.shared,{targets,driftThresholdBps:250,rebalanceIntervalSeconds:600});
  assert.deepEqual([...result.untrackedAssets].sort(),['AMZN','TSLA']);assert.match(result.note!,/stay in the wallet/);
- assert.deepEqual(await f.config(),{...before,targets,driftThresholdBps:250,rebalanceIntervalSeconds:600});
+ const appliedConfig = await f.config();
+ assert.match(appliedConfig.rebalanceRequestId!,/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+ assert.deepEqual(appliedConfig,{...before,targets,driftThresholdBps:250,rebalanceIntervalSeconds:600,rebalanceRequestId:appliedConfig.rebalanceRequestId});
  assert.equal((await f.snapshot())[1],other);assert.equal(f.viewCalls,0);
  for(const file of files)assert.deepEqual(await readJson(join(f.profiles[0]!.dataDir,file)),{fixture:file});
  const journal=await readFile(f.journalPath,'utf8');
@@ -76,7 +78,9 @@ test('manual imported targets clear managed allocation while absent settings ret
  assert.equal(result.outcome,'applied');if(result.outcome!=='applied')assert.fail();
  assert.equal(result.settingsApplied,false);assert.deepEqual(result.settingChanges,[]);
  assert.equal(result.shared.driftThresholdBps,null);assert.equal(result.shared.rebalanceIntervalSeconds,null);
- const next=await f.config();assert.equal(next.allocation,undefined);assert.deepEqual(next,{...before,targets});
+ const next=await f.config();assert.equal(next.allocation,undefined);
+ assert.match(next.rebalanceRequestId!,/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+ assert.deepEqual(next,{...before,targets,rebalanceRequestId:next.rebalanceRequestId});
 });
 
 test('unattached even single-wallet portfolios never apply; selecting later cannot consume the old request',async t=>{
@@ -209,4 +213,30 @@ test('explicit CLI scope does not change attachment and pinned receive rejects m
  assert.equal(mismatch.outcome,'blocked');assert.equal((await f.snapshot())[0],before[0]);
  await assert.rejects(command([...args,'--apply']));await assert.rejects(command([...args,'--settings']));
  await assert.rejects(command(args.filter(arg=>arg!==request&&arg!=='--request-id')));
+});
+
+
+test('native share intent is committed after its applying barrier and dedupe never mints again', async t => {
+ const f=await fixture(t);await f.connect(0);
+ const seen:string[]=[];
+ const write:typeof atomicWriteJson=async(path,value)=>{
+  if(path===f.configPath()){
+   const pending=await readJson<{state:string}>(f.journalPath);
+   assert.equal(pending?.state,'applying','the journal barrier must exist before the request-bearing config commit');
+   const id=(value as Config).rebalanceRequestId!;
+   assert.match(id,/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);seen.push(id);
+  }
+  await atomicWriteJson(path,value);
+ };
+ assert.equal((await f.receive({write})).outcome,'applied');
+ const first=await f.config(),firstBytes=await readFile(f.configPath(),'utf8');
+ assert.equal(seen.length,1);assert.equal(first.rebalanceRequestId,seen[0]);
+ const replay=await f.receive({write});assert.equal('replayed' in replay&&replay.replayed,true);
+ assert.equal(seen.length,1);assert.equal(await readFile(f.configPath(),'utf8'),firstBytes);
+ const next=await f.receive({},'b'.repeat(64));assert.equal(next.outcome,'applied');
+ const second=await f.config();assert.deepEqual(second.targets,first.targets);
+ assert.notEqual(second.rebalanceRequestId,first.rebalanceRequestId,'a new native request with the same code is fresh explicit intent');
+ const before=await readFile(f.configPath(),'utf8');
+ const oldReplay=await f.receive({write});assert.equal('replayed' in oldReplay&&oldReplay.replayed,true);
+ assert.equal(await readFile(f.configPath(),'utf8'),before,'replaying the older request must not replace the newer marker');
 });
