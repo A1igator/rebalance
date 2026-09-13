@@ -2,10 +2,10 @@ import { FeeTargetError, type FeeCheck } from './fee-target.js';
 import { projectSwapCount } from './fee-projection.js';
 import { resolve } from 'node:path';
 import { watch } from 'node:fs';
-import { createChain, type BatchQuote } from './chain.js';
+import { createChain, type BatchQuote, type ChainTransaction } from './chain.js';
 import { DATA, STATE_PATH, PENDING_PATH, loadConfig, type Config } from './config.js';
 import { allocationSummary } from './allocation-management.js';
-import { planRebalance, type Portfolio, type TradePlan, type RebalancePlan } from './core.js';
+import { planRebalance, RebalanceNotRequiredError, type Portfolio, type TradePlan, type RebalancePlan } from './core.js';
 import { attentionCondition, ledgerCondition, rebalanceCompleted, transactionRecovered, type FailurePhase, type RebalanceAttention } from './events.js';
 import { automaticRecovery } from './recovery.js';
 import { CYCLE_PATH, ACTIVE_CYCLE_SECONDS, readCycle, publicCycle, rebalanceInterval, beginRebalanceCycle, finishRebalanceCycle, type RebalanceCycle } from './cadence.js';
@@ -171,6 +171,12 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
     try { await requireCurrentConfig(); return await action(); }
     finally { await release(); }
   };
+  const feeSwapCount = (transaction: ChainTransaction): number | null => {
+    const projected = state.portfolio ? projectSwapCount(state.portfolio.positions, config.driftThresholdBps) : null;
+    // Rebuilt calldata can differ from the earlier observation. Cover every
+    // actual inner swap while retaining conservative later work and null errors.
+    return projected === null ? null : Math.max(projected, transaction.swapCount ?? 1);
+  };
   const recoveryObservation: { operation: Operation | null } = { operation: null };
   await runGraph<RebalancePlan>({
     canExecute: execute,
@@ -236,7 +242,12 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
       state.cycle = interval.cycle;
       return interval.operation;
     },
-    quote: trade => chain.quoteBatch(trade),
+    quote: async trade => {
+      const quote = await chain.quoteBatch(trade, { driftThresholdBps: config.driftThresholdBps });
+      await requireCurrentConfig();
+      if (quote.plan) state.proposal = quote.plan;
+      return quote;
+    },
     execute: async (trade, quote) => {
       if (await readJson(STOP_PATH)) return { status: 'stopping', message: 'Stop requested; no new transaction sent.' };
       await requireCurrentConfig();
@@ -251,10 +262,12 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
         // execution. These fee checks never access the device or keys.
         if (config.rebalanceFeeTargetUsdE8 !== undefined) {
           try {
-            const transaction = await chain.transactionBatch(trade, quote as BatchQuote);
-            const swaps = state.portfolio ? projectSwapCount(state.portfolio.positions, config.driftThresholdBps) : null;
-            state.feeCheck = await readRebalanceFee(config, chain, transaction, swaps);
-          } catch {
+            const transaction = await chain.transactionBatch(trade, quote as BatchQuote, { driftThresholdBps: config.driftThresholdBps });
+            await requireCurrentConfig();
+            if (transaction.plan) state.proposal = transaction.plan;
+            state.feeCheck = await readRebalanceFee(config, chain, transaction, feeSwapCount(transaction));
+          } catch (error) {
+            if (error instanceof RebalanceNotRequiredError || error instanceof ConfigChangedError) throw error;
             // Allowance/transaction preparation here is also a passive read;
             // its failure is an unavailable estimate, not a signing incident.
             state.feeCheck = { state: 'unavailable', targetUsdE8: config.rebalanceFeeTargetUsdE8,
@@ -284,9 +297,14 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
         }
         await ledger!.assertReady(config);
       }
-      const transaction = await chain.transactionBatch(trade, quote as BatchQuote);
+      const transaction = await chain.transactionBatch(trade, quote as BatchQuote, { driftThresholdBps: config.driftThresholdBps });
+      await requireCurrentConfig();
+      if (transaction.plan) {
+        state.proposal = transaction.plan;
+        await atomicWriteJson(STATE_PATH, state);
+      }
       const fees: FeeContext | undefined = config.rebalanceFeeTargetUsdE8 === undefined ? undefined : {
-        swaps: state.portfolio ? projectSwapCount(state.portfolio.positions, config.driftThresholdBps) : null,
+        swaps: feeSwapCount(transaction),
         onCheck: async check => { state.feeCheck = check; await atomicWriteJson(STATE_PATH, state); },
       };
       state.cycle = await withCurrentConfig(() => beginRebalanceCycle(config));
@@ -310,7 +328,13 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
       await atomicWriteJson(STATE_PATH, state);
     },
   }).catch(async error => {
-    if (error instanceof ConfigChangedError || error instanceof ConfigLockBusyError) {
+    if (error instanceof RebalanceNotRequiredError) {
+      state.error = null;
+      state.operation = { status: 'observation-changed', message: error.message };
+      delete state.proposal; delete state.feeCheck;
+      state.cycle = publicCycle(await readCycle());
+      state.graph = { node: 'wait', trace: [...state.graph.trace.filter(node => node !== 'error'), 'wait'] };
+    } else if (error instanceof ConfigChangedError || error instanceof ConfigLockBusyError) {
       state.error = null;
       state.operation = { status: 'configuration-changed', message: error instanceof ConfigChangedError
         ? error.message : 'Settings are being saved; the next evaluation will use the latest configuration.' };
@@ -325,7 +349,7 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
       state.operation = { status: `ledger-${error.outcome}`, message: error.message };
       if (!['rejected', 'cancelled', 'timeout'].includes(error.outcome)) state.error = error.message;
     } else state.error = publicError(error);
-    await ledger?.finish(error instanceof ConfigChangedError || error instanceof ConfigLockBusyError ? 'configuration-changed' : error instanceof FeeTargetError ? 'fee-target' : error instanceof LedgerSigningError ? error.outcome : 'failed');
+    await ledger?.finish(error instanceof RebalanceNotRequiredError ? 'observation-changed' : error instanceof ConfigChangedError || error instanceof ConfigLockBusyError ? 'configuration-changed' : error instanceof FeeTargetError ? 'fee-target' : error instanceof LedgerSigningError ? error.outcome : 'failed');
     await atomicWriteJson(STATE_PATH, state);
   });
   if (configured?.mode === 'ledger') {

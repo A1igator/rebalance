@@ -447,3 +447,19 @@ test('concurrent Retry clicks with different UUIDs admit only one new request fo
   const journal = await readJson<{ records: unknown[] }>(f.path('ledger-request.json'));
   assert.equal(journal?.records.length, 2);
 });
+
+
+test('a changed observation ends the old request without claiming completion or suspending automatic evaluation', async t => {
+  const f = await fixture(t), execution = f.execution();
+  await execution.observePresence(true);
+  assert.equal(await execution.prepareAutomatic(f.config), true);
+  const first = await f.read();
+  await execution.finish('observation-changed');
+  assert.equal(execution.active, false);
+  assert.equal((await f.read())?.outcome, 'observation-changed');
+  assert.deepEqual(await readLedgerPromptState(f.options), { suspended: false });
+  const restarted = f.execution();
+  await restarted.observePresence(true);
+  assert.equal(await restarted.prepareAutomatic(f.config), true);
+  assert.notEqual((await f.read())?.id, first?.id, 'fresh evaluation receives a new bounded request');
+});

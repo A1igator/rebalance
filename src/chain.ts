@@ -13,7 +13,7 @@ import {
   type Address,
   type Hex,
 } from "viem";
-import { evaluatePortfolio, type Portfolio, type TradePlan, type RebalancePlan } from "./core.ts";
+import { evaluatePortfolio, planRebalance, planAtomicRebalance, RebalanceNotRequiredError, type Portfolio, type TradePlan, type RebalancePlan } from "./core.ts";
 import { ASSETS } from "./assets.ts";
 export { ASSETS } from "./assets.ts";
 
@@ -53,7 +53,8 @@ export type RouteQuote = {
   blockNumber: bigint;
 };
 
-export type BatchQuote = { quotes: RouteQuote[]; blockNumber: bigint };
+export type RebalanceContext = { driftThresholdBps: number };
+export type BatchQuote = { quotes: RouteQuote[]; blockNumber: bigint; plan?: RebalancePlan };
 
 export type ChainTransaction = {
   to: Address;
@@ -66,6 +67,8 @@ export type ChainTransaction = {
   swapCount?: number;
   /** Deficient input-token approvals still required, including this approval. */
   approvalCount?: number;
+  /** Exact fresh combined plan represented by this preparation. */
+  plan?: RebalancePlan;
 };
 
 // Official ABI sources:
@@ -293,7 +296,7 @@ export function createChain(config: ChainConfig) {
     return { ...best, minimumOut, blockNumber: block.number };
   }
 
-  async function snapshot(): Promise<{
+  async function snapshotAt(block: Header): Promise<{
     portfolio: Portfolio;
     blockNumber: bigint;
     blockTimestamp: bigint;
@@ -301,7 +304,6 @@ export function createChain(config: ChainConfig) {
     valuationNote: string;
     multipliers: Record<string, bigint>;
   }> {
-    const block = await header();
     const multipliers = await Promise.all(stockList.map(async (stock) => [stock.id, await stockState(stock, block.number)] as const));
     const [balances, native, valuations] = await Promise.all([
       Promise.all(assetList.map((asset) => tokenBalance(asset, block.number))),
@@ -328,6 +330,8 @@ export function createChain(config: ChainConfig) {
       multipliers: Object.fromEntries(multipliers),
     };
   }
+
+  async function snapshot() { return snapshotAt(await header()); }
 
   async function quote(trade: TradePlan): Promise<RouteQuote> {
     trade = { ...trade };
@@ -372,7 +376,7 @@ export function createChain(config: ChainConfig) {
     };
   }
 
-  function validatedBatch(plan: RebalancePlan): TradePlan[] {
+  function validatedBatch(plan: RebalancePlan, allowMixed = false): TradePlan[] {
     if (!plan || !Array.isArray(plan.trades) || plan.trades.length === 0 || plan.trades.length > 4) {
       throw new Error("A rebalance batch requires one to four distinct stock trades");
     }
@@ -386,14 +390,15 @@ export function createChain(config: ChainConfig) {
       const buying = sell.id === "USDG";
       const stock = buying ? buy.id : sell.id;
       if (stocks.has(stock)) throw new Error("A rebalance batch may use each stock pool only once");
-      if (phase !== undefined && phase !== buying) throw new Error("Sales and purchases require separate rebalance batches");
+      if (phase !== undefined && phase !== buying && !allowMixed) throw new Error("Sales and purchases require separate rebalance batches");
+      if (allowMixed && phase === true && !buying) throw new Error("All stock sales must precede purchases in an atomic rebalance");
       stocks.add(stock); phase = buying;
       inputs.set(sell.id, amount((inputs.get(sell.id) ?? 0n) + trade.amountIn, "Aggregate batch input"));
       return trade;
     });
   }
 
-  async function batchState(trades: TradePlan[], block: Header) {
+  async function batchState(trades: TradePlan[], block: Header, enforcedSaleMinimums = 0n) {
     const inputs = new Map<string, { asset: Asset; amountIn: bigint }>();
     for (const trade of trades) {
       const { sell } = assetsFor(trade, assetList);
@@ -402,7 +407,9 @@ export function createChain(config: ChainConfig) {
     }
     await Promise.all([
       ...[...inputs.values()].map(async ({ asset, amountIn }) => {
-        if (amountIn > await tokenBalance(asset, block.number)) throw new Error(`Insufficient aggregate ${asset.id} balance`);
+        const held = await tokenBalance(asset, block.number);
+        const funded = amount(held + (asset.id === "USDG" ? enforcedSaleMinimums : 0n), "Guaranteed batch balance", true);
+        if (amountIn > funded) throw new Error(`Insufficient aggregate ${asset.id} balance`);
       }),
       ...trades.map(trade => requireTradable(trade, block.number)),
     ]);
@@ -410,30 +417,67 @@ export function createChain(config: ChainConfig) {
     return [...inputs.values()];
   }
 
-  async function quoteBatch(plan: RebalancePlan): Promise<BatchQuote> {
-    const trades = validatedBatch(plan);
+  function contextFor(context: RebalanceContext): RebalanceContext {
+    if (!context || !Number.isInteger(context.driftThresholdBps) || context.driftThresholdBps < 0 || context.driftThresholdBps > 10_000) {
+      throw new Error("Invalid rebalance preparation context");
+    }
+    return { driftThresholdBps: context.driftThresholdBps };
+  }
+
+  /** All funding proof is created here from fresh, encoded sale minima. */
+  async function atomicBatchAt(block: Header, context: RebalanceContext) {
+    const observation = await snapshotAt(block);
+    const initial = planRebalance(observation.portfolio, "USDG", context.driftThresholdBps);
+    if (!initial) throw new RebalanceNotRequiredError();
+    const initialTrades = validatedBatch(initial);
+    await batchState(initialTrades, block);
+    const initialQuotes = await Promise.all(initialTrades.map(trade => quoteAt(trade, block)));
+    const selling = initialTrades[0]!.buyAssetId === "USDG";
+    const minimums = selling ? initialQuotes.map(quote => quote.minimumOut) : [];
+    const plan = planAtomicRebalance(observation.portfolio, "USDG", context.driftThresholdBps, minimums)!;
+    const trades = validatedBatch(plan, true);
+    const purchases = selling ? trades.slice(initialTrades.length) : [];
+    const purchaseQuotes = await Promise.all(purchases.map(trade => quoteAt(trade, block)));
+    const quotes = [...initialQuotes, ...purchaseQuotes];
+    const minimumTotal = minimums.reduce((sum, value) => amount(sum + value, "Aggregate enforced sale minimum"), 0n);
+    const inputs = await batchState(trades, block, minimumTotal);
+    fresh(block);
+    return { trades, quotes, inputs, plan };
+  }
+
+  async function quoteBatch(plan: RebalancePlan, context?: RebalanceContext): Promise<BatchQuote> {
+    const preparedContext = context === undefined ? undefined : contextFor(context);
+    const trades = preparedContext ? undefined : validatedBatch(plan);
     const block = await header();
-    await batchState(trades, block);
-    const quotes = await Promise.all(trades.map(trade => quoteAt(trade, block)));
+    if (preparedContext) {
+      const prepared = await atomicBatchAt(block, preparedContext);
+      return { quotes: prepared.quotes, blockNumber: block.number, plan: prepared.plan };
+    }
+    await batchState(trades!, block);
+    const quotes = await Promise.all(trades!.map(trade => quoteAt(trade, block)));
     fresh(block);
     return { quotes, blockNumber: block.number };
   }
 
-  async function transactionBatch(plan: RebalancePlan, _previous: BatchQuote): Promise<ChainTransaction> {
-    const trades = validatedBatch(plan);
+  async function transactionBatch(plan: RebalancePlan, _previous: BatchQuote, context?: RebalanceContext): Promise<ChainTransaction> {
+    const preparedContext = context === undefined ? undefined : contextFor(context);
+    const originalTrades = preparedContext ? undefined : validatedBatch(plan);
     const block = await header();
-    const inputs = await batchState(trades, block);
+    const prepared = preparedContext ? await atomicBatchAt(block, preparedContext) : undefined;
+    const trades = prepared?.trades ?? originalTrades!;
+    const inputs = prepared?.inputs ?? await batchState(trades, block);
     const [current, allowances] = await Promise.all([
-      Promise.all(trades.map(trade => quoteAt(trade, block))),
+      prepared ? Promise.resolve(prepared.quotes) : Promise.all(trades.map(trade => quoteAt(trade, block))),
       Promise.all(inputs.map(async input => ({ ...input, allowance: amount(await publicClient.readContract({
         address: input.asset.address, abi: erc20Abi, functionName: "allowance", args: [wallet, ROUTER], blockNumber: block.number,
       }), "Router allowance", true) }))),
     ]);
     fresh(block);
+    const metadata = prepared ? { plan: prepared.plan } : {};
     const deficient = allowances.filter(({ allowance, amountIn }) => allowance < amountIn);
     if (deficient.length) {
       const first = deficient[0]!;
-      return { to: first.asset.address, value: 0n, kind: "approval", swapCount: trades.length, approvalCount: deficient.length,
+      return { to: first.asset.address, value: 0n, kind: "approval", swapCount: trades.length, approvalCount: deficient.length, ...metadata,
         data: encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: [ROUTER, first.amountIn] }) };
     }
     const deadline = block.timestamp + deadlineSeconds;
@@ -446,7 +490,7 @@ export function createChain(config: ChainConfig) {
         amountIn: trade.amountIn, amountOutMinimum: route.minimumOut, sqrtPriceLimitX96: 0n,
       }] });
     });
-    return { to: ROUTER, value: 0n, kind: "swap", expiresAt: deadline, swapCount: trades.length, approvalCount: 0,
+    return { to: ROUTER, value: 0n, kind: "swap", expiresAt: deadline, swapCount: trades.length, approvalCount: 0, ...metadata,
       data: encodeFunctionData({ abi: ROUTER_ABI, functionName: "multicall", args: [deadline, swaps] }) };
   }
 

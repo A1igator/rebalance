@@ -12,7 +12,7 @@ import {
 } from "viem";
 import { ASSETS, DISCOVERY_TTL_MS, QUOTER, ROBINHOOD, ROUTER, RPC_RETRY_COUNT, RPC_TIMEOUT_MS,
   createChain, type ChainConfig } from "../src/chain.js";
-import type { RebalancePlan, TradePlan } from "../src/core.js";
+import { planRebalance, RebalanceNotRequiredError, type RebalancePlan, type TradePlan } from "../src/core.js";
 
 // Local protocol fixtures only: no mainnet requests, wallets, or bytecode copies.
 // These addresses and the seven-field SwapRouter02 layout are documented in
@@ -579,4 +579,93 @@ test('batch input is copied before asynchronous reads so caller mutations cannot
   assert.equal(decoded.functionName, 'multicall');
   if (decoded.functionName !== 'multicall') assert.fail();
   assert.equal(decoded.args[1].length, 4);
+});
+
+
+const atomicContext = { driftThresholdBps: 500 };
+function investedBalances(state: ReturnType<typeof fixture>['state']) {
+  state.balances.USDG = 20_000_000n;
+  state.balances.TSLA = 200_000_000_000_000_000n;
+  state.balances.NVDA = 200_000_000_000_000_000n;
+  state.balances.AAPL = 0n; state.balances.AMZN = 0n;
+}
+
+test('atomic context freshly builds sales before minimum-funded buys and aggregates future cash approval', async t => {
+  const { state, chain } = fixture(t);
+  investedBalances(state);
+  const original = planRebalance((await chain.snapshot()).portfolio, 'USDG', 500)!;
+  assert.equal(original.trades.length, 2);
+  const quoted = await chain.quoteBatch(original, atomicContext);
+  assert.equal(quoted.plan!.trades.length, 4);
+  assert.deepEqual(quoted.plan!.trades.map(t => [t.sellAssetId, t.buyAssetId]), [
+    ['NVDA', 'USDG'], ['TSLA', 'USDG'], ['USDG', 'AAPL'], ['USDG', 'AMZN'],
+  ]);
+  assert(quoted.quotes.every(q => q.blockNumber === quoted.blockNumber));
+  const first = await chain.transactionBatch(original, quoted, atomicContext);
+  assert.equal(first.kind, 'approval'); assert.equal(first.approvalCount, 3); assert.equal(first.swapCount, 4);
+  state.allowances.NVDA = maxUint256; state.allowances.TSLA = maxUint256;
+  const cashApproval = await chain.transactionBatch(original, quoted, atomicContext);
+  assert.equal(cashApproval.kind, 'approval'); assert.equal(cashApproval.to, USDG); assert.equal(cashApproval.approvalCount, 1);
+  const requiredCash = cashApproval.plan!.trades.filter(t => t.sellAssetId === 'USDG').reduce((sum, t) => sum + t.amountIn, 0n);
+  assert(requiredCash > state.balances.USDG, 'future sale minimums may fund buys beyond starting cash');
+  assert.deepEqual(decodeFunctionData({ abi: TRANSACTION_ABI, data: cashApproval.data }).args, [ROUTER, requiredCash]);
+  state.allowances.USDG = requiredCash;
+  const tx = await chain.transactionBatch(original, quoted, atomicContext);
+  assert.equal(tx.kind, 'swap'); assert.equal(tx.approvalCount, 0); assert.equal(tx.swapCount, 4);
+  const outer = decodeFunctionData({ abi: TRANSACTION_ABI, data: tx.data });
+  if (outer.functionName !== 'multicall') assert.fail();
+  assert.equal(outer.args[1].length, 4); assert.equal(outer.args[0], tx.expiresAt);
+  let guaranteedCash = state.balances.USDG;
+  const stocks = new Set<string>();
+  outer.args[1].forEach((data, index) => {
+    const inner = decodeFunctionData({ abi: TRANSACTION_ABI, data });
+    if (inner.functionName !== 'exactInputSingle') assert.fail();
+    const call = inner.args[0];
+    assert.equal(call.recipient, WALLET); assert.equal(call.sqrtPriceLimitX96, 0n);
+    assert.equal(call.amountIn, tx.plan!.trades[index]!.amountIn);
+    const sale = call.tokenOut === USDG;
+    assert.equal(sale, index < 2);
+    const stock = (sale ? call.tokenIn : call.tokenOut).toLowerCase();
+    assert(!stocks.has(stock)); stocks.add(stock);
+    if (sale) guaranteedCash += call.amountOutMinimum;
+    else { assert(call.amountIn <= guaranteedCash); guaranteedCash -= call.amountIn; }
+  });
+  assert.equal(guaranteedCash, 19_960_000n, 'USDG target reserve survives the worst encoded sale outputs');
+  assert.equal(state.balances.USDG, 20_000_000n, 'preparation never writes hypothetical holdings');
+});
+
+test('atomic final preparation updates purchase amounts when fresh sale pricing changes', async t => {
+  const { state, chain } = fixture(t);
+  investedBalances(state); state.allowance = maxUint256;
+  const plan = planRebalance((await chain.snapshot()).portfolio, 'USDG', 500)!;
+  const quoted = await chain.quoteBatch(plan, atomicContext);
+  const before = quoted.plan!.trades.filter(t => t.sellAssetId === 'USDG').reduce((sum, t) => sum + t.amountIn, 0n);
+  state.blockNumber++; state.timestamp += 12n; state.now += 12n;
+  state.forward[100] = 1_990_000n; state.forward[500] = 1_989_000n;
+  const tx = await chain.transactionBatch(plan, quoted, atomicContext);
+  const after = tx.plan!.trades.filter(t => t.sellAssetId === 'USDG').reduce((sum, t) => sum + t.amountIn, 0n);
+  assert(after < before, 'final calldata cannot keep purchases funded by an earlier stronger sale quote');
+  assert(tx.plan!.trades.slice(0, 2).every(t => t.buyAssetId === 'USDG'));
+});
+
+test('atomic preparation quietly invalidates an old plan when actual holdings become on target', async t => {
+  const { state, chain } = fixture(t);
+  investedBalances(state);
+  const plan = planRebalance((await chain.snapshot()).portfolio, 'USDG', 500)!;
+  const quoted = await chain.quoteBatch(plan, atomicContext);
+  state.balances.TSLA = 100_000_000_000_000_000n;
+  state.balances.NVDA = 100_000_000_000_000_000n;
+  state.balances.AAPL = 100_050_025_012_506_254n;
+  state.balances.AMZN = 100_000_000_000_000_000n;
+  await assert.rejects(chain.transactionBatch(plan, quoted, atomicContext), RebalanceNotRequiredError);
+  await assert.rejects(chain.quoteBatch(plan, atomicContext), RebalanceNotRequiredError);
+});
+
+test('future-funding is available only through fresh internal atomic preparation, never through caller hints', async t => {
+  const { state, chain } = fixture(t);
+  const forged: RebalancePlan = { reason: 'untrusted mixed plan', trades: [trade, ...buyBatch().trades.slice(1)] };
+  await assert.rejects(chain.quoteBatch(forged), /separate rebalance batches/);
+  await assert.rejects(chain.transactionBatch(forged, { quotes: [{amountOut: maxUint256, minimumOut: maxUint256, fee:100, blockNumber:100n}], blockNumber:100n }), /separate rebalance batches/);
+  await assert.rejects(chain.quoteBatch(buyBatch(), { driftThresholdBps: -1 }), /Invalid rebalance/);
+  assert.equal(state.requests.length, 0);
 });

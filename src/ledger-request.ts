@@ -37,7 +37,7 @@ export type LedgerPromptState = { suspended: boolean; outcome?: string };
 // Normal backend waits can evaluate again. Device failures and uncertain or
 // interrupted execution need a real reconnection or an explicit retry.
 const RETRYABLE_OUTCOMES = new Set(['completed', 'on-target', 'cooling-down', 'fee-target',
-  'configuration-changed', 'stopped', 'stopping']);
+  'configuration-changed', 'observation-changed', 'stopped', 'stopping']);
 const suspends = (outcome: string) => !RETRYABLE_OUTCOMES.has(outcome);
 type Runner = { pid: number; token: string };
 

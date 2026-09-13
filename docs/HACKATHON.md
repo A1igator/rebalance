@@ -53,7 +53,7 @@ Fit: direct deterministic swaps can satisfy the integration direction without in
 
 Deliver:
 
-- [ ] Actual Ledger-backed approval protecting the transition from agent proposal to spending authority.
+- [x] Actual Ledger-backed approval protecting the transition from agent proposal to spending authority; [sequential rebalance receipts verified](LEDGER_EXECUTION.md#verified-sequential-rebalance-batch-validation-pending).
 - [ ] Runnable demo showing Ledger device approval and rejection; distinguish automatic raw-key/Privy profiles from device-confirmed Ledger execution.
 - [ ] [Ledger feedback](LEDGER_FEEDBACK.md) covering real SDK/docs experience, specific gaps and improvements; include evidence where useful.
 - [ ] Hardware, app, SDK and chain compatibility evidence; accurate disclosure of display/context limitations.

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { evaluatePortfolio, planRebalance, planTrade, type Portfolio } from '../src/core.js';
+import { evaluatePortfolio, planRebalance, planAtomicRebalance, planTrade, type Portfolio } from '../src/core.js';
 
 const ids = ['USDG', 'AAPL', 'NVDA', 'MSFT', 'AMD'];
 const USD = 100_000_000n;
@@ -108,4 +108,54 @@ test('zero drift threshold still sells every positive residual instead of enlarg
   const result = planRebalance(observed, 'USDG', 0)!;
   assert.equal(result.trades.length, 3);
   assert(result.trades.every(t => t.buyAssetId === 'USDG' && t.amountIn === 200_000_000_000_000_000n));
+});
+
+
+test('atomic rebalancing spends enforced minimum sale proceeds and keeps the rounded target reserve', () => {
+  const input = portfolio([20n, 40n, 40n, 0n, 0n]);
+  const before = structuredClone(input);
+  const plan = planAtomicRebalance(input, 'USDG', 500, [19_900_000n, 19_900_000n])!;
+  assert.deepEqual(plan.trades.map(t => [t.sellAssetId, t.buyAssetId, t.amountIn]), [
+    ['AAPL', 'USDG', 20n * 10n ** 18n], ['NVDA', 'USDG', 20n * 10n ** 18n],
+    ['USDG', 'AMD', 19_920_000n], ['USDG', 'MSFT', 19_920_000n],
+  ]);
+  const spent = plan.trades.filter(t => t.sellAssetId === 'USDG').reduce((sum, t) => sum + t.amountIn, 0n);
+  assert.equal(20_000_000n + 39_800_000n - spent, 19_960_000n);
+  assert.deepEqual(input, before, 'guaranteed holdings must not replace the real portfolio');
+  const lower = planAtomicRebalance(input, 'USDG', 500, [19_000_000n, 19_000_000n])!;
+  assert.equal(lower.trades.filter(t => t.sellAssetId === 'USDG').reduce((sum, t) => sum + t.amountIn, 0n), 38_400_000n);
+});
+
+test('atomic purchases can use earlier sale minimums even with zero starting cash', () => {
+  const plan = planAtomicRebalance(portfolio([0n, 60n, 40n, 0n, 0n]), 'USDG', 500, [39_800_000n, 19_900_000n])!;
+  assert.equal(plan.trades.length, 4);
+  assert(plan.trades.slice(0, 2).every(t => t.buyAssetId === 'USDG'));
+  assert.equal(plan.trades.slice(2).reduce((sum, t) => sum + t.amountIn, 0n), 39_760_000n);
+});
+
+test('atomic funding omits purchases when minimum proceeds cannot cover the target reserve', () => {
+  const plan = planAtomicRebalance(portfolio([0n, 100n, 0n, 0n, 0n]), 'USDG', 500, [1_000_000n])!;
+  assert.equal(plan.trades.length, 1);
+  assert.equal(plan.trades[0]!.buyAssetId, 'USDG');
+  assert.equal(plan.trades[0]!.amountIn, 80n * 10n ** 18n);
+});
+
+test('minimum output input is bound to deterministic sales and each stock is touched at most once', () => {
+  const input = portfolio([20n, 40n, 40n, 0n, 0n]);
+  for (const outputs of [[], [1n], [1n, 1n, 1n], [0n, 1n], [-1n, 1n], [(1n << 256n), 1n], [(1n << 256n) - 1n, 1n]]) {
+    assert.throws(() => planAtomicRebalance(input, 'USDG', 500, outputs));
+  }
+  const improved = planAtomicRebalance(input, 'USDG', 500, [30_000_000n, 30_000_000n])!;
+  const stocks = improved.trades.map(t => t.sellAssetId === 'USDG' ? t.buyAssetId : t.sellAssetId);
+  assert.equal(new Set(stocks).size, stocks.length, 'an improved quote cannot cause an already sold stock to be repurchased');
+  const cash = portfolio([5n, 0n, 0n, 0n, 0n]);
+  assert.deepEqual(planAtomicRebalance(cash, 'USDG', 500), planRebalance(cash, 'USDG', 500));
+  assert.throws(() => planAtomicRebalance(cash, 'USDG', 500, [1n]), /must match/);
+});
+
+test('atomic target reserve rounds upward instead of spending a fractional base unit', () => {
+  const input = portfolio([20n, 40n, 40n, 0n, 0n]);
+  const plan = planAtomicRebalance(input, 'USDG', 500, [19_900_001n, 19_900_001n])!;
+  const budget = plan.trades.filter(t => t.sellAssetId === 'USDG').reduce((sum, t) => sum + t.amountIn, 0n);
+  assert.equal(59_800_002n - budget, 19_960_001n);
 });

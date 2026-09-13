@@ -23,6 +23,12 @@ export type TradePlan = {
   reason: string;
 };
 
+/** A fresh observation invalidated a previously needed rebalance. */
+export class RebalanceNotRequiredError extends Error {
+  override name = "RebalanceNotRequiredError";
+  constructor() { super("Fresh holdings no longer require this rebalance; observing again before new work."); }
+}
+
 export type RebalancePlan = {
   trades: TradePlan[];
   reason: string;
@@ -297,4 +303,70 @@ export function planRebalance(
       reason: `Buy underweight ${position.symbol} with excess ${quote.symbol}` }];
   });
   return buys.length ? { trades: buys, reason: `Buy ${buys.length} underweight asset${buys.length === 1 ? "" : "s"} with excess ${quote.symbol}` } : null;
+}
+
+
+/**
+ * Complete a sales plan with purchases funded by its enforced minimum outputs.
+ * These conservative holdings size calldata only; they are never observations.
+ */
+export function planAtomicRebalance(
+  portfolio: Portfolio,
+  quoteAssetId: string,
+  driftThresholdBps: number,
+  minimumSaleOutputs: bigint[] = [],
+): RebalancePlan | null {
+  const current = evaluatePortfolio(portfolio.positions);
+  const initial = planRebalance(current, quoteAssetId, driftThresholdBps);
+  const sales = initial?.trades.filter(trade => trade.buyAssetId === quoteAssetId) ?? [];
+  if (!Array.isArray(minimumSaleOutputs) || minimumSaleOutputs.length !== sales.length) {
+    throw new Error("Sale minimum outputs must match the current deterministic sales plan");
+  }
+  if (!initial || sales.length === 0) return initial;
+  const maximum = (1n << 256n) - 1n;
+  const positions = current.positions.map(position => ({ ...position }));
+  const cash = positions.find(position => position.id === quoteAssetId)!;
+  const sold = new Set<string>();
+  sales.forEach((trade, index) => {
+    const minimumOut = minimumSaleOutputs[index]!;
+    if (typeof minimumOut !== "bigint" || minimumOut <= 0n || minimumOut > maximum) {
+      throw new Error("Each enforced sale minimum must be a positive uint256 bigint");
+    }
+    const position = positions.find(position => position.id === trade.sellAssetId)!;
+    if (!position || sold.has(position.id) || trade.amountIn <= 0n || trade.amountIn > position.balance) {
+      throw new Error("Invalid stock input in the deterministic sales plan");
+    }
+    sold.add(position.id);
+    position.balance -= trade.amountIn;
+    cash.balance += minimumOut;
+    if (cash.balance > maximum) throw new Error("Guaranteed USDG balance exceeds uint256");
+  });
+  const guaranteed = evaluatePortfolio(positions);
+  const quote = guaranteed.positions.find(position => position.id === quoteAssetId)!;
+  const deviations = guaranteed.positions.map(position => ({ position,
+    delta: position.valueUsdE8 * BPS - guaranteed.totalUsdE8 * BigInt(position.targetBps) }));
+  const threshold = guaranteed.totalUsdE8 * BigInt(driftThresholdBps);
+  if (!deviations.some(({ delta }) => (delta < 0n ? -delta : delta) > threshold)) return initial;
+  // Round the reserve up, including when the quote asset's decimals exceed USD
+  // valuation precision. Extra actual sale output stays in the wallet.
+  const denominator = BPS * quote.priceUsdE8;
+  const reserveNumerator = guaranteed.totalUsdE8 * BigInt(quote.targetBps) * 10n ** BigInt(quote.decimals);
+  const reserve = (reserveNumerator + denominator - 1n) / denominator;
+  if (quote.balance <= reserve) return initial;
+  const deficits = deviations.filter(({ position, delta }) => position.id !== quoteAssetId && !sold.has(position.id) && delta < 0n)
+    .sort((a, b) => a.delta === b.delta ? compareIds(a.position.id, b.position.id) : a.delta < b.delta ? -1 : 1);
+  if (!deficits.length) return initial;
+  const needed = deficits.reduce((sum, { delta }) => sum - delta, 0n) * 10n ** BigInt(quote.decimals) / denominator;
+  const available = quote.balance - reserve;
+  const budget = available < needed ? available : needed;
+  if (budget <= 0n) return initial;
+  const portions = apportion(budget, deficits.map(({ position, delta }) => ({ id: position.id, weight: -delta })));
+  const purchases = deficits.flatMap(({ position }): TradePlan[] => {
+    const amountIn = portions.get(position.id)!;
+    if (amountIn === 0n || estimatedOutput(amountIn, quote, position) === 0n) return [];
+    return [{ sellAssetId: quoteAssetId, buyAssetId: position.id, amountIn,
+      reason: `Buy underweight ${position.symbol} with held ${quote.symbol} and enforced sale minimums` }];
+  });
+  if (!purchases.length) return initial;
+  return { trades: [...sales, ...purchases], reason: `Rebalance ${sales.length + purchases.length} assets in one atomic transaction` };
 }
