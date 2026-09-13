@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { isAbsolute, resolve } from 'node:path';
 import { createEventStream, type EventStream, type EventStreamDependencies } from './event-stream.js';
 import type { RebalanceEvent } from './events.js';
+import { selectedPortfolioRunning, withNotificationSelection } from './notification-selection.js';
 import { createNotificationFilter } from './notification-filter.js';
 import { acquireLock, atomicWriteJson, readJson } from './storage.js';
 
@@ -15,22 +16,25 @@ export type OpenCodeNotifications = { wake: () => void; close: () => Promise<voi
 export type OpenCodeNotificationOptions = {
   sessionId: string; projectDir: string; rootDir: string; dataDir: string; wallet: string | null;
   sessionDirectory?: string;
+  selectedOnly?: boolean;
+  selectionEpoch?: string;
   client: OpenCodeNotificationClient; signal?: AbortSignal;
   onError?: (failure: OpenCodeNotificationFailure) => void;
 };
 export type OpenCodeNotificationDependencies = {
   now: () => number;
+  selectionActive: typeof selectedPortfolioRunning;
   read: (path: string) => Promise<unknown>;
   persistJournal: (path: string, journal: unknown) => Promise<void>;
   stream: Partial<EventStreamDependencies>;
   after: (milliseconds: number, callback: () => void) => () => void;
 };
 type Delivery = { id: string; messageID: string; state: 'prepared' | 'accepted' | 'uncertain'; attemptedAt: string };
-type Journal = { version: 1; scope: string; entries: Delivery[] };
+type Journal = { version: 1; scope: string; entries: Delivery[]; selectionEpoch?: string; ignoredEventIds?: string[] };
 const idPattern = /^[A-Za-z0-9_-]{1,160}$/;
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const quote = (value: string) => "'" + value.replace(/'/g, "'\\''") + "'";
-const defaults: OpenCodeNotificationDependencies = { now: Date.now, read: readJson, persistJournal: atomicWriteJson, stream: {},
+const defaults: OpenCodeNotificationDependencies = { selectionActive: selectedPortfolioRunning, now: Date.now, read: readJson, persistJournal: atomicWriteJson, stream: {},
   after: (ms, callback) => { const timer = setTimeout(callback, ms); return () => clearTimeout(timer); } };
 
 // OpenCode v1.18.30's ascending IDs encode timestamp*4096+counter in six
@@ -67,7 +71,9 @@ function queue(value: unknown): RebalanceEvent[] {
 function journal(value: unknown, scope: string): Journal {
   if (value == null) return { version: 1, scope, entries: [] };
   const saved = value as Journal;
-  if (saved.version !== 1 || saved.scope !== scope || !Array.isArray(saved.entries) || saved.entries.length > 10_000) {
+  if (saved.version !== 1 || saved.scope !== scope || !Array.isArray(saved.entries) || saved.entries.length > 10_000 ||
+      (saved.ignoredEventIds !== undefined && (!Array.isArray(saved.ignoredEventIds) || saved.ignoredEventIds.length > 10_000 ||
+        saved.ignoredEventIds.some(id => typeof id !== 'string' || !idPattern.test(id)) || new Set(saved.ignoredEventIds).size !== saved.ignoredEventIds.length))) {
     throw new Error('Notification journal unavailable');
   }
   const ids = new Set<string>();
@@ -178,7 +184,13 @@ export async function createOpenCodeNotifications(
         throw new Error('Notification journal unavailable');
       }
     };
-    const selected = async () => (await filter.select(queue(await deps.read(resolve(dataDir, 'events.json'))))).events;
+    if (options.selectedOnly && saved.selectionEpoch !== (options.selectionEpoch ?? 'selected')) {
+      saved.selectionEpoch = options.selectionEpoch ?? 'selected';
+      saved.ignoredEventIds = queue(await deps.read(resolve(dataDir, 'events.json'))).map(event => event.id);
+      await save();
+    }
+    const eligibleSelection = () => options.selectedOnly ? deps.selectionActive(rootDir, `opencode:${sessionId}`, dataDir) : Promise.resolve(true);
+    const selected = async () => await eligibleSelection() ? (await filter.select(queue(await deps.read(resolve(dataDir, 'events.json'))))).events.filter(event => !saved.ignoredEventIds?.includes(event.id)) : [];
     const reconcile = async () => {
       const entries = saved.entries.filter(entry => entry.state !== 'accepted' && !checked.has(entry.id));
       if (!entries.length || closed) return;
@@ -200,7 +212,13 @@ export async function createOpenCodeNotifications(
       if (entries.some(entry => entry.state !== 'accepted')) report('delivery-uncertain');
     };
     stream = createEventStream({ directory: dataDir,
+      watchFiles: options.selectedOnly ? ['events.json', 'status.json', 'run.lock', 'stop.json', 'config.json'] : ['events.json'],
       read: () => track(async () => {
+        if (!await eligibleSelection()) {
+          const ids = queue(await deps.read(resolve(dataDir, 'events.json'))).map(event => event.id);
+          if (JSON.stringify(ids) !== JSON.stringify(saved.ignoredEventIds ?? [])) { saved.ignoredEventIds = ids; await save(); }
+          return [];
+        }
         const pending = await selected();
         const unseen = pending.filter(event => !saved.entries.some(entry => entry.id === event.id));
         // New actionable events take precedence over checking old ambiguous writes.
@@ -223,10 +241,30 @@ export async function createOpenCodeNotifications(
         if (closed || !current.some(item => JSON.stringify(item) === JSON.stringify(event))) {
           saved.entries = saved.entries.filter(item => item !== entry); await save(); return false;
         }
+        const dispatch: { result?: Promise<{ ok: boolean; value?: unknown }> } = {};
+        const begin = async () => {
+          if (closed) return;
+          if (options.selectedOnly) {
+            if (!await eligibleSelection()) return;
+            const latest = await selected();
+            if (closed || !latest.some(item => JSON.stringify(item) === JSON.stringify(event))) return;
+          }
+          // Capture before releasing the selection lock. Even a release failure
+          // cannot abandon an already initiated request or its uncertainty barrier.
+          dispatch.result = request(signal => promptAsync({ path: { id: sessionId }, query: { directory: sessionDirectory },
+            body: { messageID: entry.messageID, parts: [{ type: 'text', text: text(event) }] }, signal, throwOnError: true, responseStyle: 'fields' }))
+            .then(value => ({ ok: true, value }), () => ({ ok: false }));
+        };
         try {
-          response(await request(signal => promptAsync({ path: { id: sessionId }, query: { directory: sessionDirectory },
-            body: { messageID: entry.messageID, parts: [{ type: 'text', text: text(event) }] }, signal, throwOnError: true, responseStyle: 'fields' })));
-          entry.state = 'accepted';
+          if (options.selectedOnly) await withNotificationSelection(rootDir, `opencode:${sessionId}`, begin); else await begin();
+        } catch {
+          if (!dispatch.result) { saved.entries = saved.entries.filter(item => item !== entry); await save(); throw new Error('Selection control unavailable'); }
+        }
+        if (!dispatch.result) { saved.entries = saved.entries.filter(item => item !== entry); await save(); return false; }
+        try {
+          const result = await dispatch.result;
+          if (!result.ok) throw new Error('Native delivery uncertain');
+          response(result.value); entry.state = 'accepted';
         } catch { entry.state = 'uncertain'; report('delivery-uncertain'); }
         await save(true);
         stream?.wake();

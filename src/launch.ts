@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import type { Status } from './runtime.js';
 import type { CodexNotificationStatus } from './codex-notifications.js';
 import { acquireLock, atomicWriteJson, readJson } from './storage.js';
+import { ensureSelectedCodexNotifications } from './selected-notifications.js';
+import { portfolioRoot, sessionIdentity } from '../scripts/profile-routing.mjs';
 import { chartPort, chartUrl } from './chart-address.js';
 
 const REPOSITORY = fileURLToPath(new URL('..', import.meta.url));
@@ -20,6 +22,7 @@ export type LaunchDependencies = {
   alive: (pid: number) => boolean;
   pause: () => Promise<void>;
   attempts: number;
+  selectedNotifications: (dataDir: string, starting: boolean) => Promise<unknown>;
 };
 export type LaunchResult = {
   app: 'Rebalance'; requested: 'full' | 'setup-only';
@@ -55,6 +58,7 @@ function defaultDependencies(port: number): LaunchDependencies {
   const dataDir = resolve(process.env.REBALANCE_DATA_DIR || resolve(REPOSITORY, '.local'));
   const url = chartUrl(port);
   return {
+    selectedNotifications: (directory, starting) => ensureSelectedCodexNotifications(portfolioRoot(), sessionIdentity(), { dataDir: directory, starting }),
     dataDir, alive: processAlive, pause: () => delay(250), attempts: 40,
     command: args => new Promise((resolveResult, reject) => {
       execFile(process.execPath, ['--import', 'tsx', CLI, ...args], {
@@ -146,6 +150,7 @@ export async function launch(options: LaunchOptions = {}, overrides: Partial<Lau
         }
         return s;
       };
+      await deps.selectedNotifications(deps.dataDir, result.outcome === 'starting');
       let current = readNotificationStatus(await run(['notifications', 'status']));
       let state: LaunchResult['notifications']['state'];
       if (!current.configured) state = 'unconfigured';

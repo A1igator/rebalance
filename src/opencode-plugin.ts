@@ -23,7 +23,7 @@ type Context = {
     };
   };
 };
-type Binding = { version: 1; sessionId: string; enabled: boolean; wallets: string[] };
+type Binding = { version: 1; sessionId: string; enabled: boolean; wallets: string[]; selectionEpoch?: string };
 type Hooks = {
   'command.execute.before': (input: { command: string; sessionID: string; arguments: string }, output: { parts: Part[] }) => Promise<void>;
   'chat.message': (input: { sessionID: string; messageID?: string }, output: { message: Message; parts: Part[] }) => Promise<void>;
@@ -35,7 +35,7 @@ type Hooks = {
 type Overrides = {
   repository?: string; rootDir?: string;
   launch?: (input: Record<string, unknown>, env: NodeJS.ProcessEnv) => Promise<unknown>;
-  sharePreview?: (input: Record<string, unknown>, env: NodeJS.ProcessEnv) => Promise<unknown>;
+  shareReceive?: (input: Record<string, unknown>, env: NodeJS.ProcessEnv) => Promise<unknown>;
   notify?: typeof createOpenCodeNotifications;
   watchConnection?: (rootDir: string, changed: () => void) => () => void;
   now?: () => number;
@@ -62,13 +62,13 @@ function launchInNode(root: string, input: Record<string, unknown>, env: NodeJS.
   });
 }
 
-function previewShareInNode(root: string, input: Record<string, unknown>, env: NodeJS.ProcessEnv): Promise<unknown> {
+function receiveShareInNode(root: string, input: Record<string, unknown>, env: NodeJS.ProcessEnv): Promise<unknown> {
   return new Promise((done, fail) => {
     const child = execFile('node', [resolve(root, 'scripts/rebalance-opencode-share-hook.mjs')], {
       cwd: root, env, timeout: 30_000, maxBuffer: 1_048_576, killSignal: 'SIGTERM', encoding: 'utf8',
     }, (error, stdout) => {
-      if (error) { fail(new Error('The strategy preview is unavailable.')); return; }
-      try { done(JSON.parse(stdout)); } catch { fail(new Error('The strategy preview could not be read.')); }
+      if (error) { fail(new Error('The strategy import is unavailable.')); return; }
+      try { done(JSON.parse(stdout)); } catch { fail(new Error('The strategy import could not be read.')); }
     });
     child.stdin?.on('error', () => {});
     child.stdin?.end(JSON.stringify(input));
@@ -104,7 +104,8 @@ export async function createRebalanceOpenCodePlugin(context: Context, overrides:
     if (!binding) return null;
     if (binding.version !== 1 || binding.sessionId !== namespaced(id) || typeof binding.enabled !== 'boolean' ||
         !Array.isArray(binding.wallets) || binding.wallets.length > 128 || new Set(binding.wallets).size !== binding.wallets.length ||
-        binding.wallets.some(wallet => !/^0x[a-f0-9]{40}$/.test(wallet))) throw new Error('OpenCode notification preferences are invalid.');
+        binding.wallets.some(wallet => !/^0x[a-f0-9]{40}$/.test(wallet)) ||
+        (binding.selectionEpoch !== undefined && !/^[a-f0-9-]{36}$/.test(binding.selectionEpoch))) throw new Error('OpenCode notification preferences are invalid.');
     return binding;
   }
   async function updateBinding(id: string, edit: (value: Binding) => void): Promise<Binding> {
@@ -117,39 +118,20 @@ export async function createRebalanceOpenCodePlugin(context: Context, overrides:
       return current;
     } finally { await release(); }
   }
-  async function bindLaunchRoute(id: string, messageId: string) {
-    // Use the request's immutable route, not a selection that may have changed
-    // while startup was in flight. This also covers the sole-profile fallback.
-    const requestId = hash(JSON.stringify([namespaced(id), messageId]));
-    const route = await readJson<{ version?: number; requestId?: string; sessionId?: string;
-      selectionRequired?: boolean; profile?: { wallet?: string; dataDir?: string; rootDir?: string; chartPort?: number } }>(
-      resolve(rootDir, 'hook-routes', `${requestId}.json`));
-    if (!route) {
-      // New app entries restore an immutable remembered-running snapshot. Only
-      // its eligible wallets join this native conversation's event bindings.
-      const restored = await readJson<{ version: number; requestId: string; sessionId: string;
-        entries: { profile: { wallet: string; rootDir: string; dataDir: string; chartPort: number }; generation: string | null; expectedStop: string | null }[] }>(
-        resolve(rootDir, 'app-launch-requests', `${hash(requestId)}.json`));
-      if (!restored) return;
-      if (restored.version !== 1 || restored.requestId !== requestId || restored.sessionId !== namespaced(id) || !Array.isArray(restored.entries)) throw new Error('Invalid restoration route');
-      const registered = await readProfiles(rootDir), wallets: string[] = [];
-      for (const entry of restored.entries) {
-        if (entry.generation === null && entry.expectedStop === null) continue;
-        if (typeof entry.generation !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(entry.generation) || entry.expectedStop !== 'none') throw new Error('Invalid restoration preference');
-        const profile = registered.find(p => p.wallet === entry.profile?.wallet);
-        if (!profile?.wallet || entry.profile.rootDir !== rootDir || entry.profile.dataDir !== profile.dataDir || entry.profile.chartPort !== profile.chartPort || wallets.includes(profile.wallet)) throw new Error('Restoration route no longer matches a registered wallet');
-        wallets.push(profile.wallet);
-      }
-      await updateBinding(id, value => { for (const wallet of wallets) if (!value.wallets.includes(wallet)) value.wallets.push(wallet); });
-      return;
+  async function bindLaunchRoute(id: string, _messageId: string) {
+    // Restoring other runners is independent of this chat's notification scope.
+    // A sole-wallet fallback is not an actual user selection.
+    const linked = await readJson<{ version?: number; chainId?: number; wallet?: string }>(connectionPath(rootDir, namespaced(id)));
+    let selected: string[] = [];
+    if (linked !== null) {
+      if (linked.version !== 1 || linked.chainId !== 4663 || !linked.wallet) throw new Error('Invalid notification selection');
+      const profile = await resolveProfile(rootDir, { wallet: linked.wallet });
+      if (profile.wallet) selected = [profile.wallet];
     }
-    if (route.version !== 1 || route.requestId !== requestId || route.sessionId !== namespaced(id)) throw new Error('Invalid launch route');
-    if (route.selectionRequired === true || !route.profile?.wallet) return;
-    const profile = (await readProfiles(rootDir)).find(entry => entry.wallet === route.profile!.wallet);
-    if (!profile?.wallet || route.profile.rootDir !== rootDir || route.profile.dataDir !== profile.dataDir ||
-        route.profile.chartPort !== profile.chartPort) throw new Error('Launch route no longer matches a registered wallet');
-    const wallet = profile.wallet;
-    await updateBinding(id, value => { if (!value.wallets.includes(wallet)) value.wallets.push(wallet); });
+    await updateBinding(id, value => {
+      if (!value.selectionEpoch || JSON.stringify(value.wallets) !== JSON.stringify(selected)) value.selectionEpoch = randomUUID();
+      value.wallets = selected;
+    });
   }
   async function closeSession(id: string) {
     const record = active.get(id);
@@ -166,25 +148,21 @@ export async function createRebalanceOpenCodePlugin(context: Context, overrides:
     const refresh = async () => {
       let binding = await readBinding(id);
       if (!binding || !binding.enabled || record.closed || disposed) return;
-      // Selection changes are ordinary public local records. No model turn is
-      // needed to synchronize the next CLI call or attach another event stream.
-      const linked = await readJson<{ wallet?: string }>(connectionPath(rootDir, namespaced(id)));
-      if (linked?.wallet) {
-        const profile = await resolveProfile(rootDir, { sessionId: namespaced(id) });
-        if (profile.wallet && !binding.wallets.includes(profile.wallet)) {
-          binding = await updateBinding(id, value => { if (!value.wallets.includes(profile.wallet!)) value.wallets.push(profile.wallet!); });
-        }
-      }
+      // Reconcile to exactly this conversation's current selection. Worker
+      // delivery additionally requires fresh running state before native dispatch.
+      await bindLaunchRoute(id, 'selection');
+      binding = await readBinding(id);
+      if (!binding?.enabled || record.closed || disposed) return;
       const profiles = await readProfiles(rootDir);
       for (const [wallet, watcher] of record.watchers) {
-        if (!profiles.some(profile => profile.wallet === wallet)) { await watcher.close(); record.watchers.delete(wallet); }
+        if (!binding.wallets.includes(wallet) || !profiles.some(profile => profile.wallet === wallet)) { await watcher.close(); record.watchers.delete(wallet); }
       }
       for (const wallet of binding.wallets) {
         if (record.closed || disposed || !binding.enabled) break;
         if (record.watchers.has(wallet)) continue;
         const profile = profiles.find(candidate => candidate.wallet === wallet);
         if (!profile) continue;
-        const watcher = await notify({ sessionId: id, projectDir: root, sessionDirectory: directory, rootDir, dataDir: profile.dataDir, wallet, client: context.client });
+        const watcher = await notify({ sessionId: id, projectDir: root, sessionDirectory: directory, rootDir, dataDir: profile.dataDir, wallet, selectedOnly: true, selectionEpoch: binding.selectionEpoch, client: context.client });
         if (record.closed || disposed) await watcher.close();
         else record.watchers.set(wallet, watcher);
       }
@@ -261,13 +239,16 @@ export async function createRebalanceOpenCodePlugin(context: Context, overrides:
           const selected = selectOpenCodeShareImportRequest(native, root);
           if (selected) {
             try {
-              if (selected.blocked || !await verifiedSession(input.sessionID)) throw new Error('Unverified strategy preview session');
-              const result = await (overrides.sharePreview ?? ((value, env) => previewShareInNode(root, value, env)))(native, environment(input.sessionID));
+              if (selected.blocked || !await verifiedSession(input.sessionID)) {
+                report(output, part!, 'Strategy import requires a verified root Build conversation. Nothing was applied.');
+                return;
+              }
+              const result = await (overrides.shareReceive ?? ((value, env) => receiveShareInNode(root, value, env)))(native, environment(input.sessionID));
               const reply = result as { hookSpecificOutput?: { additionalContext?: unknown } } | null;
-              if (typeof reply?.hookSpecificOutput?.additionalContext !== 'string') throw new Error('Invalid preview response');
+              if (typeof reply?.hookSpecificOutput?.additionalContext !== 'string') throw new Error('Invalid import response');
               report(output, part!, reply.hookSpecificOutput.additionalContext);
             } catch {
-              report(output, part!, 'Rebalance could not prepare the strategy preview in this root Build conversation. Nothing was applied; use the skill’s read-only share preview if needed.');
+              report(output, part!, 'The strategy import outcome could not be verified. Check the saved strategy before another import; do not assume nothing was applied or repeat it blindly.');
             }
             // A pasted strategy never starts or binds a runner/notification session.
             return;

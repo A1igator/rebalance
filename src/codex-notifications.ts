@@ -1,6 +1,10 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { watch } from 'node:fs';
+import { mkdir } from 'node:fs/promises';
+import { basename } from 'node:path';
+import { connectionPath } from '../scripts/profile-routing.mjs';
+import { selectedPortfolioRunning, withNotificationSelection } from './notification-selection.js';
 import { isAbsolute, resolve } from 'node:path';
 import { DATA } from './config.js';
 import { createEventStream, type EventStream, type EventStreamFailure } from './event-stream.js';
@@ -16,7 +20,7 @@ const CONTROL = 'codex-notifications-control.lock';
 export const CODEX_NOTIFICATION_LOCK = 'codex-notifications.lock';
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const eventId = /^[A-Za-z0-9_-]{1,160}$/;
-type Binding = { version: 1; threadId: string; command: string; enabled: boolean; requestId: string };
+type Binding = { version: 1; threadId: string; command: string; enabled: boolean; requestId: string; selectionManaged?: true; ignoredEventIds?: string[] };
 type Delivery = { id: string; threadId: string; state: 'prepared' | 'accepted' | 'uncertain'; attemptedAt: string; queueId?: string; withdrawal?: { state: 'prepared' | 'deleted' | 'absent' | 'uncertain'; attemptedAt: string } };
 type Failure = 'queue-unavailable' | 'delivery-uncertain' | 'read-unavailable' | 'watch-unavailable' | 'withdrawal-uncertain';
 export type CodexNotificationStatus = {
@@ -36,6 +40,8 @@ export type CodexNotificationDependencies = {
     directory: string; watchFiles?: readonly string[]; nextWakeAt?: () => number | null; read: () => Promise<readonly RebalanceEvent[]>; deliver: (event: RebalanceEvent) => Promise<void | boolean>;
     onError?: (phase: EventStreamFailure) => void;
   }) => EventStream;
+  selectionActive: typeof selectedPortfolioRunning;
+  watchSelection: (root: string, threadId: string, changed: () => void, failed: () => void) => () => void;
   watchStop: (directory: string, changed: () => void, failed: () => void) => () => void;
 };
 
@@ -48,6 +54,13 @@ const defaults: CodexNotificationDependencies = {
       (error, stdout) => error ? reject(error) : resolve({ stdout }));
   }),
   withdraw: withdrawCodexNotification,
+  selectionActive: selectedPortfolioRunning,
+  watchSelection: (root, threadId, changed, failed) => {
+    const file = basename(connectionPath(root, threadId));
+    const watcher = watch(resolve(root, 'connections'), (_event, name) => { if (name === null || name === file) changed(); });
+    watcher.on('error', failed); watcher.on('close', failed);
+    return () => watcher.close();
+  },
   persistJournal: atomicWriteJson,
   stream: options => createEventStream(options),
   watchStop: (directory, changed, failed) => {
@@ -66,8 +79,10 @@ function binding(value: unknown): Binding {
   const b = value as Binding;
   if (b.version !== 1 || typeof b.threadId !== 'string' || !uuid.test(b.threadId) || typeof b.enabled !== 'boolean' || typeof b.requestId !== 'string' || !uuid.test(b.requestId) ||
       typeof b.command !== 'string' || (b.command !== 'codex' && !isAbsolute(b.command)) ||
-      b.command.length > 1000 || /[\0\r\n]/.test(b.command)) throw new Error('Codex notification binding is invalid');
-  return { version: 1, threadId: b.threadId.toLowerCase(), command: b.command, enabled: b.enabled, requestId: b.requestId };
+      b.command.length > 1000 || /[\0\r\n]/.test(b.command) || (b.selectionManaged !== undefined && b.selectionManaged !== true) ||
+      (b.ignoredEventIds !== undefined && (!Array.isArray(b.ignoredEventIds) || b.ignoredEventIds.length > 10_000 ||
+        b.ignoredEventIds.some(id => typeof id !== 'string' || !eventId.test(id)) || new Set(b.ignoredEventIds).size !== b.ignoredEventIds.length))) throw new Error('Codex notification binding is invalid');
+  return { version: 1, threadId: b.threadId.toLowerCase(), command: b.command, enabled: b.enabled, requestId: b.requestId, ...(b.selectionManaged ? { selectionManaged: true as const } : {}), ...(b.ignoredEventIds ? { ignoredEventIds: b.ignoredEventIds } : {}) };
 }
 
 async function controlled<T>(deps: CodexNotificationDependencies, action: () => Promise<T>): Promise<T> {
@@ -165,6 +180,24 @@ export async function configureCodexNotifications(
   return codexNotificationStatus(overrides);
 }
 
+/** Selection can retarget delivery, but never undo an explicit Pause. */
+export async function selectCodexNotifications(options: { threadId: string; command?: string; explicitSelection?: boolean },
+  overrides: Partial<CodexNotificationDependencies> = {}): Promise<CodexNotificationStatus> {
+  const deps = depsFor(overrides);
+  const requested = binding({ version: 1, ...options, command: options.command ?? 'codex', enabled: true,
+    requestId: randomUUID(), selectionManaged: true });
+  await controlled(deps, async () => {
+    const saved = await readJson<unknown>(pathFor(deps, BINDING));
+    const previous = saved === null ? null : binding(saved);
+    if (previous && previous.threadId !== requested.threadId && !options.explicitSelection) return;
+    if (!options.explicitSelection && previous?.threadId === requested.threadId && previous.selectionManaged &&
+        (options.command === undefined || previous.command === requested.command)) return;
+    await atomicWriteJson(pathFor(deps, BINDING), { ...requested, enabled: previous?.enabled ?? true,
+      command: options.command ?? previous?.command ?? requested.command, ignoredEventIds: (await queue(deps)).map(event => event.id) });
+  });
+  return codexNotificationStatus(overrides);
+}
+
 export async function stopCodexNotifications(overrides: Partial<CodexNotificationDependencies> = {}): Promise<void> {
   const deps = depsFor(overrides);
   await controlled(deps, async () => {
@@ -232,6 +265,7 @@ export async function runCodexNotifications(
   const release = await acquireLock(deps.dataDir, CODEX_NOTIFICATION_LOCK);
   let stream: EventStream | undefined;
   let unwatch: (() => void) | undefined;
+  let unwatchSelection: (() => void) | undefined;
   const active: { promise: Promise<unknown> | null } = { promise: null };
   let closed = false;
   let resolveDone!: () => void;
@@ -256,6 +290,24 @@ export async function runCodexNotifications(
     const controlChanged = () => { void shouldStop().catch(() => { void diagnostic('read-unavailable').catch(() => {}); finish(); }); };
     try { unwatch = deps.watchStop(deps.dataDir, controlChanged, () => { if (!closed) { void diagnostic('watch-unavailable').catch(() => {}); finish(); } }); }
     catch { await diagnostic('watch-unavailable'); finish(); }
+    const eligibleSelection = () => deps.selectionActive(deps.rootDir, b.threadId, deps.dataDir);
+    const ignoreInactiveHistory = async () => {
+      const ids = (await queue(deps)).map(event => event.id);
+      if (JSON.stringify(ids) === JSON.stringify(b.ignoredEventIds ?? [])) return;
+      await controlled(deps, async () => {
+        const current = binding(await readJson(pathFor(deps, BINDING)));
+        if (current.requestId !== b.requestId) return;
+        b.ignoredEventIds = ids;
+        await atomicWriteJson(pathFor(deps, BINDING), { ...current, ignoredEventIds: ids });
+      });
+    };
+    const selectedControl = <T>(action: () => Promise<T>) => withNotificationSelection(deps.rootDir, b.threadId, () => controlled(deps, action));
+    {
+      await mkdir(resolve(deps.rootDir, 'connections'), { recursive: true, mode: 0o700 });
+      try { unwatchSelection = deps.watchSelection(deps.rootDir, b.threadId, () => stream?.wake(),
+        () => { if (!closed) { void diagnostic('watch-unavailable').catch(() => {}); finish(); } }); }
+      catch { await diagnostic('watch-unavailable'); finish(); }
+    }
     let entries = await journal(deps);
     const save = async (afterDispatch = false) => {
       try { await deps.persistJournal(pathFor(deps, JOURNAL), entries); }
@@ -266,7 +318,7 @@ export async function runCodexNotifications(
       }
     };
     const deliver = async (event: RebalanceEvent) => {
-      if (await shouldStop()) return;
+      if (await shouldStop() || !await eligibleSelection()) return false;
       const entry: Delivery = { id: event.id, threadId: b.threadId, state: 'prepared', attemptedAt: new Date(deps.now()).toISOString() };
       entries.push(entry);
       try { await save(); }
@@ -280,11 +332,11 @@ export async function runCodexNotifications(
       const dispatch: { result?: Promise<{ ok: true; value: { stdout: string } } | { ok: false; error: unknown }> } = {};
       let controlFailed = false;
       try {
-        await controlled(deps, async () => {
-          if (await shouldStop()) return;
+        await selectedControl(async () => {
+          if (await shouldStop() || !await eligibleSelection()) return;
           const current = await filter.select(await queue(deps));
           nextWakeAt = current.nextAt;
-          if (closed || options.signal?.aborted || !current.events.some(item => item.id === event.id && item.type === event.type)) return;
+          if (closed || options.signal?.aborted || b.ignoredEventIds?.includes(event.id) || !current.events.some(item => item.id === event.id && item.type === event.type)) return;
           let result: Promise<{ stdout: string }>;
           try { result = deps.execute(b.command, ['queue', '--thread', b.threadId, '--message', message(event, deps.projectDir, scope)]); }
           catch (error) { result = Promise.reject(error); }
@@ -364,13 +416,14 @@ export async function runCodexNotifications(
     };
     if (!await shouldStop()) {
       stream = deps.stream({ directory: deps.dataDir,
-        watchFiles: ['events.json'], nextWakeAt: () => nextWakeAt,
+        watchFiles: ['events.json', 'status.json', 'run.lock', 'stop.json', 'config.json'], nextWakeAt: () => nextWakeAt,
         read: async () => {
           if (await shouldStop()) return [];
+          if (!await eligibleSelection()) { await ignoreInactiveHistory(); return []; }
           const history = await queue(deps);
           const selection = await filter.select(history);
           nextWakeAt = selection.nextAt;
-          const pending = selection.events;
+          const pending = selection.events.filter(event => !b.ignoredEventIds?.includes(event.id));
           // Retain accepted/uncertain barriers until actual acknowledgement, even
           // when an automatically resolved notification is suppressed.
           const ids = new Set(history.filter(event => !event.acknowledgedAt).map(event => event.id));
@@ -399,6 +452,7 @@ export async function runCodexNotifications(
     finish();
     options.signal?.removeEventListener('abort', finish);
     unwatch?.();
+    unwatchSelection?.();
     await active.promise?.catch(() => {});
     await diagnostics.catch(() => {});
     await release();

@@ -10,9 +10,9 @@ import { assertTemporaryTestDirectory } from '../src/test-isolation.js';
 const claude = await import(new URL('../scripts/rebalance-claude-share-hook.mjs', import.meta.url).href);
 const opencode = await import(new URL('../scripts/rebalance-opencode-share-hook.mjs', import.meta.url).href);
 const code = 'rebalance:v1 USDG=5,AAPL=95 drift=5 interval=3600';
-const expected = { app: 'Rebalance', operation: 'share-import', outcome: 'preview', code,
+const expected = { app: 'Rebalance', operation: 'share-import', outcome: 'applied', code,
   shared: { targets: { USDG: 500, AAPL: 9500 }, driftThresholdBps: 500, rebalanceIntervalSeconds: 3600 },
-  targetChanges: [], settingChanges: [], untrackedAssets: [], applied: false };
+  targetChanges: [], settingChanges: [], untrackedAssets: [], applied: true };
 const forbidden = {
   ensureDependencies: () => assert.fail('must not bootstrap'),
   readStopToken: () => assert.fail('must not read Stop'),
@@ -43,7 +43,7 @@ function publicResult(reply: { hookSpecificOutput: { additionalContext: string }
 }
 
 for (const c of contracts) {
-  test(`${c.name} previews an exact pasted code under native identity without financial setup`, async t => {
+  test(`${c.name} applies an exact pasted code under native identity without financial setup`, async t => {
     const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-native-share-')));
     assertTemporaryTestDirectory(root);
     t.after(() => rm(root, { recursive: true, force: true }));
@@ -54,7 +54,7 @@ for (const c of contracts) {
     assert.equal(selected.normalized.session_id, c.sessionId);
     let calls = 0;
     const result = await c.handle(input, { repository: root, ...forbidden,
-      runSharePreview: async (repository: string, request: { code: string; sessionId: string }) => {
+      runShareReceive: async (repository: string, request: { code: string; sessionId: string }) => {
         calls++; assert.equal(repository, root); assert.equal(request.code, code); assert.equal(request.sessionId, c.sessionId);
         return expected;
       },
@@ -71,10 +71,10 @@ for (const c of contracts) {
       `"${code}"`, `\`${code}\``, `Please import ${code}`, `\`\`\`\n${code}\n\`\`\``].map(prompt => ({ prompt }))]) {
       const candidate = { ...input, ...update };
       assert.equal(c.select(candidate), null);
-      assert.equal(await c.handle(candidate, { ...forbidden, runSharePreview: () => assert.fail('must not preview') }), null);
+      assert.equal(await c.handle(candidate, { ...forbidden, runShareReceive: () => assert.fail('must not preview') }), null);
     }
     for (const update of [...c.blocked, { cwd: 'relative' }]) {
-      const result = await c.handle({ ...input, ...update }, { ...forbidden, runSharePreview: () => assert.fail('must not preview') });
+      const result = await c.handle({ ...input, ...update }, { ...forbidden, runShareReceive: () => assert.fail('must not preview') });
       assert.equal(publicResult(result).outcome, 'blocked');
       assert.equal(publicResult(result).applied, false);
     }
@@ -88,12 +88,12 @@ for (const c of contracts) {
     await symlink(outside, join(root, 'escape'));
     for (const cwd of [outside, join(root, 'escape')]) {
       assert.equal(await c.handle({ ...c.input, cwd }, { repository: root, ...forbidden,
-        runSharePreview: () => assert.fail('must not preview outside project') }), null);
+        runShareReceive: () => assert.fail('must not preview outside project') }), null);
     }
     const result = await c.handle({ ...c.input, cwd: root }, { repository: root, ...forbidden,
-      runSharePreview: () => { throw new Error('fixture-secret-provider'); } });
-    assert.equal(publicResult(result).outcome, 'blocked');
-    assert.equal(publicResult(result).applied, false);
+      runShareReceive: () => { throw new Error('fixture-secret-provider'); } });
+    assert.equal(publicResult(result).outcome, 'unknown');
+    assert.equal(publicResult(result).applied, null);
     assert.doesNotMatch(JSON.stringify(result), /fixture-secret/);
     assert.deepEqual(await readdir(outside), []);
   });
@@ -106,7 +106,7 @@ for (const c of contracts) {
     const pending = { app: 'Rebalance', operation: 'share-import', outcome: 'select-portfolio', code, shared: expected.shared, applied: false, view };
     const calls: string[] = [];
     const result = await c.handle({ ...c.input, cwd: root }, { repository: root, ...forbidden,
-      runSharePreview: async () => { calls.push('preview'); return pending; },
+      runShareReceive: async () => { calls.push('preview'); return pending; },
       openView: async (request: { url: string; sessionId: string }) => {
         calls.push('view'); assert.equal(request.url, view.url); assert.equal(request.sessionId, c.sessionId);
         return { host: 'fixture', opened: true };
@@ -137,7 +137,7 @@ for (const c of contracts) {
   });
 }
 
-test('Claude registers a dedicated preview-only prompt handler without trust policy changes', async () => {
+test('Claude registers a dedicated import-only prompt handler without trust policy changes', async () => {
   const settings = JSON.parse(await readFile(new URL('../.claude/settings.json', import.meta.url), 'utf8'));
   assert.deepEqual(Object.keys(settings), ['hooks']);
   assert.deepEqual(settings.hooks.UserPromptSubmit, [{ hooks: [{ type: 'command', command: 'node',

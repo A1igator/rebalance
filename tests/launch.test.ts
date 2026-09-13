@@ -30,6 +30,7 @@ async function fixture(t: TestContext) {
   const alive = new Set([101]);
   await atomicWriteJson(join(dataDir, 'chart.lock'), { pid: 101, createdAt: 'fixture' });
   const deps: LaunchDependencies = {
+    selectedNotifications: async () => {},
     dataDir, attempts: 3, pause: async () => {}, alive: pid => alive.has(pid),
     chartStatus: async () => ({ state: 'response', value: structuredClone(current) }),
     command: async args => {

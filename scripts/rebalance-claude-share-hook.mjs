@@ -5,7 +5,7 @@ import { openCompanionView } from './companion-view.mjs';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-/** Read-only pasted-code preview. Native UserPromptSubmit/prompt_id contract:
+/** Pasted-code configuration import. Native UserPromptSubmit/prompt_id contract:
  * https://code.claude.com/docs/en/hooks#userpromptsubmit
  * Never adapt slash commands, model Skill calls or subagent input to launch. */
 export function selectClaudeShareImportRequest(input, root = repository) {
@@ -20,7 +20,7 @@ export function selectClaudeShareImportRequest(input, root = repository) {
   if (!selected) return null;
   if (typeof input.prompt_id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.prompt_id) ||
       typeof input.session_id !== 'string' || !input.session_id) {
-    return { blocked: 'Strategy preview requires native Claude session and prompt identity; nothing was applied.' };
+    return { blocked: 'Strategy import requires native Claude session and prompt identity; nothing was applied.' };
   }
   return { ...selected, normalized };
 }
@@ -36,7 +36,7 @@ export async function handleClaudeSharePrompt(input, overrides = {}) {
 function blockedReply(message) {
   return { hookSpecificOutput: {
     hookEventName: 'UserPromptSubmit',
-    additionalContext: 'The local strategy import preview was blocked. Do not apply targets or launch.\n'
+    additionalContext: 'The local strategy import was blocked. Do not apply targets or launch.\n'
       + JSON.stringify({ app: 'Rebalance', operation: 'share-import', outcome: 'blocked', applied: false, messages: [message] }),
   } };
 }
@@ -50,7 +50,7 @@ async function main() {
     }
     input = JSON.parse(raw);
   } catch {
-    process.stdout.write(JSON.stringify(blockedReply('The strategy preview input could not be read; nothing was applied.')) + '\n');
+    process.stdout.write(JSON.stringify(blockedReply('The strategy import input could not be read; nothing was applied.')) + '\n');
     return;
   }
   const result = await handleClaudeSharePrompt(input);

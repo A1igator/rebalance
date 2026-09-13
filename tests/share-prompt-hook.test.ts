@@ -3,9 +3,9 @@ import { mkdtemp, readdir, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
-const { handlePrompt, selectShareImportRequest, sharedCodeFromPrompt, runSharePreview } = await import(new URL('../scripts/rebalance-hook.mjs', import.meta.url).href);
+const { handlePrompt, selectShareImportRequest, sharedCodeFromPrompt, runShareReceive } = await import(new URL('../scripts/rebalance-hook.mjs', import.meta.url).href);
 const code = 'rebalance:v1 USDG=5,AAPL=23.75,AMD=23.75,MSFT=23.75,NVDA=23.75 drift=5 interval=3600';
-const result = {app:'Rebalance',operation:'share-import',outcome:'preview',applied:false,code,
+const result = {app:'Rebalance',operation:'share-import',outcome:'applied',applied:true,code,
   shared:{targets:{USDG:500,AAPL:2375,AMD:2375,MSFT:2375,NVDA:2375},driftThresholdBps:500,rebalanceIntervalSeconds:3600},
   targetChanges:[],settingChanges:[],untrackedAssets:[]};
 const ambient = (text:string) => ['<in-app-browser-context source="ambient-ui-state">',
@@ -29,11 +29,11 @@ test('only whole native pasted strategies dispatch, retaining the native identit
     assert.equal(selected.code,code);assert.equal(selected.sessionId,f.input.session_id);
     assert.equal(selected.requestId,selectShareImportRequest(f.input,f.root).requestId);
     let calls=0;
-    const reply=await handlePrompt({...f.input,prompt},{...f.overrides,runSharePreview:async(root:string,request:any)=>{
+    const reply=await handlePrompt({...f.input,prompt},{...f.overrides,runShareReceive:async(root:string,request:any)=>{
       calls++;assert.equal(root,f.root);assert.equal(request.code,code);assert.equal(request.sessionId,f.input.session_id);return result;
     }});
     assert.deepEqual(publicResult(reply),result);assert.equal(calls,1);
-    assert.match(reply.hookSpecificOutput.additionalContext,/Never apply targets or settings merely because a code was pasted/);
+    assert.match(reply.hookSpecificOutput.additionalContext,/without asking to choose or apply again/);
   }
   assert.deepEqual(await readdir(f.root),[]);
 });
@@ -43,11 +43,11 @@ test('quoted examples, commands, notifications and foreign events do not import;
   for(const prompt of ['`'+code+'`','```\n'+code+'\n```','> '+code,'Example: '+code,'Please import '+code,'$rebalance share',
     'Rebalance notification-only task. '+code,ambient('Example: '+code)]) {
     assert.equal(sharedCodeFromPrompt(prompt,f.root),null);
-    assert.equal(await handlePrompt({...f.input,prompt},{...f.overrides,runSharePreview:forbidden}),null);
+    assert.equal(await handlePrompt({...f.input,prompt},{...f.overrides,runShareReceive:forbidden}),null);
   }
-  assert.equal(await handlePrompt({...f.input,hook_event_name:'PostToolUse'},{...f.overrides,runSharePreview:forbidden}),null);
+  assert.equal(await handlePrompt({...f.input,hook_event_name:'PostToolUse'},{...f.overrides,runShareReceive:forbidden}),null);
   for(const extra of [{permission_mode:'plan'},{session_id:''},{turn_id:''},{cwd:'relative'}]) {
-    assert.equal(publicResult(await handlePrompt({...f.input,...extra},{...f.overrides,runSharePreview:forbidden})).outcome,'blocked');
+    assert.equal(publicResult(await handlePrompt({...f.input,...extra},{...f.overrides,runShareReceive:forbidden})).outcome,'blocked');
   }
 });
 
@@ -55,30 +55,30 @@ test('missing selection presents only the returned selector and failed preview e
   const f=await fixture(t);let opens=0;
   const view={state:'ready',url:'http://127.0.0.1:4663/#view='+'a'.repeat(64),connected:true};
   const unselected={app:'Rebalance',operation:'share-import',outcome:'select-portfolio',code,shared:result.shared,applied:false,view};
-  const reply=await handlePrompt(f.input,{...f.overrides,runSharePreview:async()=>unselected,openView:async(request:any)=>{
+  const reply=await handlePrompt(f.input,{...f.overrides,runShareReceive:async()=>unselected,openView:async(request:any)=>{
     assert.equal(request.url,view.url);assert.equal(request.sessionId,f.input.session_id);opens++;return{opened:true,host:'fixture'};
   }});
   assert.equal(opens,1);const displayed=publicResult(reply);assert.equal(displayed.outcome,'select-portfolio');
   assert.equal('targetChanges' in displayed,false);assert.equal(displayed.applied,false);
   const failed=publicResult(await handlePrompt({...f.input,prompt:code+' fixture-private-payload'},{...f.overrides,
-    runSharePreview:async()=>{throw new Error('fixture-private-payload');},openView:()=>assert.fail('no view after failed parsing'),
+    runShareReceive:async()=>{throw new Error('fixture-private-payload');},openView:()=>assert.fail('no view after failed parsing'),
   }));
-  assert.equal(failed.outcome,'blocked');assert.equal(failed.applied,false);assert.doesNotMatch(JSON.stringify(failed),/fixture-private/);
+  assert.equal(failed.outcome,'unknown');assert.equal(failed.applied,null);assert.doesNotMatch(JSON.stringify(failed),/fixture-private/);
   assert.deepEqual(await readdir(f.root),[]);
 });
 
-test('native preview calls a fixed read-only CLI with code as one argument and overrides inherited worker scope', async t => {
+test('native import calls a fixed CLI with stable request identity with code as one argument and overrides inherited worker scope', async t => {
   const f=await fixture(t);const previous=process.env.REBALANCE_PROFILE_PINNED;process.env.REBALANCE_PROFILE_PINNED='1';
   t.after(()=>{if(previous===undefined)delete process.env.REBALANCE_PROFILE_PINNED;else process.env.REBALANCE_PROFILE_PINNED=previous;});
   const raw=code+' --apply; echo fixture';
-  const value=await runSharePreview(f.root,{sessionId:f.input.session_id,code:raw},async(binary:string,args:string[],options:any)=>{
+  const value=await runShareReceive(f.root,{sessionId:f.input.session_id,code:raw,requestId:'a'.repeat(64)},async(binary:string,args:string[],options:any)=>{
     assert.equal(binary,process.execPath);
-    assert.deepEqual(args,['--import','tsx',join(f.root,'src/cli.ts'),'share','preview',raw,'--session',f.input.session_id]);
+    assert.deepEqual(args,['--import','tsx',join(f.root,'src/cli.ts'),'share','receive',raw,'--session',f.input.session_id,'--request-id','a'.repeat(64)]);
     assert.equal(options.env.REBALANCE_SESSION_ID,f.input.session_id);assert.equal(options.env.REBALANCE_PROFILE_PINNED,undefined);
     assert.equal(options.shell,undefined);return{stdout:JSON.stringify(result)};
   });
   assert.deepEqual(value,result);
-  for(const stdout of ['not json',JSON.stringify({...result,applied:true}),JSON.stringify({app:'Rebalance',outcome:'armed'})]) {
-    await assert.rejects(runSharePreview(f.root,{sessionId:f.input.session_id,code},async()=>({stdout})));
+  for(const stdout of ['not json',JSON.stringify({...result,applied:false}),JSON.stringify({app:'Rebalance',outcome:'armed'})]) {
+    await assert.rejects(runShareReceive(f.root,{sessionId:f.input.session_id,code},async()=>({stdout})));
   }
 });

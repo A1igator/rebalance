@@ -46,7 +46,7 @@ export function recoveryPromptFormat(value, root = repository) {
   });
 }
 
-/** Only a whole pasted strategy request reaches the read-only preview. */
+/** Only a whole native pasted strategy request reaches the configuration import. */
 export function sharedCodeFromPrompt(value, root = repository) {
   let code = null;
   promptFormat(value, root, prompt => {
@@ -57,7 +57,7 @@ export function sharedCodeFromPrompt(value, root = repository) {
   return code;
 }
 export function selectShareImportRequest(input, root = repository) {
-  const selected = selectRequest(input, root, value => sharedCodeFromPrompt(value, root), 'share preview');
+  const selected = selectRequest(input, root, value => sharedCodeFromPrompt(value, root), 'share receive');
   return selected && !selected.blocked ? { ...selected, code: sharedCodeFromPrompt(input.prompt, root) } : selected;
 }
 
@@ -125,8 +125,8 @@ export async function recordHookObservation(input, root = repository) {
 
 export function hookReply(result) {
   const sharedImport = result?.operation === 'share-import';
-  const appEntry = typeof result?.restoration === 'string' || Array.isArray(result?.restorationResults)
-    || Array.isArray(result?.portfolios) || result?.outcome === 'select-portfolio';
+  const appEntry = !sharedImport && (typeof result?.restoration === 'string' || Array.isArray(result?.restorationResults)
+    || Array.isArray(result?.portfolios) || result?.outcome === 'select-portfolio');
   const view = result?.view;
   const presentation = view?.state === 'ready' && typeof view.url === 'string'
     ? view.presentation?.opened === true
@@ -140,7 +140,7 @@ export function hookReply(result) {
       hookEventName: 'UserPromptSubmit',
       additionalContext: 'The deterministic Rebalance command handler already handled this invocation. '
         + presentation
-        + (sharedImport ? 'This was a read-only shared-strategy preview. Present the parsed strategy and computed changes below without recalculating or rewriting its code. If selection is required, invite choosing a portfolio; no comparison has been performed yet. Never apply targets or settings merely because a code was pasted. ' : '')
+        + (sharedImport ? 'The pasted strategy was handled for this conversation. Use outcome exactly: applied means the saved targets of the returned wallet and included settings were updated; report it briefly, without asking to choose or apply again. If replayed, this is the earlier receipt, not a new application or proof of current settings. Only select-portfolio invites choosing a portfolio and pasting again; no changes were made in that case. Unknown means application could not be confirmed; never blindly reapply. Report blocked as unapplied. Preserve the computed values and mention untracked assets if any; do not recalculate or rewrite the code. Do not repeat the import, launch a runner, or equate application with completed rebalancing. ' : '')
         + (appEntry ? 'Restoration results are not wallet inventory; an empty results array never establishes an empty registry. Briefly describe readiness in natural language, invite choosing a portfolio when the view is ready, and include actual blockers. Omit routine notification status: unconfigured or intentionally paused delivery is not a startup blocker; ' : 'Report the public result below; ')
         + 'do not repeat launch or start, or repeat recovery or restoration. An outcome is not a trade receipt.\n'
         + JSON.stringify(result),
@@ -308,18 +308,23 @@ async function legacyRequest(root, selected) {
   return await readRoutingJson(resolve(rootDir, 'launch-requests', `${digest}.json`)) !== null ||
     await readRoutingJson(resolve(rootDir, 'recovery-requests', `${digest}.json`)) !== null;
 }
-export async function runSharePreview(root, selected, execute = executeFile) {
+export async function runShareReceive(root, selected, execute = executeFile) {
   const env = { ...process.env, REBALANCE_ROOT_DIR: portfolioRoot(process.env, root), REBALANCE_SESSION_ID: selected.sessionId };
   // A native request belongs to its own conversation, not an inherited worker.
   for (const key of ['REBALANCE_PROFILE_PINNED', 'REBALANCE_PROFILE_WALLET', 'REBALANCE_CHART_PORT']) delete env[key];
   const { stdout } = await execute(process.execPath, ['--import', 'tsx', resolve(root, 'src/cli.ts'),
-    'share', 'preview', selected.code, '--session', selected.sessionId], {
+    'share', 'receive', selected.code, '--session', selected.sessionId, '--request-id', selected.requestId], {
     cwd: root, env, timeout: 20_000, maxBuffer: 16_384,
   });
   const result = JSON.parse(stdout);
-  if (result?.app !== 'Rebalance' || result.operation !== 'share-import' || result.applied !== false ||
-      !['preview', 'select-portfolio'].includes(result.outcome) || typeof result.code !== 'string' ||
-      result.code.length > 400 || !result.code.startsWith('rebalance:v1 ')) throw new Error('Invalid share preview result');
+  const validOutcome = result?.outcome === 'applied' && result.applied === true
+    || ['select-portfolio', 'blocked'].includes(result?.outcome) && result.applied === false
+    || result?.outcome === 'unknown' && result.applied === null;
+  const needsCode = ['applied', 'select-portfolio'].includes(result?.outcome);
+  if (result?.app !== 'Rebalance' || result.operation !== 'share-import' || !validOutcome ||
+      needsCode && (typeof result.code !== 'string' || result.code.length > 400 || !result.code.startsWith('rebalance:v1 '))) {
+    throw new Error('Invalid strategy import result');
+  }
   return result;
 }
 
@@ -356,11 +361,11 @@ export async function handlePrompt(input, overrides = {}) {
     if (child === '..' || child.startsWith('../') || child.startsWith('..\\') || isAbsolute(child)) return null;
     if (sharedImport) {
       try {
-        const result = await (overrides.runSharePreview ?? runSharePreview)(root, selected);
+        const result = await (overrides.runShareReceive ?? runShareReceive)(root, selected);
         return hookReply(await presentView(result, root, selected, overrides));
       } catch {
-        return hookReply({ app: 'Rebalance', operation: 'share-import', outcome: 'blocked', applied: false,
-          messages: ['The shared strategy could not be previewed. Check the share code and selected portfolio; no targets or settings changed.'] });
+        return hookReply({ app: 'Rebalance', operation: 'share-import', outcome: 'unknown', applied: null,
+          messages: ['The strategy import outcome could not be verified. Inspect the saved strategy before another import; do not assume it failed or apply it again.'] });
       }
     }
     // Historical requests keep their original route. New app requests delegate

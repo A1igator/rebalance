@@ -1,4 +1,6 @@
 import { resolve } from 'node:path';
+import { withNotificationSelection } from './notification-selection.js';
+import { ensureSelectedCodexNotifications } from './selected-notifications.js';
 import { getAddress } from 'viem';
 import { acquireLock, atomicWriteJson, readJson } from './storage.js';
 import { validateConfig, type Config } from './config.js';
@@ -59,7 +61,9 @@ export async function addPortfolio(root: string, input: unknown): Promise<Routed
 export async function connectPortfolio(root: string, sessionId: string, wallet: string) {
   const profile = await resolveProfile(root, { wallet });
   const path = connectionPath(root, sessionId);
-  await atomicWriteJson(path, { version: 1, wallet: profile.wallet, chainId: 4663 });
+  await withNotificationSelection(root, sessionId, () => atomicWriteJson(path, { version: 1, wallet: profile.wallet, chainId: 4663 }));
+  // Delivery setup failures do not undo a successful, non-trading selection.
+  const notifications = await ensureSelectedCodexNotifications(root, sessionId, { dataDir: profile.dataDir, explicitSelection: true }).catch(() => ({ state: 'unavailable' as const }));
   return { sessionId, wallet: getAddress(profile.wallet!), chainId: 4663,
-    chartUrl: `http://127.0.0.1:${profile.chartPort}/chart`, tradingChanged: false };
+    chartUrl: `http://127.0.0.1:${profile.chartPort}/chart`, tradingChanged: false, notifications };
 }

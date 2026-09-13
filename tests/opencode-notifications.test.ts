@@ -7,6 +7,7 @@ import { test, type TestContext } from 'node:test';
 import { createOpenCodeNotifications, type OpenCodeNotificationClient, type OpenCodeNotificationDependencies,
   type OpenCodeNotificationFailure, type OpenCodeNotificationOptions, type OpenCodeNotifications } from '../src/opencode-notifications.js';
 import type { RebalanceEvent } from '../src/events.js';
+import { withNotificationSelection } from '../src/notification-selection.js';
 import { atomicWriteJson, readJson } from '../src/storage.js';
 
 const sessionId = 'ses_fixtureNativeSessionA';
@@ -305,4 +306,40 @@ test('malformed scopes and journals fail closed and overlapping plugin instances
     await atomicWriteJson(path, corrupted); await assert.rejects(f.start(), /OpenCode notification setup unavailable/);
   }
   assert.equal(f.calls.length, 1);
+});
+
+
+test('selected-only subscription suppresses history and stopped-state events without losing native uncertainty records', async t => {
+  const f = await fixture(t); let active = true;
+  f.deps.selectionActive = async () => active;
+  await f.write([event('old')]);
+  const worker = await f.start({ selectedOnly: true, selectionEpoch: 'selection-one' });
+  await until(() => f.watchers.length === 1); await delay(10);
+  assert.equal(f.calls.length, 0);
+  await f.write([event('old'), event('fresh')]); await until(() => f.calls.length === 1);
+  active = false; await f.write([event('old'), event('fresh'), event('while-stopped')]);
+  await until(async () => ((await readJson<any>((await f.journalPaths())[0])).ignoredEventIds ?? []).includes('while-stopped'));
+  active = true; worker.wake(); await delay(10); assert.equal(f.calls.length, 1);
+  await f.write([event('old'), event('fresh'), event('while-stopped'), event('after-start')]);
+  await until(() => f.calls.length === 2);
+  await worker.close();
+  await f.start({ selectedOnly: true, selectionEpoch: 'selection-two' });
+  await delay(10); assert.equal(f.calls.length, 2);
+  assert.deepEqual((await f.entries()).map(e => e.id), ['fresh', 'after-start']);
+});
+
+test('selected-only final dispatch rechecks acknowledgement after waiting for a selection change lock', async t => {
+  const f = await fixture(t); f.deps.selectionActive = async () => true;
+  await f.start({ selectedOnly: true, selectionEpoch: 'selection' });
+  let release!: () => void, entered!: () => void;
+  const ready = new Promise<void>(done => { entered = done; });
+  const held = withNotificationSelection(f.directory, `opencode:${sessionId}`, async () => {
+    entered(); await new Promise<void>(done => { release = done; });
+  });
+  await ready; await f.write([event('racing-ack')]);
+  await until(async () => (await f.entries()).some(e => e.id === 'racing-ack'));
+  await f.write([{ ...event('racing-ack'), acknowledgedAt: new Date(epoch).toISOString() }]);
+  release(); await held;
+  await until(async () => (await f.entries()).length === 0);
+  assert.equal(f.calls.length, 0); assert.deepEqual(f.errors, []);
 });

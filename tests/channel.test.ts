@@ -1,6 +1,7 @@
 import { assertTemporaryTestDirectory } from '../src/test-isolation.js';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { Notification } from '@modelcontextprotocol/sdk/types.js';
-import { atomicWriteJson } from '../src/storage.js';
+import { atomicWriteJson, readJson } from '../src/storage.js';
 import { connectionPath } from '../scripts/profile-routing.mjs';
 
 const directory = await mkdtemp(join(tmpdir(), 'rebalance-channel-test-'));
@@ -28,10 +29,10 @@ after(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 
-async function waitFor(condition: () => boolean, message: string): Promise<void> {
+async function waitFor(condition: () => boolean | Promise<boolean>, message: string): Promise<void> {
   const deadline = Date.now() + 6_000;
-  while (!condition() && Date.now() < deadline) await delay(20);
-  assert.ok(condition(), message);
+  while (Date.now() < deadline) {if (await condition()) return; await delay(20);}
+  assert.ok(await condition(), message);
 }
 
 async function openSession(dataDir = directory, env: Record<string, string> = {}) {
@@ -54,6 +55,26 @@ async function openSession(dataDir = directory, env: Record<string, string> = {}
   return { client, received, errors, stderr: () => stderr };
 }
 
+const defaultWallet = `0x${'a'.repeat(40)}`;
+const defaultSession = 'claude:fixture-channel';
+const bindingPath = (data: string, session: string) => join(data, `claude-notification-${createHash('sha256').update(session).digest('hex')}.json`);
+async function preparePortfolio(data: string, nativeSession = defaultSession, wallet = defaultWallet, existing = true) {
+  await atomicWriteJson(join(data, 'portfolios.json'), {version: 1, profiles: [{wallet, chainId: 4663, directory: '.', chartPort: 4663}]});
+  await atomicWriteJson(join(data, 'config.json'), {wallet, chainId: 4663, mode: 'ledger'});
+  await atomicWriteJson(join(data, 'status.json'), {app: 'Rebalance', wallet, chain: {id: 4663}, mode: 'ledger', armed: true});
+  await atomicWriteJson(join(data, 'run.lock'), {pid: process.pid, createdAt: new Date().toISOString(), token: 'fixture-owned-runner'});
+  await atomicWriteJson(connectionPath(data, nativeSession), {version: 1, wallet, chainId: 4663});
+  if (existing) await atomicWriteJson(bindingPath(data, nativeSession), {version: 1, wallet,
+    sessionDigest: createHash('sha256').update(nativeSession).digest('hex'), ignoredEventIds: []});
+}
+const selectedEnv = (root: string, session = defaultSession) => ({REBALANCE_ROOT_DIR: root, REBALANCE_SESSION_ID: session});
+function expectedEvent(event: {id: string; type: string; createdAt: string; message: string; hash?: string}, wallet = defaultWallet) {
+  return {content: `Portfolio ${wallet} on Robinhood (4663): ${event.message}`, meta: {
+    event_id: event.id, event_type: event.type, created_at: event.createdAt,
+    portfolio_wallet: wallet, chain_id: '4663', ...(event.hash ? {transaction_hash: event.hash} : {}),
+  }};
+}
+
 function eventId(notification: Notification): unknown {
   return (notification.params?.meta as Record<string, unknown> | undefined)?.event_id;
 }
@@ -64,8 +85,9 @@ test('real MCP stdio sessions deliver queued events, expose scoped acknowledgeme
     createdAt: '2026-09-04T20:00:00.000Z', message: 'A recorded rebalance receipt is ready.',
     hash: `0x${'1'.repeat(64)}`,
   };
+  await preparePortfolio(directory);
   await publishEvent(first);
-  const initial = await openSession();
+  const initial = await openSession(directory, selectedEnv(directory));
   const capabilities = initial.client.getServerCapabilities();
   assert.deepEqual(capabilities?.experimental, { 'claude/channel': {} });
   const tools = await initial.client.listTools();
@@ -75,10 +97,7 @@ test('real MCP stdio sessions deliver queued events, expose scoped acknowledgeme
   await waitFor(() => initial.received.length === 1, 'offline event should arrive after the MCP initialization handshake');
   const notification = initial.received[0]!;
   assert.equal(notification.method, 'notifications/claude/channel');
-  assert.deepEqual(notification.params, {
-    content: first.message,
-    meta: { event_id: first.id, event_type: first.type, created_at: first.createdAt, transaction_hash: first.hash },
-  });
+  assert.deepEqual(notification.params, expectedEvent(first));
   assert.equal((await events()).length, 1, 'transport delivery must not automatically acknowledge an event');
 
   const second = {
@@ -101,7 +120,7 @@ test('real MCP stdio sessions deliver queued events, expose scoped acknowledgeme
   assert.equal(initial.stderr(), '');
   await initial.client.close();
 
-  const resumed = await openSession();
+  const resumed = await openSession(directory, selectedEnv(directory));
   await waitFor(() => resumed.received.length === 1, 'a fresh session should replay the unacknowledged event');
   assert.deepEqual(resumed.received.map(eventId), [second.id]);
   await resumed.client.callTool({ name: 'acknowledge_event', arguments: { id: second.id } });
@@ -111,8 +130,7 @@ test('real MCP stdio sessions deliver queued events, expose scoped acknowledgeme
     hash: `0x${'3'.repeat(64)}` };
   await publishEvent(attention);
   await waitFor(() => resumed.received.length === 2, 'new attention events should use the existing notification channel');
-  assert.deepEqual(resumed.received[1]!.params, { content: attention.message,
-    meta: { event_id: attention.id, event_type: attention.type, created_at: attention.createdAt, transaction_hash: attention.hash } });
+  assert.deepEqual(resumed.received[1]!.params, expectedEvent(attention));
   assert.deepEqual((await events()).map(event => event.id), [attention.id]);
   await resumed.client.callTool({ name: 'acknowledge_event', arguments: { id: attention.id } });
   const saved = JSON.parse(await readFile(join(directory, 'events.json'), 'utf8')) as { id: string; acknowledgedAt?: string }[];
@@ -121,7 +139,7 @@ test('real MCP stdio sessions deliver queued events, expose scoped acknowledgeme
   assert.deepEqual(resumed.errors, []);
   await resumed.client.close();
 
-  const acknowledged = await openSession();
+  const acknowledged = await openSession(directory, selectedEnv(directory));
   await acknowledged.client.listTools();
   await delay(2_200);
   assert.deepEqual(acknowledged.received, [], 'acknowledged events must stay hidden after a new process starts');
@@ -133,11 +151,12 @@ test('real MCP stdio sessions deliver queued events, expose scoped acknowledgeme
 test('a stalled stdio write ends the channel after its deadline and preserves unacknowledged entries', { timeout: 15_000 }, async t => {
   const root = await mkdtemp(join(tmpdir(), 'rebalance-channel-blocked-test-'));
   const data = join(root, '.local'); await mkdir(data);
+  await preparePortfolio(data);
   const queue = [{ id: 'blocked-first', type: 'rebalance-attention', createdAt: '2026-09-06T00:00:00.000Z', message: 'x'.repeat(4 * 1024 * 1024) },
     { id: 'unsent-second', type: 'rebalance-completed', createdAt: '2026-09-06T00:00:01.000Z', message: 'Still queued.' }];
   await writeFile(join(data, 'events.json'), JSON.stringify(queue));
   const child = spawn(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('../src/channel.ts', import.meta.url))], {
-    cwd: fileURLToPath(new URL('..', import.meta.url)), env: { ...process.env, REBALANCE_ROOT_DIR: data, REBALANCE_DATA_DIR: data }, stdio: ['pipe', 'pipe', 'pipe'],
+    cwd: fileURLToPath(new URL('..', import.meta.url)), env: { ...process.env, REBALANCE_ROOT_DIR: data, REBALANCE_DATA_DIR: data, REBALANCE_SESSION_ID: defaultSession }, stdio: ['pipe', 'pipe', 'pipe'],
   });
   t.after(async () => { child.kill('SIGKILL'); await rm(root, { recursive: true, force: true }); });
   let stderr = '';
@@ -173,10 +192,11 @@ test('Claude channel never escalates automatic read/quote retries or recovery ac
   for (const fixture of ['missing-state', 'corrupt-state', 'legacy-eligible'] as const) await t.test(fixture, async t => {
     const dataDir = await mkdtemp(join(tmpdir(), 'rebalance-channel-quiet-'));
     t.after(() => rm(dataDir, { recursive: true, force: true }));
+    await preparePortfolio(dataDir);
     const at = Date.now();
     const old = '2020-01-01T00:00:00.000Z';
     const current = new Date(at).toISOString();
-    const observation = (healthy: boolean) => ({ wallet: `0x${'a'.repeat(40)}`, armed: true,
+    const observation = (healthy: boolean) => ({ app: 'Rebalance', chain: {id: 4663}, mode: 'ledger', wallet: defaultWallet, armed: true,
       portfolio: { totalUsdE8: '100', positions: [{ id: 'USDG', balance: '100', priceUsdE8: '100000000', valueUsdE8: '100', weightBps: 10000, targetBps: 10000 }] },
       updatedAt: current, error: healthy ? null : 'Read failed',
       graph: healthy ? { node: 'wait', trace: ['config', 'observe', 'plan', 'wait'] } : { node: 'error', trace: ['config', 'observe', 'error'] },
@@ -184,7 +204,7 @@ test('Claude channel never escalates automatic read/quote retries or recovery ac
     const legacyFiles = ['read-notification-state.json', 'quote-notification-state.json'];
     const legacyBefore = new Map<string, string>();
     if (fixture !== 'missing-state') {
-      await writeFile(join(dataDir, 'status.json'), fixture === 'corrupt-state' ? '{invalid' : JSON.stringify(observation(false)));
+      await atomicWriteJson(join(dataDir, 'status.json'), observation(false));
       for (const [index, name] of legacyFiles.entries()) {
         const content = fixture === 'corrupt-state' ? '{invalid' : JSON.stringify({ version: 1, clockAt: at,
           incident: { wallet: `0x${'a'.repeat(40)}`, representativeId: index === 0 ? 'old-read' : 'old-quote',
@@ -207,8 +227,8 @@ test('Claude channel never escalates automatic read/quote retries or recovery ac
     ];
     const expected = ['meaningful-completion', 'meaningful-ledger', 'meaningful-test', 'meaningful-failure', 'transaction-bearing-read', 'unrecognized-read'];
     await atomicWriteJson(join(dataDir, 'events.json'), retained);
-    const session = await openSession(dataDir); t.after(() => session.client.close());
-    await waitFor(() => session.received.length >= expected.length, 'actionable and requested events must pass without status or filter-state prerequisites');
+    const session = await openSession(dataDir, selectedEnv(dataDir)); t.after(() => session.client.close());
+    await waitFor(() => session.received.length >= expected.length, 'selected running portfolio events pass independently of legacy retry-filter journals');
     assert.deepEqual(session.received.map(eventId), expected);
 
     // A later failing observation and another retry must not promote any old
@@ -226,7 +246,7 @@ test('Claude channel never escalates automatic read/quote retries or recovery ac
 
     // Neither time-based eligibility from the old journal nor a process restart
     // can make the same retained automatic event eligible for model context.
-    const reconnect = await openSession(dataDir); t.after(() => reconnect.client.close());
+    const reconnect = await openSession(dataDir, selectedEnv(dataDir)); t.after(() => reconnect.client.close());
     await waitFor(() => reconnect.received.length >= expected.length, 'unacknowledged meaningful events replay after restart');
     assert.deepEqual(reconnect.received.map(eventId), expected);
     assert.deepEqual(reconnect.errors, []); assert.equal(reconnect.stderr(), '');
@@ -247,13 +267,19 @@ test('Claude sessions pin notifications and acknowledgements while a chat attach
   const walletA = `0x${'a'.repeat(40)}`, walletB = `0x${'b'.repeat(40)}`;
   const dataB = join(root, 'wallets', walletB);
   await mkdir(dataB, { recursive: true }); await mkdir(join(root, 'connections'));
-  await atomicWriteJson(join(root, 'config.json'), { wallet: walletA, chainId: 4663 });
-  await atomicWriteJson(join(dataB, 'config.json'), { wallet: walletB, chainId: 4663 });
+  await atomicWriteJson(join(root, 'config.json'), { wallet: walletA, chainId: 4663, mode: 'ledger' });
+  await atomicWriteJson(join(dataB, 'config.json'), { wallet: walletB, chainId: 4663, mode: 'ledger' });
   await atomicWriteJson(join(root, 'portfolios.json'), { version: 1, profiles: [
     { wallet: walletA, chainId: 4663, directory: '.', chartPort: 4663 },
     { wallet: walletB, chainId: 4663, directory: `wallets/${walletB}`, chartPort: 4664 },
   ] });
   const sessionId = 'claude:fixture-profile-session';
+  for (const [data, wallet] of [[root, walletA], [dataB, walletB]]) {
+    await atomicWriteJson(join(data!, 'status.json'), {app: 'Rebalance', chain: {id: 4663}, wallet, mode: 'ledger', armed: true});
+    await atomicWriteJson(join(data!, 'run.lock'), {pid: process.pid, createdAt: new Date().toISOString(), token: 'fixture-owned-runner'});
+    await atomicWriteJson(bindingPath(data!, sessionId), {version: 1, wallet,
+      sessionDigest: createHash('sha256').update(sessionId).digest('hex'), ignoredEventIds: []});
+  }
   const connect = (wallet: string) => atomicWriteJson(connectionPath(root, sessionId), { version: 1, chainId: 4663, wallet });
   const shared = { id: 'same-event-id', type: 'rebalance-completed', createdAt: '2026-09-07T00:00:00Z', message: 'Completed.' };
   await atomicWriteJson(join(root, 'events.json'), [shared]);
@@ -266,6 +292,9 @@ test('Claude sessions pin notifications and acknowledgements while a chat attach
   assert.equal((first.received[0]?.params?.meta as Record<string, string>).portfolio_wallet, walletA);
   assert.ok(first.client.getInstructions()?.includes(`--profile ${walletA} status`));
   await connect(walletB);
+  const ignored = { ...shared, id: 'later-old-wallet', message: 'Must remain local after selection changes.' };
+  await atomicWriteJson(join(root, 'events.json'), [shared, ignored]);
+  await delay(250);assert.equal(first.received.length, 1);
   const second = await openSession(root, env); t.after(() => second.client.close());
   await waitFor(() => second.received.length === 1, 'new channel should select the new attachment');
   assert.equal((second.received[0]?.params?.meta as Record<string, string>).portfolio_wallet, walletB);
@@ -277,4 +306,41 @@ test('Claude sessions pin notifications and acknowledgements while a chat attach
   assert.ok(JSON.parse(await readFile(join(dataB, 'events.json'), 'utf8'))[0].acknowledgedAt);
   assert.deepEqual(first.errors, []); assert.deepEqual(second.errors, []);
   await first.client.close(); await second.client.close();
+});
+
+
+test('new Claude binding ignores historical backlog and stopped-wallet events remain local after restart', {timeout: 15_000}, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'rebalance-channel-binding-'));
+  t.after(() => rm(root, {recursive: true, force: true}));
+  await preparePortfolio(root, defaultSession, defaultWallet, false);
+  const event = (id: string) => ({id, type: 'rebalance-completed', createdAt: new Date().toISOString(), message: 'Confirmed fixture completion.'});
+  const history = [event('historical')];await atomicWriteJson(join(root, 'events.json'), history);
+  const channel = await openSession(root, selectedEnv(root));t.after(() => channel.client.close());
+  await waitFor(async () => (await readJson<{ignoredEventIds: string[]}>(bindingPath(root, defaultSession)))?.ignoredEventIds.includes('historical') === true, 'initial backlog must be retained as ignored');
+  history.push(event('new-running'));await atomicWriteJson(join(root, 'events.json'), history);
+  await waitFor(() => channel.received.length === 1, 'new selected-running event should arrive');
+  assert.deepEqual(channel.received.map(eventId), ['new-running']);
+  await atomicWriteJson(join(root, 'stop.json'), {createdAt: new Date().toISOString()});
+  history.push(event('while-stopped'));await atomicWriteJson(join(root, 'events.json'), history);
+  await waitFor(async () => (await readJson<{ignoredEventIds: string[]}>(bindingPath(root, defaultSession)))?.ignoredEventIds.includes('while-stopped') === true, 'stopped events should enter only local ignored history');
+  await rm(join(root, 'stop.json'));history.push(event('after-restart'));await atomicWriteJson(join(root, 'events.json'), history);
+  await waitFor(() => channel.received.length === 2, 'future running events should resume without old backlog');
+  assert.deepEqual(channel.received.map(eventId), ['new-running', 'after-restart']);
+  assert.deepEqual(await readJson(join(root, 'events.json')), history, 'delivery filters never acknowledge or delete event history');
+  assert.deepEqual(channel.errors, []);assert.equal(channel.stderr(), '');
+});
+
+test('unknown or malformed runner ownership never delivers portfolio events', {timeout: 15_000}, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'rebalance-channel-running-'));
+  t.after(() => rm(root, {recursive: true, force: true}));await preparePortfolio(root);
+  await atomicWriteJson(join(root, 'run.lock'), {pid: process.pid});
+  const history = [{id: 'invalid-owner', type: 'rebalance-attention', createdAt: new Date().toISOString(), message: 'Should stay local.'}];
+  await atomicWriteJson(join(root, 'events.json'), history);
+  const channel = await openSession(root, selectedEnv(root));t.after(() => channel.client.close());
+  await waitFor(async () => (await readJson<{ignoredEventIds: string[]}>(bindingPath(root, defaultSession)))?.ignoredEventIds.includes('invalid-owner') === true, 'unknown runner cannot authorize notification');
+  assert.deepEqual(channel.received, []);
+  await atomicWriteJson(join(root, 'run.lock'), {pid: process.pid, createdAt: new Date().toISOString(), token: 'fixture-owned-runner'});
+  history.push({id: 'current-valid-owner', type: 'rebalance-attention', createdAt: new Date().toISOString(), message: 'Current meaningful failure.'});
+  await atomicWriteJson(join(root, 'events.json'), history);await waitFor(() => channel.received.length === 1, 'later verified running event can arrive');
+  assert.deepEqual(channel.received.map(eventId), ['current-valid-owner']);assert.equal(channel.stderr(), '');
 });

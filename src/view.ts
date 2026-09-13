@@ -8,6 +8,7 @@ import { readProfiles, resolveProfile, validateProfileDirectory, type RoutedProf
 import { acquireLock, readJson } from './storage.js';
 import { issueView } from './view-session.js';
 import { ViewError } from './view-error.js';
+import { ensureSelectedCodexNotifications } from './selected-notifications.js';
 
 const repository = fileURLToPath(new URL('..', import.meta.url));
 const execute = promisify(execFile);
@@ -82,6 +83,7 @@ export async function ensurePortfolioChart(profile: RoutedProfile, overrides: Pa
   } finally { await release(); }
 }
 
+
 /** Selection-free entry for an empty registry or an unattached conversation. */
 export async function prepareView(rootDir: string, sessionId: string | undefined, wallet?: string,
   overrides: Partial<ViewDependencies> = {}) {
@@ -105,6 +107,8 @@ export async function prepareView(rootDir: string, sessionId: string | undefined
   }
   await ensurePortfolioChart(profile, overrides);
   const handle = sessionId ? await issueView(rootDir, sessionId) : null;
+  // The view's selected native session is the destination, never the reused chart.
+  await ensureSelectedCodexNotifications(rootDir, sessionId, wallet ? { dataDir: profile.dataDir } : {}).catch(() => {});
   const path = wallet ? '/chart' : '/';
   return { state: 'ready' as const, url: `http://127.0.0.1:${profile.chartPort}${path}${handle ? '#view=' + handle.token : ''}`,
     connected: Boolean(handle), tradingChanged: false };

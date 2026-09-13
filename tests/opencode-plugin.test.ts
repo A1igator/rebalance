@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test, type TestContext } from 'node:test';
 import { createRebalanceOpenCodePlugin } from '../src/opencode-plugin.js';
+import { selectedPortfolioRunning } from '../src/notification-selection.js';
 import { atomicWriteJson, readJson } from '../src/storage.js';
 import { connectionPath, readProfiles, resolveProfile } from '../scripts/profile-routing.mjs';
 import type { OpenCodeNotificationOptions, OpenCodeNotifications } from '../src/opencode-notifications.js';
@@ -82,7 +83,7 @@ async function fixture(t: TestContext, options: { wallets?: string[]; nested?: b
     const plugin = await createRebalanceOpenCodePlugin({ directory, client }, {
       repository: root, rootDir, now: () => clock.time,
       launch: async (input, env) => { launches.push({ input, env }); return launch(input, env); },
-      sharePreview: async (input, env) => { previews.push({ input, env }); return preview(input, env); },
+      shareReceive: async (input, env) => { previews.push({ input, env }); return preview(input, env); },
       notify: async options => { notificationCalls.push(options); return notify(options); },
       watchConnection: (observedRoot, changed) => {
         assert.equal(observedRoot, rootDir);
@@ -110,7 +111,7 @@ async function fixture(t: TestContext, options: { wallets?: string[]; nested?: b
     await atomicWriteJson(connectionPath(rootDir, namespace(id)), { version: 1, chainId: 4663, wallet });
   }
   const changed = () => { for (const record of connectionWatchers) if (!record.closed) record.changed(); };
-  const binding = () => readJson<{ version: number; sessionId: string; enabled: boolean; wallets: string[] }>(
+  const binding = () => readJson<{ version: number; sessionId: string; enabled: boolean; wallets: string[]; selectionEpoch?: string }>(
     join(rootDir, 'opencode-sessions', `${digest(namespace(sessionId))}.json`));
   return { root, rootDir, directory, plugin, create, command, chat, invoke, launches, notificationCalls,
     notifications, connectionWatchers, connect, changed, binding, native, clock, persistRoute,
@@ -224,24 +225,25 @@ test('shell environment removes stale pinned wallets and tracks each conversatio
   assert.deepEqual(untouched.env, { KEEP: 'unchanged' }); assert.equal(f.launches.length, 0);
 });
 
-test('a single-profile launch without an explicit connection binds that exact wallet and reports fallback', async t => {
+test('a single-profile launch fallback never becomes a notification selection', async t => {
   const f = await fixture(t, { wallets: [walletA] });
   assert.equal(await readJson(connectionPath(f.rootDir, namespace(sessionId))), null);
   await f.invoke();
-  assert.deepEqual((await f.binding())?.wallets, [walletA]);
-  assert.deepEqual(f.notificationCalls.map(call => call.wallet), [walletA]);
+  assert.deepEqual((await f.binding())?.wallets, []);
+  assert.deepEqual(f.notificationCalls, []);
   const system = { system: [] as string[] }; await f.plugin['experimental.chat.system.transform']({ sessionID: sessionId }, system);
   assert.match(system.system.join('\n'), new RegExp(walletA));
   assert.doesNotMatch(system.system.join('\n'), /No wallet is selected/);
 });
 
-test('launch binding keeps its persisted wallet when selection changes before launch returns', async t => {
+test('notification binding follows current selection when it changes before launch returns', async t => {
   const f = await fixture(t, { wallets: [walletA, walletB] });
   await f.connect(walletA);
   f.setLaunch(async input => { await f.persistRoute(input); await f.connect(walletB); return structuredClone(publicReply); });
   await f.invoke();
-  assert.deepEqual(new Set((await f.binding())?.wallets), new Set([walletA, walletB]));
-  assert.deepEqual(new Set(f.notificationCalls.map(call => call.wallet)), new Set([walletA, walletB]));
+  assert.deepEqual((await f.binding())?.wallets, [walletB]);
+  assert.deepEqual(f.notificationCalls.map(call => call.wallet), [walletB]);
+  assert.equal(f.notificationCalls[0]!.selectedOnly, true);
 });
 
 test('nested OpenCode sessions use their original directory for notification transport', async t => {
@@ -275,15 +277,15 @@ test('paused notifications remain paused across launch and restart until native 
   assert.match(status.parts[0]!.text!, /did not change trading/); assert.equal(f.launches.length, launches);
 });
 
-test('enabled binding restores on a new message without launching or switching its retained wallet', async t => {
+test('enabled binding restores only the current selection without launching', async t => {
   const f = await fixture(t, { wallets: [walletA, walletB] });
   await f.connect(walletA); await f.invoke(); await f.plugin.dispose();
   await f.connect(walletB);
   const restored = await f.create();
   await f.chat([{ type: 'text', text: 'Hello again' }], {}, restored);
   assert.equal(f.launches.length, 1);
-  assert.deepEqual(new Set(f.notificationCalls.slice(1).map(call => call.wallet)), new Set([walletA, walletB]));
-  assert.deepEqual(new Set((await f.binding())?.wallets), new Set([walletA, walletB]));
+  assert.deepEqual(f.notificationCalls.slice(1).map(call => call.wallet), [walletB]);
+  assert.deepEqual((await f.binding())?.wallets, [walletB]);
 });
 
 test('selection changes during asynchronous watcher setup are drained without another event', { timeout: 10_000 }, async t => {
@@ -299,8 +301,46 @@ test('selection changes during asynchronous watcher setup are drained without an
   await f.connect(walletB); f.changed(); release.resolve(); await launching;
   await until(() => f.notificationCalls.some(call => call.wallet === walletB));
   assert.deepEqual(f.notificationCalls.map(call => call.wallet), [walletA, walletB]);
-  assert.deepEqual(new Set((await f.binding())?.wallets), new Set([walletA, walletB]));
+  assert.deepEqual((await f.binding())?.wallets, [walletB]);
+  assert.deepEqual(closed, [walletA], 'the previous selection closes before the new watcher is retained');
   await f.plugin.dispose(); assert.deepEqual(new Set(closed), new Set([walletA, walletB]));
+});
+
+test('selected dormant wallets keep a guarded watcher and scope changes rotate its history epoch', async t => {
+  const f = await fixture(t, { wallets: [walletA, walletB] });
+  await f.connect(walletA); await f.invoke();
+  const first = f.notificationCalls[0]!;
+  assert.equal(first.wallet, walletA); assert.equal(first.selectedOnly, true);
+  assert.match(first.selectionEpoch!, /^[a-f0-9-]{36}$/);
+  assert.equal(await selectedPortfolioRunning(f.rootDir, namespace(sessionId), first.dataDir), false,
+    'an attachment alone is not a running portfolio; the worker must keep the running guard');
+  await f.chat([{ type: 'text', text: 'continue this conversation' }]);
+  await f.invoke();
+  assert.equal(f.notificationCalls.length, 1);
+  assert.equal((await f.binding())?.selectionEpoch, first.selectionEpoch,
+    'same-wallet continuation must not reset history suppression');
+
+  await f.connect(walletB); f.changed();
+  await until(() => f.notificationCalls.length === 2);
+  const second = f.notificationCalls[1]!;
+  assert.equal(f.notifications[0]!.closes, 1);
+  assert.equal(second.wallet, walletB); assert.equal(second.selectedOnly, true);
+  assert.notEqual(second.selectionEpoch, first.selectionEpoch);
+  assert.deepEqual((await f.binding())?.wallets, [walletB]);
+
+  await f.connect(walletA); f.changed();
+  await until(() => f.notificationCalls.length === 3);
+  const returned = f.notificationCalls[2]!;
+  assert.equal(f.notifications[1]!.closes, 1);
+  assert.equal(returned.wallet, walletA); assert.equal(returned.selectedOnly, true);
+  assert.notEqual(returned.selectionEpoch, first.selectionEpoch);
+  assert.notEqual(returned.selectionEpoch, second.selectionEpoch);
+
+  await rm(connectionPath(f.rootDir, namespace(sessionId))); f.changed();
+  await until(() => f.notifications[2]!.closes === 1);
+  assert.deepEqual((await f.binding())?.wallets, []);
+  assert.equal(f.notificationCalls.length, 3, 'returning to an unattached selector must not guess a wallet');
+  assert.equal(f.launches.length, 2, 'scope changes only update notification watchers');
 });
 
 test('disposal closes a watcher that finishes setup late and prevents every later launch', { timeout: 10_000 }, async t => {
@@ -370,8 +410,9 @@ test('multiple profiles without a selection never attach all wallets from a sele
   assert.deepEqual(f.notificationCalls.map(call => call.wallet), [walletB]);
 });
 
-test('a mismatched persisted launch route cannot attach notifications to another wallet or scope', async t => {
+test('persisted launch routes cannot override the conversation notification selection', async t => {
   const f = await fixture(t, { wallets: [walletA] });
+  await f.connect(walletA);
   for (const update of [
     (route: Record<string, unknown>) => { route.sessionId = namespace(otherSession); },
     (route: Record<string, unknown>) => { route.requestId = 'b'.repeat(64); },
@@ -389,9 +430,10 @@ test('a mismatched persisted launch route cannot attach notifications to another
     });
     const output = await f.invoke();
     assert.ok(output.parts[0]!.text!.startsWith(publicReply.hookSpecificOutput.additionalContext));
-    assert.match(output.parts[0]!.text!, /event delivery could not be connected/);
+    assert.doesNotMatch(output.parts[0]!.text!, /event delivery could not be connected/);
   }
-  assert.equal(f.notificationCalls.length, 0); assert.deepEqual((await f.binding())?.wallets, []);
+  assert.deepEqual(f.notificationCalls.map(call => call.wallet), [walletA]);
+  assert.deepEqual((await f.binding())?.wallets, [walletA]);
 });
 
 for (const trigger of ['ordinary message', 'notifications resume'] as const) {
@@ -429,9 +471,11 @@ test('pause immediately closes the active wallet while another watcher is still 
   await f.connect(walletB); f.changed(); await startingB.promise;
   const pausing = f.invoke('notifications pause');
   try {
+    await until(async () => (await f.binding())?.enabled === false);
     await until(() => closed.includes(walletA));
     assert.deepEqual(closed, [walletA], 'wallet A must close before wallet B finishes setup');
     assert.equal((await f.binding())?.enabled, false);
+    await until(() => f.connectionWatchers.every(watcher => watcher.closed));
     assert.equal(f.connectionWatchers.every(watcher => watcher.closed), true);
   } finally { releaseB.resolve(); await pausing; }
   assert.deepEqual(closed, [walletA, walletB], 'the late wallet B watcher must also close');
@@ -471,7 +515,7 @@ test('unmarked message provenance is verified before restoring a saved notificat
 });
 
 
-test('remembered app entry binds only restored wallets without choosing one for the chat', async t => {
+test('remembered app entry does not subscribe restored wallets without a chat selection', async t => {
  const f = await fixture(t, {wallets:[walletA,walletB]});
  f.setLaunch(async input => {
   const selected=selectOpenCodeLaunchRequest(input,f.root);
@@ -483,18 +527,18 @@ test('remembered app entry binds only restored wallets without choosing one for 
   return structuredClone(publicReply);
  });
  await f.invoke();
- assert.deepEqual((await f.binding())?.wallets,[walletA]);
- assert.deepEqual(f.notificationCalls.map(call=>call.wallet),[walletA]);
+ assert.deepEqual((await f.binding())?.wallets,[]);
+ assert.deepEqual(f.notificationCalls,[]);
  assert.equal(await readJson(connectionPath(f.rootDir,namespace(sessionId))),null);
 });
 
 
 const pastedShare = 'rebalance:v1 USDG=5,AAPL=95 drift=5 interval=3600';
-const previewReply = { hookSpecificOutput: { additionalContext: 'Strategy preview; nothing applied.\n' + JSON.stringify({
-  app: 'Rebalance', operation: 'share-import', outcome: 'preview', code: pastedShare, applied: false,
+const previewReply = { hookSpecificOutput: { additionalContext: 'Strategy applied.\n' + JSON.stringify({
+  app: 'Rebalance', operation: 'share-import', outcome: 'applied', code: pastedShare, applied: true,
 }) } };
 
-test('exact pasted strategy previews before model processing without launching or binding notifications', async t => {
+test('exact pasted strategy applies before model processing without launching or binding notifications', async t => {
   const f = await fixture(t, { wallets: [walletA, walletB] });
   await f.connect(walletB);
   f.setPreview(async (input, env) => {
@@ -530,7 +574,7 @@ test('pasted-code preview requires one user text part and a verified root Build 
   assert.equal(f.previews.length, 0); assert.equal(f.launches.length, 0); assert.equal(await f.binding(), null);
 });
 
-test('preview selection and transport failure preserve no-apply semantics without notifications', async t => {
+test('import selection and transport failure distinguish no selection from uncertainty without notifications', async t => {
   const f = await fixture(t);
   const selector = { hookSpecificOutput: { additionalContext: 'Choose a portfolio to compare this strategy; nothing applied.' } };
   f.setPreview(async () => selector);
@@ -538,7 +582,7 @@ test('preview selection and transport failure preserve no-apply semantics withou
   for (const failure of [async () => null, async () => { throw new Error('fixture-secret-preview'); }]) {
     f.setPreview(failure);
     const result = await f.chat([{ type: 'text', text: pastedShare }]);
-    assert.match(result.parts[0]!.text!, /Nothing was applied/);
+    assert.match(result.parts[0]!.text!, /outcome could not be verified/);
     assert.doesNotMatch(result.parts[0]!.text!, /fixture-secret|launch|trade/);
   }
   assert.equal(f.launches.length, 0); assert.equal(await f.binding(), null);

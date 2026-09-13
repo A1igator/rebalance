@@ -12,6 +12,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type { Notification } from '@modelcontextprotocol/sdk/types.js';
 import { acquireLock, atomicWriteJson, isLiveLockContention } from '../src/storage.js';
 import { issueView, pendingViewRequests, requestWalletSetup, type SetupMode } from '../src/view-session.js';
+import { connectionPath } from '../scripts/profile-routing.mjs';
 
 const repository = fileURLToPath(new URL('..', import.meta.url));
 const channel = fileURLToPath(new URL('../src/channel.ts', import.meta.url));
@@ -294,4 +295,26 @@ test('an explicit Rebalance native session also rejects foreign tokens before an
   assert.deepEqual(ids(session.received), [own.id]);
   assert.equal((await f.record(foreign.id)).state, 'pending');
   assert.deepEqual(session.errors, []); assert.equal(session.stderr(), ''); f.noTradingChanges();
+});
+
+
+test('unknown Claude startup identity receives no portfolio alerts before trusted own-view binding', {timeout: 15_000}, async t => {
+  const f = await fixture(t), wallet = `0x${'c'.repeat(40)}`;
+  await atomicWriteJson(join(f.root, 'portfolios.json'), {version: 1, profiles: [{wallet, chainId: 4663, directory: '.', chartPort: 4663}]});
+  await atomicWriteJson(join(f.root, 'config.json'), {wallet, chainId: 4663, mode: 'ledger'});
+  await atomicWriteJson(join(f.root, 'status.json'), {app: 'Rebalance', chain: {id: 4663}, wallet, mode: 'ledger', armed: true});
+  await atomicWriteJson(join(f.root, 'run.lock'), {pid: process.pid, createdAt: new Date().toISOString(), token: 'fixture-owned-runner'});
+  await atomicWriteJson(connectionPath(f.root, sessionA), {version: 1, chainId: 4663, wallet});
+  const event = (id: string) => ({id, type: 'rebalance-completed', createdAt: new Date().toISOString(), message: 'Confirmed fixture completion.'});
+  const history = [event('before-binding')];await atomicWriteJson(join(f.root, 'events.json'), history);
+  const a = await issueView(f.root, sessionA, {kind: 'claude'}), b = await issueView(f.root, sessionB, {kind: 'claude'});
+  const channel = await f.open();await channel.client.listTools();await delay(100);
+  assert.deepEqual(channel.received, []);
+  assert.notEqual((await channel.client.callTool({name: 'connect_companion_view', arguments: {token: a.token}})).isError, true);
+  history.push(event('after-binding'));await atomicWriteJson(join(f.root, 'events.json'), history);
+  await waitFor(() => channel.received.some(n => metadata(n).event_id === 'after-binding'), 'trusted native binding permits only new selected-running events');
+  assert.deepEqual(channel.received.map(n => metadata(n).event_id), ['after-binding']);
+  assert.equal((await channel.client.callTool({name: 'connect_companion_view', arguments: {token: b.token}})).isError, true);
+  assert.deepEqual(JSON.parse(await readFile(join(f.root, 'events.json'), 'utf8')), history);
+  assert.deepEqual(channel.errors, []);assert.equal(channel.stderr(), '');
 });

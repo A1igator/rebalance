@@ -32,6 +32,7 @@ async function fixture(t: TestContext) {
   let withdraw: CodexNotificationDependencies['withdraw'] = async () => 'deleted';
   let execute: CodexNotificationDependencies['execute'] = async () => ({ stdout: `Queued message queue-1 for thread ${threadId}\n` });
   const deps: Partial<CodexNotificationDependencies> = {
+    selectionActive: async () => true, watchSelection: () => () => {},
     dataDir: directory, rootDir: directory, projectDir: '/fixture/rebalance', now: () => now,
     withdraw: async (command, targetThread, queueId) => { withdrawals.push({ command, threadId: targetThread, queueId }); return withdraw(command, targetThread, queueId); },
     execute: async (command, args) => { calls.push({ command, args }); return execute(command, args); },

@@ -7,6 +7,7 @@ import { requestLedgerRebalance } from './ledger-request.js';
 import { validateConfig } from './config.js';
 import { readView, viewState } from './view-session.js';
 import { acquireLock, atomicWriteJson, readJson } from './storage.js';
+import { ensureSelectedCodexNotifications } from './selected-notifications.js';
 
 export type RunnerSummary = { wallet: string | null; state: 'running' | 'stopped' | 'starting' | 'stopping' | 'unavailable' | 'deferred'; message?: string };
 export type RunnerResult = RunnerSummary & { requestId: string; outcome: string };
@@ -15,7 +16,8 @@ export type LedgerRetryRequest = { token: string; wallet: string; requestId: str
 type Outcome = 'prepared' | 'armed' | 'starting' | 'stop-requested' | 'blocked' | 'busy' | 'deferred' | 'uncertain';
 type Entry = { version: 1; sessionId: string; requestId: string; wallet: string; action: 'start' | 'stop'; expectedStop: string; receivedAt: string; outcome: Outcome };
 export type PortfolioControlDependencies = {
-  execute: (profile: RoutedProfile, args: readonly string[]) => Promise<{ ok: boolean; value: unknown }>;
+  execute: (profile: RoutedProfile, args: readonly string[], sessionId?: string) => Promise<{ ok: boolean; value: unknown }>;
+  selectedNotifications: (profile: RoutedProfile, sessionId: string, starting: boolean) => Promise<unknown>;
   alive: (pid: number) => boolean;
   persist: typeof atomicWriteJson;
 };
@@ -40,16 +42,19 @@ const hash = (value: string) => createHash('sha256').update(value).digest('hex')
 const key = (entry: Pick<Entry, 'sessionId' | 'requestId'>) => hash(`${entry.sessionId}\0${entry.requestId}`);
 const pid = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) > 0 && Number(value) <= 2_147_483_647;
 const defaults: PortfolioControlDependencies = {
-  execute: (profile, args) => new Promise((done, fail) => {
+  execute: (profile, args, sessionId) => new Promise((done, fail) => {
     execFile(process.execPath, ['--import', 'tsx', resolve(repository, 'src/cli.ts'), ...args], {
       cwd: repository, timeout: 120_000, maxBuffer: 1_048_576, killSignal: 'SIGKILL',
       env: { ...process.env, REBALANCE_ROOT_DIR: profile.rootDir, REBALANCE_DATA_DIR: profile.dataDir,
+        REBALANCE_SESSION_ID: sessionId ?? '', CODEX_THREAD_ID: '', CLAUDE_CODE_SESSION_ID: '',
         REBALANCE_PROFILE_PINNED: '1', REBALANCE_PROFILE_WALLET: profile.wallet ?? '', REBALANCE_CHART_PORT: String(profile.chartPort) },
     }, (error, stdout) => {
       try { done({ ok: !error, value: JSON.parse(stdout) }); }
       catch { fail(new Error('The local control command could not be verified.')); }
     });
   }),
+  selectedNotifications: (profile, sessionId, starting) => ensureSelectedCodexNotifications(profile.rootDir, sessionId,
+    { dataDir: profile.dataDir, starting, explicitSelection: true }),
   alive: value => { try { process.kill(value, 0); return true; } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
     if ((error as NodeJS.ErrnoException).code === 'EPERM') return true;
@@ -219,7 +224,7 @@ export class PortfolioControls {
       let outcome: Outcome = 'uncertain';
       try {
         const result = await this.deps.execute(profile, entry.action === 'start'
-          ? ['launch', '--request-id', `chart:${id}`, '--expected-stop', entry.expectedStop] : ['stop']);
+          ? ['launch', '--request-id', `chart:${id}`, '--expected-stop', entry.expectedStop] : ['stop'], entry.sessionId);
         const value = result.value as { app?: string; outcome?: string; status?: unknown } | null;
         if (entry.action === 'stop') {
           if (result.ok && value?.status === 'stop-requested') outcome = 'stop-requested';
@@ -239,6 +244,13 @@ export class PortfolioControls {
         saved.outcome = outcome;
         await this.deps.persist(this.path(LOG), entries);
       });
+      if (entry.action === 'start' && (outcome === 'armed' || outcome === 'starting')) {
+        // A newly completed explicit Start can claim this selected chat's alerts.
+        // Restoration and replay never pass this point; delivery still rechecks
+        // selection and running state before dispatch. Notification failure does
+        // not reinterpret an already persisted financial control outcome.
+        try { await this.deps.selectedNotifications(profile, entry.sessionId, outcome === 'starting'); } catch { /* Available on the next selected view. */ }
+      }
       return { ...await this.read(), requestId: entry.requestId, outcome, message: messages[outcome] };
     };
     // The journal is the durable guard; concurrent callers share only their exact
