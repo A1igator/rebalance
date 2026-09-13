@@ -24,7 +24,7 @@ type DisplayNode = { tag: string; textContent: string; attrs: Record<string, str
 type Response = { ok: boolean; json: () => Promise<unknown> };
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
-async function browser(options: { hidden?: boolean; status?: () => Promise<Response>; stockLinks?: boolean; hash?: string; disconnect?: () => Promise<Response> } = {}) {
+async function browser(options: { trackControls?: boolean; hidden?: boolean; status?: () => Promise<Response>; stockLinks?: boolean; hash?: string; disconnect?: () => Promise<Response> } = {}) {
   const [ringScript, script, html] = await Promise.all(['allocation-ring.js', 'app.js', 'index.html']
     .map(file => readFile(new URL(`../ui/${file}`, import.meta.url), 'utf8')));
   const htmlIds = new Set([...html!.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]));
@@ -35,6 +35,7 @@ async function browser(options: { hidden?: boolean; status?: () => Promise<Respo
   const calls: { url: string; at: number; signal: AbortSignal; body?: string }[] = [];
   let now = initialTime, nextTimer = 0, pieRenders = 0;
   const navigations: string[] = [];
+  const statusUpdates: [unknown, boolean | undefined][] = [], runnerUpdates: [unknown, boolean | undefined][] = [];
   const getStatus = options.status || (async () => ({ ok: true, json: async () => current }));
   function node(tag: string, id?: string): DisplayNode {
     const item = {
@@ -87,7 +88,11 @@ async function browser(options: { hidden?: boolean; status?: () => Promise<Respo
       assert.equal(url, '/api/status', 'the chart has no independent gas quote requests');
       return getStatus();
     },
-    window: { location: { hash: options.hash ?? '', pathname: '/chart', assign: (url: string) => navigations.push(url) }, addEventListener: (name: string, handler: () => void) => lifecycle.set(name, handler) },
+    window: { rebalanceControls: options.trackControls ? {
+      updateStatus: (value: unknown, disconnected?: boolean) => statusUpdates.push([value, disconnected]),
+      updateRunner: (value: unknown, disconnected?: boolean) => runnerUpdates.push([value, disconnected]),
+      refreshRunner: async () => {},
+    } : undefined, location: { hash: options.hash ?? '', pathname: '/chart', assign: (url: string) => navigations.push(url) }, addEventListener: (name: string, handler: () => void) => lifecycle.set(name, handler) },
     document: {
       get visibilityState() { return pageDocument.visibilityState; },
       addEventListener: (name: string, handler: () => void) => visibility.set(name, handler),
@@ -104,7 +109,8 @@ async function browser(options: { hidden?: boolean; status?: () => Promise<Respo
   return {
     element: (id: string) => elements.get(id)!,
     get renders() { return pieRenders; }, get now() { return now; },
-    calls, timers, source, sources: Source.instances, navigations,
+    calls, timers, source, sources: Source.instances, navigations, statusUpdates, runnerUpdates,
+    hold: () => runInContext("window.rebalanceStatus.suspendForControl()", context) as () => void,
     visible(value: boolean) { pageDocument.visibilityState = value ? "visible" : "hidden"; visibility.get("visibilitychange")!(); },
     hide() { lifecycle.get('pagehide')!(); },
     show() { lifecycle.get('pageshow')!(); },
@@ -1105,4 +1111,69 @@ test('Back retains the chart on stale or unverifiable detach and ignores late na
   page.element('portfolios-back').listeners.get('click')!(); await flush(); page.hide();
   finish({ok:true,json:async()=>({connectedWallet:null,tradingChanged:false})}); await flush();
   assert.deepEqual(page.navigations,[]);
+});
+
+
+test('control holds release the status connection without invalidating the displayed portfolio', async () => {
+  const page = await browser({ trackControls: true });
+  page.source.handlers.get('runner')!({ data: JSON.stringify({ wallet, state: 'stopped' }) });
+  const statusCount = page.statusUpdates.length, runnerCount = page.runnerUpdates.length, renders = page.renders;
+  const release = page.hold(), releaseNested = page.hold();
+  assert.equal(page.source.closed, true);
+  assert.equal(page.statusUpdates.length, statusCount, 'transport pause preserves status freshness');
+  assert.equal(page.runnerUpdates.length, runnerCount, 'transport pause preserves the captured control revision');
+  page.source.send({ ...current, error: 'late old stream' });
+  page.source.handlers.get('runner')!({ data: JSON.stringify({ wallet, state: 'running' }) });
+  page.source.onerror!();
+  await page.advance(10000);
+  assert.equal(page.renders, renders);
+  assert.equal(page.runnerUpdates.length, runnerCount);
+  assert.deepEqual(page.calls, []);
+  assert.equal(page.timers.size, 0);
+  release(); release();
+  assert.equal(page.sources.length, 1, 'nested request keeps the stream paused');
+  releaseNested(); releaseNested();
+  assert.equal(page.sources.length, 2, 'the final idempotent release reconnects once');
+  page.sources[1]!.send(current);
+  assert.equal(page.statusUpdates.length, statusCount + 1);
+  page.hide();
+});
+
+test('real hidden and pagehide transitions still invalidate status during a control hold', async () => {
+  const page = await browser({ trackControls: true });
+  const release = page.hold();
+  page.visible(false);
+  assert.equal(page.statusUpdates.at(-1)![1], true);
+  assert.deepEqual(page.runnerUpdates.at(-1), [null, true]);
+  page.visible(true); page.show();
+  assert.equal(page.sources.length, 1, 'becoming visible cannot reclaim the request connection');
+  release();
+  assert.equal(page.sources.length, 2);
+  assert.equal(page.statusUpdates.at(-1)![1], true, 'release alone does not claim fresh status');
+  page.sources[1]!.send(current);
+  assert.notEqual(page.statusUpdates.at(-1)![1], true);
+  const releaseNext = page.hold();
+  page.hide(); releaseNext(); page.visible(true);
+  assert.equal(page.sources.length, 2, 'a page in the back-forward cache stays disconnected');
+  page.show(); page.show();
+  assert.equal(page.sources.length, 3);
+  page.hide();
+});
+
+test('control holds cancel fallback reads and ignore late results after reconnection', async () => {
+  let finish!: (value: Response) => void;
+  const page = await browser({ status: () => new Promise(resolve => { finish = resolve; }) });
+  page.source.onerror!();
+  assert.equal(page.calls.length, 1);
+  const release = page.hold();
+  assert.equal(page.calls[0]!.signal.aborted, true);
+  release();
+  page.sources[1]!.send({ ...current, portfolio: { ...current.portfolio, totalUsdE8: '700000000' } });
+  const renders = page.renders;
+  finish({ ok: true, json: async () => ({ ...current, error: 'obsolete fallback' }) });
+  await flush();
+  assert.equal(page.renders, renders);
+  assert.match(page.element('c-val').textContent, /^\$7 · as of /);
+  assert.equal(page.timers.size, 0);
+  page.hide();
 });

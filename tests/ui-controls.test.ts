@@ -29,7 +29,7 @@ class Node {
   dispatch(name: string) { for (const handler of this.handlers.get(name) || []) handler(); }
 }
 type Controls = { updateStatus: (value: unknown, disconnected?: boolean) => void; updateRunner: (value: unknown, disconnected?: boolean) => void };
-async function browser(options: { token?: string | null; reply?: (call: Call) => Promise<Reply | undefined> } = {}) {
+async function browser(options: { token?: string | null; reply?: (call: Call) => Promise<Reply | undefined>; onTransport?: (event: string) => void } = {}) {
   const nodes = new Map<string, Node>(), events = new Map<string, (() => void)[]>(), subscribers = new Set<(value: unknown) => void>();
   const timers = new Map<number, () => void>(), calls: Call[] = [];
   const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
@@ -40,9 +40,15 @@ async function browser(options: { token?: string | null; reply?: (call: Call) =>
     if (!nodes.has(id)) { const node = new Node(); node.hidden = id === 'control-message'; nodes.set(id, node); }
     return nodes.get(id)!;
   };
-  const window: { rebalanceControls?: Controls; rebalanceView: { token: string | null; subscribe: (callback: (value: unknown) => void) => () => void }; addEventListener: (name: string, handler: () => void) => void } = {
+  const holdTransport = (name: string) => {
+    options.onTransport?.(`hold:${name}`);
+    return () => options.onTransport?.(`release:${name}`);
+  };
+  const window: { rebalanceControls?: Controls; rebalanceView: { token: string | null; subscribe: (callback: (value: unknown) => void) => () => void; suspendForControl: () => () => void }; rebalanceStatus: { suspendForControl: () => () => void }; addEventListener: (name: string, handler: () => void) => void } = {
     rebalanceView: { token: options.token === undefined ? token : options.token,
-      subscribe: callback => { subscribers.add(callback); return () => subscribers.delete(callback); } },
+      subscribe: callback => { subscribers.add(callback); return () => subscribers.delete(callback); },
+      suspendForControl: () => holdTransport('view') },
+    rebalanceStatus: { suspendForControl: () => holdTransport('status') },
     addEventListener: (name, handler) => events.set(name, [...events.get(name) || [], handler]),
   };
   runInNewContext(await readFile(new URL('../ui/portfolio-controls.js', import.meta.url), 'utf8'), {
@@ -412,4 +418,200 @@ test('unverified Retry replies never claim success or silently retry, and view/l
     await page.lifecycle('pagehide'); await page.lifecycle('pageshow');
     await page.click('ledger-retry', true); assert.equal(page.posts().length, 1);
   }
+});
+
+
+test('Stop reaches Start after PID exit without another file event and never repeats the action', async () => {
+  let processAlive = true;
+  const page = await browser({ reply: async call => call.method === 'POST'
+    ? ok(result('stopping', { outcome: 'stop-requested' })) : ok(runner(processAlive ? 'stopping' : 'stopped')) });
+  await page.ready('running'); await page.click('portfolio-run');
+  assert.equal(page.byId('portfolio-run').textContent, 'Stopping…');
+  assert.equal(page.posts().length, 1);
+  const initialReads = page.calls.filter(call => call.method === 'GET').length;
+  processAlive = false; // No SSE/file event is emitted when the old PID disappears.
+  await page.timersRun();
+  assert.equal(page.byId('portfolio-run').textContent, 'Start');
+  assert.equal(page.byId('portfolio-run').disabled, false);
+  assert.equal(page.calls.filter(call => call.method === 'GET').length, initialReads + 1);
+  await page.timersRun(); await page.timersRun();
+  assert.equal(page.calls.filter(call => call.method === 'GET').length, initialReads + 1, 'stable runners have no healthy polling');
+  assert.equal(page.posts().length, 1); assert.equal(page.uuidCalls, 1); assert.equal(page.timers.size, 0);
+});
+
+test('a starting state reconciles to running with read-only transition refresh', async () => {
+  const page = await browser({ reply: async () => ok(runner('running')) });
+  await page.ready('starting'); await page.timersRun();
+  assert.equal(page.byId('portfolio-run').textContent, 'Stop');
+  assert.equal(page.calls.length, 1); assert.equal(page.posts().length, 0); assert.equal(page.uuidCalls, 0);
+  await page.timersRun(); assert.equal(page.calls.length, 1); assert.equal(page.timers.size, 0);
+});
+
+test('transition refreshes are serial and cannot replace a newer runner event', async () => {
+  const read = deferred<Reply>();
+  const page = await browser({ reply: async () => read.promise });
+  await page.ready('stopping'); await page.timersRun();
+  assert.equal(page.calls.length, 1);
+  await page.status(); await page.view();
+  assert.equal(page.calls.length, 1, 'extra render hints do not dispatch concurrent reads');
+  await page.runner(runner('stopped'));
+  read.resolve(ok(runner('stopping'))); await flush();
+  assert.equal(page.byId('portfolio-run').textContent, 'Start');
+  await page.timersRun(); assert.equal(page.calls.length, 1); assert.equal(page.posts().length, 0);
+});
+
+test('transition refresh stops on deselection, stale status or page suspension', async () => {
+  for (const invalidation of ['view', 'status', 'pagehide']) {
+    const page = await browser(); await page.ready('stopping');
+    if (invalidation === 'view') await page.view({ snapshot: { connectedWallet: null } });
+    else if (invalidation === 'status') await page.status(chart(), true);
+    else await page.lifecycle('pagehide');
+    await page.timersRun();
+    assert.equal(page.calls.length, 0, invalidation); assert.equal(page.timers.size, 0, invalidation);
+  }
+});
+
+test('an unresolved transition has a finite read budget without claiming it stopped or retrying controls', async () => {
+  const page = await browser({ reply: async () => ok(runner('stopping')) });
+  await page.ready('stopping');
+  for (let i = 0; i < 40; i++) await page.timersRun();
+  assert.equal(page.calls.length, 30);
+  assert.equal(page.byId('portfolio-run').textContent, 'Unavailable');
+  assert.match(page.byId('portfolio-run').title, /Refresh the page/);
+  assert.equal(page.byId('portfolio-run').disabled, true);
+  assert.equal(page.timers.size, 0); assert.equal(page.posts().length, 0); assert.equal(page.uuidCalls, 0);
+});
+
+
+test('a never-settling control POST stops blocking UI, reports unknown outcome and only reads back status', async () => {
+  for (const action of ['start', 'stop']) {
+    const page = await browser({ reply: async call => call.method === 'POST' ? new Promise<Reply>(() => {}) : ok(runner('stopped')) });
+    await page.ready(action === 'start' ? 'stopped' : 'running'); await page.click('portfolio-run');
+    assert.equal(page.byId('portfolio-run').disabled, true);
+    const sent = page.posts()[0]!; assert.equal(sent.signal?.aborted, false);
+    await page.timersRun();
+    assert.equal(sent.signal?.aborted, true, 'only the HTTP waiting signal is aborted');
+    assert.equal(page.byId('portfolio-run').textContent, 'Start');
+    assert.equal(page.byId('portfolio-run').disabled, false);
+    assert.match(page.byId('control-message').textContent, /outcome is unknown and it may still finish/);
+    assert.doesNotMatch(page.byId('control-message').textContent, /cancelled|stop completed/i);
+    assert.equal(page.calls.filter(call => call.method === 'GET').length, 1);
+    await page.timersRun(); await page.timersRun();
+    assert.equal(page.posts().length, 1); assert.equal(page.uuidCalls, 1); assert.equal(page.timers.size, 0);
+  }
+});
+
+test('late control response after its deadline cannot replace current state or erase unknown outcome', async () => {
+  const late = deferred<Reply>();
+  let currentState = 'starting';
+  const page = await browser({ reply: async call => call.method === 'POST' ? late.promise : ok(runner(currentState)) });
+  await page.ready('stopped'); await page.click('portfolio-run'); await page.timersRun();
+  assert.equal(page.byId('portfolio-run').textContent, 'Starting…');
+  assert.match(page.byId('control-message').textContent, /outcome is unknown/);
+  currentState = 'running'; await page.timersRun();
+  assert.equal(page.byId('portfolio-run').textContent, 'Stop');
+  late.resolve(ok(result('stopped'))); await flush();
+  assert.equal(page.byId('portfolio-run').textContent, 'Stop');
+  assert.match(page.byId('control-message').textContent, /outcome is unknown/);
+  assert.equal(page.posts().length, 1); assert.equal(page.uuidCalls, 1);
+  await page.timersRun(); assert.equal(page.timers.size, 0);
+});
+
+test('the control response deadline includes a stalled JSON response body', async () => {
+  const page = await browser({ reply: async call => call.method === 'POST'
+    ? { ok: true, status: 200, json: () => new Promise(() => {}) } : ok(runner('stopped')) });
+  await page.ready(); await page.click('portfolio-run'); await page.timersRun();
+  assert.match(page.byId('control-message').textContent, /outcome is unknown/);
+  assert.equal(page.byId('portfolio-run').textContent, 'Start');
+  assert.equal(page.posts().length, 1); assert.equal(page.calls.filter(call => call.method === 'GET').length, 1);
+});
+
+
+test('runner actions release stream slots before POST and retain them until readback settles', async () => {
+  const events: string[] = [], held = new Set<string>(), post = deferred<Reply>(), read = deferred<Reply>();
+  const page = await browser({ onTransport: event => {
+    events.push(event);
+    const [action, name] = event.split(':');
+    if (action === 'hold') held.add(name!); else held.delete(name!);
+  }, reply: async call => {
+    assert.deepEqual([...held].sort(), ['status', 'view'], 'control and reconciliation need both persistent stream slots free');
+    events.push(call.method);
+    return call.method === 'POST' ? post.promise : read.promise;
+  } });
+  await page.ready('stopped'); await page.click('portfolio-run');
+  assert.deepEqual(events, ['hold:view', 'hold:status', 'POST']);
+  await page.click('portfolio-run', true); assert.equal(page.posts().length, 1);
+  post.resolve(ok(result())); await flush();
+  assert.deepEqual(events, ['hold:view', 'hold:status', 'POST', 'GET']);
+  assert.equal(page.byId('portfolio-run').disabled, true, 'readback finishes before streams resume or another action is possible');
+  read.resolve(ok(runner('running'))); await flush();
+  assert.deepEqual(events, ['hold:view', 'hold:status', 'POST', 'GET', 'release:status', 'release:view']);
+  assert.equal(held.size, 0); assert.equal(page.byId('portfolio-run').textContent, 'Stop');
+  assert.equal(page.posts().length, 1); assert.equal(page.uuidCalls, 1);
+});
+
+test('stream holds survive a command timeout until failed readback, then release with an honest unknown outcome', async () => {
+  const events: string[] = [], read = deferred<Reply>();
+  const page = await browser({ onTransport: event => events.push(event), reply: async call => {
+    events.push(call.method);
+    return call.method === 'POST' ? new Promise<Reply>(() => {}) : read.promise;
+  } });
+  await page.ready('stopped'); await page.click('portfolio-run'); await page.timersRun();
+  assert.deepEqual(events, ['hold:view', 'hold:status', 'POST', 'GET']);
+  read.reject(new Error('Status transport unavailable')); await flush();
+  assert.deepEqual(events, ['hold:view', 'hold:status', 'POST', 'GET', 'release:status', 'release:view']);
+  assert.equal(page.byId('portfolio-run').textContent, 'Unavailable');
+  assert.match(page.byId('control-message').textContent, /outcome is unknown.*may still finish/);
+  assert.match(page.byId('control-message').textContent, /Check the runner state before trying again/);
+  assert.doesNotMatch(page.byId('control-message').textContent, /button shows current|cancelled/i);
+  await page.timersRun();
+  assert.equal(page.posts().length, 1); assert.equal(page.uuidCalls, 1);
+});
+
+test('stream holds release after malformed control replies and page suspension without dispatching again', async () => {
+  for (const suspend of [false, true]) {
+    const events: string[] = [], post = deferred<Reply>();
+    const page = await browser({ onTransport: event => events.push(event), reply: async call => {
+      events.push(call.method);
+      return call.method === 'POST' ? post.promise : ok(runner('stopped'));
+    } });
+    await page.ready('running'); await page.click('portfolio-run');
+    if (suspend) await page.lifecycle('pagehide');
+    post.resolve(ok({ ...result(), requestId: 'not-this-request' })); await flush();
+    assert.deepEqual(events, ['hold:view', 'hold:status', 'POST', ...suspend ? [] : ['GET'], 'release:status', 'release:view']);
+    assert.equal(page.posts().length, 1); assert.equal(page.uuidCalls, 1);
+    if (suspend) {
+      assert.equal(page.byId('portfolio-run').disabled, true);
+      await page.lifecycle('pageshow'); await page.click('portfolio-run', true);
+      assert.equal(page.posts().length, 1, 'transport release does not restore stale action authority');
+    }
+  }
+});
+
+
+test('the later stopping transition read frees stream slots again after the control has reconciled', async () => {
+  const held = new Set<string>(), events: string[] = [];
+  let reads = 0;
+  const page = await browser({ onTransport: event => {
+    events.push(event);
+    const [action, name] = event.split(':');
+    if (action === 'hold') held.add(name!); else held.delete(name!);
+  }, reply: async call => {
+    assert.deepEqual([...held].sort(), ['status', 'view'], 'each control and transition read must have a browser connection slot');
+    events.push(call.method);
+    if (call.method === 'POST') return ok(result('stopping', { outcome: 'stop-requested' }));
+    return ok(runner(++reads === 1 ? 'stopping' : 'stopped'));
+  } });
+  await page.ready('running'); await page.click('portfolio-run');
+  assert.equal(page.byId('portfolio-run').textContent, 'Stopping…');
+  assert.equal(held.size, 0, 'live streams have resumed after the initial readback');
+  assert.equal(reads, 1);
+  await page.timersRun(); // The PID exits without a new stream event.
+  assert.equal(page.byId('portfolio-run').textContent, 'Start');
+  assert.equal(held.size, 0); assert.equal(reads, 2);
+  assert.deepEqual(events, ['hold:view', 'hold:status', 'POST', 'GET', 'release:status', 'release:view',
+    'hold:view', 'hold:status', 'GET', 'release:status', 'release:view']);
+  await page.timersRun();
+  assert.equal(reads, 2, 'a stable state resumes streams without healthy polling');
+  assert.equal(page.posts().length, 1); assert.equal(page.uuidCalls, 1);
 });

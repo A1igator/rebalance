@@ -28,6 +28,8 @@ mock.module(path('signers'), { namedExports: { loadSigner: async selected => {
   assert.equal(selected.wallet, account.address);
   return { address: account.address, signTransaction: async tx => {
     signatures++;
+    const savedInputs = await storage.readJson(configModule.DATA + '/batch-inputs.json');
+    assert.deepEqual(savedInputs.inputs, { USDG: '80000000' }, 'durable aggregate inputs exist before any signature');
     assert.equal((await request.readLedgerRequest()).state, 'consumed');
     assert.equal(await storage.readJson(configModule.DATA + '/config.lock'), null);
     if (tx.data === '0x02' && scenario === 'stop-during-swap-sign') {
@@ -43,7 +45,7 @@ configModule = await import(path('config'));
 storage = await import(path('storage'));
 runtime = await import(path('runtime'));
 const request = await import(path('ledger-request'));
-const { evaluatePortfolio } = await import(path('core'));
+const { evaluatePortfolio, RebalanceInputLimitError } = await import(path('core'));
 const { events } = await import(path('events'));
 const targets = { USDG: 2000, AAPL: 2000, NVDA: 2000, MSFT: 2000, AMD: 2000 };
 config = configModule.validateConfig({ version: 1, wallet: account.address, mode: 'ledger', chainId: 4663,
@@ -89,8 +91,13 @@ const chain = {
   quote: async () => { throw new Error('Batch runtime must not quote one legacy trade'); },
   transaction: async () => { throw new Error('Batch runtime must not prepare one legacy trade'); },
   quoteBatch: async (plan, context) => {
-    assert.deepEqual(context, { driftThresholdBps: 500 });
+    assert.equal(context.driftThresholdBps, 500);
+    assert.deepEqual(context.inputLimits, approved ? { USDG: 80000000n } : undefined);
     quotes++;
+    if (approved && scenario.startsWith('limits-exhausted')) {
+      if (scenario === 'limits-exhausted-config-edit') await storage.atomicWriteJson(configModule.CONFIG_PATH, { ...config, slippageBps: 75 });
+      throw new RebalanceInputLimitError();
+    }
     assert.equal(plan.trades.length, 4, 'the initial all-cash plan includes all four stock buys');
     assert.deepEqual(new Set(plan.trades.map(trade => trade.buyAssetId)), new Set(['AAPL', 'NVDA', 'MSFT', 'AMD']));
     for (const trade of plan.trades) { assert.equal(trade.sellAssetId, 'USDG'); assert.equal(trade.amountIn, 20000000n); }
@@ -98,7 +105,8 @@ const chain = {
     return { plan, quotes: plan.trades.map(() => ({ amountOut: 20000000n, minimumOut: 19900000n, fee: 500, blockNumber: 102n })), blockNumber: 102n };
   },
   transactionBatch: async (plan, batch, context) => {
-    assert.deepEqual(context, { driftThresholdBps: 500 });
+    assert.equal(context.driftThresholdBps, 500);
+    assert.deepEqual(context.inputLimits, approved ? { USDG: 80000000n } : undefined);
     preparations++;
     assert.equal(batch.quotes.length, plan.trades.length); assert.equal(batch.blockNumber, 102n);
     // Chain builder/ABI atomicity is covered independently. This fixture reports
@@ -122,7 +130,19 @@ try {
   assert.equal((await storage.readJson(configModule.PENDING_PATH)).hash, approvalHash);
   mined.add(approvalHash);
   const second = await traverse();
-  if (scenario === 'stop-during-swap-sign' || scenario === 'config-during-swap-sign') {
+  if (scenario.startsWith('limits-exhausted')) {
+    assert.equal(second.error, null);
+    assert.equal(second.operation.status, scenario === 'limits-exhausted-config-edit' ? 'configuration-changed' : 'observation-changed');
+    assert.equal(signatures, 1); assert.equal(sends, 1); assert.equal(ledger.active, false);
+    assert.equal(await storage.readJson(configModule.PENDING_PATH), null);
+    const closed = await storage.readJson(runtime.CYCLE_PATH);
+    assert.equal(closed.nextEligibleAt, initialCycle.nextEligibleAt);
+    assert.equal(closed.swapConfirmed, false);
+    if (scenario === 'limits-exhausted-config-edit') {
+      assert.equal(closed.activeUntil, initialCycle.activeUntil, 'an old observation cannot close the newly edited configuration cycle');
+    } else assert.ok(closed.activeUntil < initialCycle.activeUntil);
+    assert.equal((await events()).filter(event => event.type === 'rebalance-completed').length, 0);
+  } else if (scenario === 'stop-during-swap-sign' || scenario === 'config-during-swap-sign') {
     assert.equal(signatures, 2, 'control change must occur after the batch reaches signing');
     assert.equal(sends, 1, 'a late control change discards the signed but unbroadcast batch');
     assert.equal(await storage.readJson(configModule.PENDING_PATH), null);
@@ -178,7 +198,7 @@ try {
 } finally { await ledger.finish('fixture-ended'); await release(); }
 `;
 
-for (const scenario of ['complete-batch', 'reverted-batch', 'stop-during-swap-sign', 'config-during-swap-sign']) {
+for (const scenario of ['complete-batch', 'reverted-batch', 'stop-during-swap-sign', 'config-during-swap-sign', 'limits-exhausted', 'limits-exhausted-config-edit']) {
   test(`batch runtime: ${scenario}`, async () => {
     const directory = await mkdtemp(join(tmpdir(), 'rebalance-batch-runtime-'));
     try {
@@ -188,7 +208,7 @@ for (const scenario of ['complete-batch', 'reverted-batch', 'stop-during-swap-si
           env: { ...process.env, REBALANCE_DATA_DIR: directory, REBALANCE_ROOT_DIR: directory, REBALANCE_PROFILE_WALLET: '' },
           timeout: 20_000,
         }).catch(error => { throw new Error(String(error.stderr || error.message).slice(-5000)); });
-      assert.deepEqual(JSON.parse(result.stdout), { scenario, signatures: 2, sends: scenario.includes('during-swap-sign') ? 1 : 2 });
+      assert.deepEqual(JSON.parse(result.stdout), { scenario, signatures: scenario.startsWith('limits-exhausted') ? 1 : 2, sends: scenario.includes('during-swap-sign') || scenario.startsWith('limits-exhausted') ? 1 : 2 });
     } finally { await rm(directory, { recursive: true, force: true }); }
   });
 }
@@ -233,7 +253,9 @@ const initialBalances = structuredClone(balances);
 const allowances = Object.fromEntries(['AAPL', 'NVDA', 'USDG'].map(id =>
   [id, scenario === 'mixed-preapproved' ? maxUint256 : 0n]));
 const sent = [], payloads = new Map();
-let snapshots = 0, quotes = 0, preparations = 0, rpcReads = 0, head = 100n, saleRateBps = 10000n;
+let snapshots = 0, quotes = 0, preparations = 0, rpcReads = 0, head = 100n, saleRateBps = 10000n, stockPriceBps = 10000n;
+const movingInputs = ['mixed-rising-inputs', 'mixed-shrink-then-rise'].includes(scenario);
+let initialInputLimits, freshAdapters = 0;
 let initialBuyInput, finalBuyInput, finalReserve, fixtureFailure;
 const blockHash = number => '0x' + number.toString(16).padStart(64, '0');
 const FACTORY = '0x1f7d7550B1b028f7571E69A784071F0205FD2EfA';
@@ -293,9 +315,11 @@ globalThis.fetch = async (input, options) => {
           assert.equal(fee, 500); assert.equal(sqrtPriceLimitX96, 0n);
           const selling = idAt(tokenIn) !== 'USDG';
           assert.equal(idAt(selling ? tokenOut : tokenIn), 'USDG');
-          // The 0.01 stock sample still values holdings at $1. Larger sale quotes
-          // can deteriorate between quote and final transaction preparation.
-          const amountOut = selling ? amountIn / scale * (amountIn > stockUnit / 100n ? saleRateBps : 10000n) / 10000n : amountIn * scale;
+          // Price changes affect both valuation samples and actual swap quotes.
+          // Separate sale deterioration still applies only to larger trade quotes.
+          const amountOut = selling ? amountIn / scale * stockPriceBps / 10000n
+            * (amountIn > stockUnit / 100n ? saleRateBps : 10000n) / 10000n
+            : amountIn * scale * 10000n / stockPriceBps;
           result = encodeAbiParameters([{ type: 'uint256' }, { type: 'uint160' }, { type: 'uint32' }, { type: 'uint256' }], [amountOut, 1n, 0, 90000n]);
           break;
         }
@@ -307,7 +331,7 @@ globalThis.fetch = async (input, options) => {
   return new Response(JSON.stringify({ jsonrpc: '2.0', id: call.id, result }), { headers: { 'Content-Type': 'application/json' } });
 };
 const chain = createChain(config);
-const original = { snapshot: chain.snapshot, quoteBatch: chain.quoteBatch, transactionBatch: chain.transactionBatch };
+let original = { snapshot: chain.snapshot, quoteBatch: chain.quoteBatch, transactionBatch: chain.transactionBatch };
 Object.assign(chain.publicClient, {
   getChainId: async () => 4663, getTransactionCount: async () => sent.length,
   estimateGas: async () => 21000n, getGasPrice: async () => 1n, getBalance: async () => stockUnit,
@@ -335,28 +359,42 @@ const assertCombined = batch => {
     [['AAPL', 'USDG'], ['NVDA', 'USDG'], ['USDG', 'AMD'], ['USDG', 'MSFT']]);
   assert.equal(batch.quotes.length, 4); assert.equal(batch.blockNumber, head);
   const minimumCash = balances.USDG + batch.quotes[0].minimumOut + batch.quotes[1].minimumOut;
-  const stockCashValue = (balances.AAPL + balances.NVDA - batch.plan.trades[0].amountIn - batch.plan.trades[1].amountIn) / scale;
-  const reserve = ((stockCashValue + minimumCash) * 2000n + 9999n) / 10000n;
+  const stockValueE8 = batch.plan.trades.slice(0, 2).reduce((sum, trade) => sum
+    + (balances[trade.sellAssetId] - trade.amountIn) * 100000000n * stockPriceBps / (stockUnit * 10000n), 0n);
+  const reserveDenominator = 10000n * 100000000n;
+  const reserveNumerator = (stockValueE8 + minimumCash * 100n) * 2000n * cashUnit;
+  const reserve = (reserveNumerator + reserveDenominator - 1n) / reserveDenominator;
   const purchases = batch.plan.trades.slice(2).reduce((sum, trade) => sum + trade.amountIn, 0n);
-  assert.equal(purchases, minimumCash - reserve, 'purchase spending is bounded by encoded sale minima and a rounded reserve');
+  assert.ok(purchases <= minimumCash - reserve, 'purchase spending is bounded by fresh encoded minima and rounded reserve');
+  if (!movingInputs) assert.equal(purchases, minimumCash - reserve);
+  if (movingInputs && initialInputLimits) assert.ok(purchases <= initialInputLimits.USDG);
   assert.ok(purchases > balances.USDG, 'these buys require balances credited by earlier calls in the same transaction');
   initialBuyInput ??= purchases;
   return { purchases, reserve };
+};
+const assertContext = async context => {
+  assert.equal(context.driftThresholdBps, 500);
+  const saved = await storage.readJson(configModule.DATA + '/batch-inputs.json');
+  assert.deepEqual(context.inputLimits, saved ? Object.fromEntries(Object.entries(saved.inputs).map(([id, value]) => [id, BigInt(value)])) : undefined);
 };
 chain.snapshot = async () => { snapshots++; return original.snapshot(); };
 chain.quote = async () => { throw new Error('Atomic runtime must not quote a legacy leg'); };
 chain.transaction = async () => { throw new Error('Atomic runtime must not dispatch a legacy leg'); };
 chain.quoteBatch = async (plan, context) => {
-  quotes++; assert.deepEqual(context, { driftThresholdBps: 500 });
+  quotes++; await assertContext(context);
   if (scenario === 'mixed-observation-changed-quote') moveOnTarget();
   const batch = await original.quoteBatch(plan, context); assertCombined(batch); return batch;
 };
 chain.transactionBatch = async (plan, previous, context) => {
-  preparations++; assert.deepEqual(context, { driftThresholdBps: 500 });
+  preparations++; await assertContext(context);
   if (scenario === 'mixed-observation-changed-preparation') moveOnTarget();
   if (scenario === 'mixed-lower-quotes' && ['AAPL', 'NVDA', 'USDG'].every(id => allowances[id] > 0n)) saleRateBps = 9975n;
   const tx = await original.transactionBatch(plan, previous, context);
   assert.equal(tx.plan.trades.length, 4); assert.equal(tx.swapCount, 4);
+  const inputs = {};
+  for (const trade of tx.plan.trades) inputs[trade.sellAssetId] = (inputs[trade.sellAssetId] ?? 0n) + trade.amountIn;
+  if (context.inputLimits) for (const [id, amount] of Object.entries(inputs)) assert.ok(amount <= (context.inputLimits[id] ?? 0n));
+  initialInputLimits ??= inputs;
   const decoded = decodeFunctionData({ abi: TRANSACTION_ABI, data: tx.data });
   if (tx.kind === 'approval') {
     assert.equal(decoded.functionName, 'approve'); assert.equal(decoded.args[0], ROUTER);
@@ -365,6 +403,7 @@ chain.transactionBatch = async (plan, previous, context) => {
     assert.equal(decoded.args[1], exactInput, 'each approval is exactly the aggregate input for its token');
     if (inputId === 'USDG') assert.ok(exactInput > balances.USDG, 'the prior approval can cover USDG received by the later multicall');
     assert.ok(allowances[inputId] < exactInput);
+    assert.ok(!sent.some(item => item.kind === 'approval' && item.approvalToken === inputId), 'fresh price movement must not cause a duplicate exact approval');
     payloads.set(tx.data, { kind: tx.kind, approvalToken: inputId, amount: exactInput, plan: tx.plan });
   } else {
     assert.equal(decoded.functionName, 'multicall'); assert.equal(tx.to, ROUTER);
@@ -399,8 +438,8 @@ const mine = item => {
     assert.ok(remaining[from] >= call.amountIn, 'USDG allowance covers both purchases together');
     settled[from] -= call.amountIn; remaining[from] -= call.amountIn;
     const actual = from !== 'USDG'
-      ? scenario === 'mixed-minimum-proceeds' ? call.amountOutMinimum : call.amountIn / scale * saleRateBps / 10000n
-      : call.amountIn * scale;
+      ? scenario === 'mixed-minimum-proceeds' ? call.amountOutMinimum : call.amountIn / scale * stockPriceBps / 10000n * saleRateBps / 10000n
+      : call.amountIn * scale * 10000n / stockPriceBps;
     assert.ok(actual >= call.amountOutMinimum);
     settled[to] += actual;
     if (scenario === 'mixed-late-buy-revert' && index === item.calls.length - 1) {
@@ -411,7 +450,15 @@ const mine = item => {
   Object.assign(balances, settled); Object.assign(allowances, remaining);
   assert.ok(balances.USDG >= finalReserve);
 };
-const traverse = () => runtime.tick(true, () => chain, ledger, undefined, { connected: true, revision: 1 });
+const traverse = () => {
+  if (movingInputs) {
+    // Recreate the preparation adapter on every traversal. The only retained
+    // input bounds must come from the public durable runtime record.
+    const fresh = createChain(config); freshAdapters++;
+    original = { snapshot: fresh.snapshot, quoteBatch: fresh.quoteBatch, transactionBatch: fresh.transactionBatch };
+  }
+  return runtime.tick(true, () => chain, ledger, undefined, { connected: true, revision: 1 });
+};
 const expected = scenario === 'mixed-preapproved' ? ['swap:mixed']
   : ['approval:AAPL', 'approval:NVDA', 'approval:USDG', 'swap:mixed'];
 const describe = item => item.kind + ':' + (item.kind === 'approval' ? item.approvalToken : 'mixed');
@@ -452,7 +499,11 @@ try {
         'even mined balance changes cannot bypass the single confirmation barrier');
       assert.deepEqual(await storage.readJson(configModule.PENDING_PATH), pending);
       assert.equal((await events()).filter(event => event.type === 'rebalance-completed').length, 0);
-      head = item.blockNumber + 1n; state = await traverse();
+      head = item.blockNumber + 1n;
+      if (movingInputs && item.kind === 'approval') {
+        stockPriceBps = scenario === 'mixed-shrink-then-rise' && index === 0 ? 9900n : 10010n + BigInt(index) * 10n;
+      }
+      state = await traverse();
       if (item.status === 'reverted') {
         assert.equal(state.operation.status, 'reverted'); assert.equal(state.proposal, undefined);
         assert.deepEqual(balances, initialBalances); assert.deepEqual(allowances, beforeSwapAllowances);
@@ -466,6 +517,16 @@ try {
     assert.deepEqual(sent.map(describe), expected);
     assert.equal(sent.filter(item => item.kind === 'swap').length, 1);
     assert.equal(new Set(sent.map(item => item.hash)).size, expected.length);
+    if (movingInputs) {
+      assert.ok(freshAdapters > expected.length, 'new preparation adapters cannot lose durable input caps');
+      const savedInputs = await storage.readJson(configModule.DATA + '/batch-inputs.json');
+      assert.ok(BigInt(savedInputs.inputs.USDG) <= initialInputLimits.USDG);
+      if (scenario === 'mixed-shrink-then-rise') {
+        const nvdaApproval = sent.find(item => item.approvalToken === 'NVDA');
+        assert.ok(nvdaApproval.amount < initialInputLimits.NVDA, 'second approval shrank before the following price increase');
+        assert.ok(BigInt(savedInputs.inputs.NVDA) <= nvdaApproval.amount, 'later preparation retains the smaller signed allowance');
+      }
+    }
     if (scenario !== 'mixed-late-buy-revert') {
       assert.equal(state.error, null); assert.equal(state.operation.status, 'confirmed'); assert.equal(state.proposal, null);
       assert.equal(await storage.readJson(configModule.PENDING_PATH), null);
@@ -485,6 +546,7 @@ try {
 `;
 
 for (const scenario of ['mixed-approvals', 'mixed-preapproved', 'mixed-minimum-proceeds', 'mixed-lower-quotes',
+  'mixed-rising-inputs', 'mixed-shrink-then-rise',
   'mixed-late-buy-revert', 'mixed-observation-changed-quote', 'mixed-observation-changed-preparation']) {
   test(`atomic batch runtime: ${scenario}`, async () => {
     const directory = await mkdtemp(join(tmpdir(), 'rebalance-mixed-batch-runtime-'));

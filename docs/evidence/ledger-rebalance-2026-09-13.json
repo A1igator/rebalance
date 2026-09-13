@@ -1,0 +1,145 @@
+{
+  "chainId": 4663,
+  "wallet": "0xced38202ef03b2cb7dc69cd004f5cce70dc21808",
+  "fromBlock": 61650000,
+  "toBlock": 61653000,
+  "transactions": [
+    {
+      "hash": "0x094b82178ed1e9c53ff60a9f88d3e7892ea24ae8a9d77a8348170190fc5291eb",
+      "nonce": 14,
+      "block": 61651836,
+      "time": "2026-09-13T03:53:16.000Z",
+      "status": "0x1",
+      "gasUsed": "63637",
+      "method": "approve",
+      "token": "NVDA",
+      "args": [
+        "0xCaf681a66D020601342297493863E78C959E5cb2",
+        "438357850888051"
+      ]
+    },
+    {
+      "hash": "0xdc68ff33874b412c8b24d4b283b766986c9c620b326eebd70675578dcbe9b02e",
+      "nonce": 15,
+      "block": 61651970,
+      "time": "2026-09-13T03:53:29.000Z",
+      "status": "0x1",
+      "gasUsed": "63625",
+      "method": "approve",
+      "token": "MSFT",
+      "args": [
+        "0xCaf681a66D020601342297493863E78C959E5cb2",
+        "190930535556404"
+      ]
+    },
+    {
+      "hash": "0xf91e8049c296d39c13365e2233c7e47f5e3f9e592d5037aa48a6b319a0f6b4a1",
+      "nonce": 16,
+      "block": 61652105,
+      "time": "2026-09-13T03:53:43.000Z",
+      "status": "0x1",
+      "gasUsed": "63625",
+      "method": "approve",
+      "token": "AMD",
+      "args": [
+        "0xCaf681a66D020601342297493863E78C959E5cb2",
+        "172013304944862"
+      ]
+    },
+    {
+      "hash": "0xc2e61fc1eb196c982a32f9490b2841e4e1e700b366eefd778a506cd7ec999441",
+      "nonce": 17,
+      "block": 61652242,
+      "time": "2026-09-13T03:53:57.000Z",
+      "status": "0x1",
+      "gasUsed": "46525",
+      "method": "approve",
+      "token": "AMD",
+      "args": [
+        "0xCaf681a66D020601342297493863E78C959E5cb2",
+        "172013764574661"
+      ]
+    },
+    {
+      "hash": "0xa167f5c7a2bd0147247abbb442e311af5dc9dc2527532ff5ac0e6ed83d9bb417",
+      "nonce": 18,
+      "block": 61652387,
+      "time": "2026-09-13T03:54:12.000Z",
+      "status": "0x1",
+      "gasUsed": "364734",
+      "method": "multicall",
+      "swaps": [
+        {
+          "method": "exactInputSingle",
+          "sell": "NVDA",
+          "buy": "USDG",
+          "amountIn": "438302265092632",
+          "minimumOut": "95122",
+          "recipient": "0xCeD38202ef03b2cB7dc69cD004F5cCe70dC21808"
+        },
+        {
+          "method": "exactInputSingle",
+          "sell": "MSFT",
+          "buy": "USDG",
+          "amountIn": "190926150842158",
+          "minimumOut": "93788",
+          "recipient": "0xCeD38202ef03b2cB7dc69cD004F5cCe70dC21808"
+        },
+        {
+          "method": "exactInputSingle",
+          "sell": "AMD",
+          "buy": "USDG",
+          "amountIn": "172013764574661",
+          "minimumOut": "87711",
+          "recipient": "0xCeD38202ef03b2cB7dc69cD004F5cCe70dC21808"
+        }
+      ]
+    },
+    {
+      "hash": "0x38cd71faf8c23b792a9e55d16eadeb279687eaf5f30ee44d818bfb5796277223",
+      "nonce": 19,
+      "block": 61652539,
+      "time": "2026-09-13T03:54:25.000Z",
+      "status": "0x1",
+      "gasUsed": "57976",
+      "method": "approve",
+      "token": "USDG",
+      "args": [
+        "0xCaf681a66D020601342297493863E78C959E5cb2",
+        "308103"
+      ]
+    },
+    {
+      "hash": "0x23f08cc7dd4b01b3921c0a29df2655532bcfa354bae253ffbb69d029b1f46b29",
+      "nonce": 20,
+      "block": 61652720,
+      "time": "2026-09-13T03:54:44.000Z",
+      "status": "0x1",
+      "gasUsed": "149390",
+      "method": "multicall",
+      "swaps": [
+        {
+          "method": "exactInputSingle",
+          "sell": "USDG",
+          "buy": "AAPL",
+          "amountIn": "308103",
+          "minimumOut": "918591042641453",
+          "recipient": "0xCeD38202ef03b2cB7dc69cD004F5cCe70dC21808"
+        }
+      ]
+    }
+  ],
+  "description": "Public RPC audit of the owner-confirmed phase-batched Ledger rebalance. No signing or transaction was performed for this audit.",
+  "cycleStartedAt": "2026-09-13T03:52:47.395Z",
+  "cycleFinishedAt": "2026-09-13T03:54:47.721Z",
+  "findings": {
+    "confirmedTransactions": 7,
+    "approvals": 5,
+    "swapTransactions": 2,
+    "innerSwaps": 4,
+    "duplicateApprovalToken": "AMD",
+    "approvalIncreaseAtomic": "459629799",
+    "physicalSignatureCount": "Not established by chain receipts; user reported eight.",
+    "runningImplementation": "Phase batching: process91362 started after d394766 but before combined batching commit3b78ace."
+  }
+}

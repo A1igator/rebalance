@@ -190,3 +190,8 @@ Isolated mixed-portfolio regressions cover distinct-token approvals, one sales b
 ## Atomic mixed rebalances — September 12
 
 [Prompt 083](docs/prompts/083-atomic-sales-and-purchases.md), committed as `3adc28e` before implementation, extends phase batching to a single ordered sales-and-purchases multicall. The fresh internal preparation derives purchases from actual held USDG and enforced minimum sale outputs while preserving a rounded cash reserve. Each stock/pool appears once, outputs stay with the wallet, approvals remain exact and separate, and any failed leg rolls back the whole transaction. The production runtime uses this context-aware path; legacy explicit phase calls remain compatible. Prepared status and fee counts include all encoded legs. Fresh receipts/holdings decide completion, and Ledger device confirmation, pending/cadence, Stop and live settings boundaries remain. No live run is initiated by implementation.
+
+
+## Stable Ledger approvals and responsive controls — September13
+
+Prompt091 follows the public audit of seven phase-batched transactions, including one repeated AMD approval from a tiny price increase. Retain and monotonically tighten public prepared input amounts across approvals/restarts, with fresh clipped-sale quotes, bounded USDG allocation and receipt/config/cycle scope. Combined swaps remain the production path. UI Start/Stop transitions use bounded read-only reconciliation; a missing control response must remain visibly uncertain and never automatically retry its mutation. No live Start or signing is performed by this repair.

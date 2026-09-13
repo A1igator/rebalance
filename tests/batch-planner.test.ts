@@ -159,3 +159,43 @@ test('atomic target reserve rounds upward instead of spending a fractional base 
   const budget = plan.trades.filter(t => t.sellAssetId === 'USDG').reduce((sum, t) => sum + t.amountIn, 0n);
   assert.equal(59_800_002n - budget, 19_960_001n);
 });
+
+
+test('bounded atomic inputs do not increase after rising valuations or better sale proceeds', () => {
+  const input = portfolio([20n, 40n, 40n, 0n, 0n]);
+  const limits = { AAPL: 20n * 10n ** 18n, NVDA: 20n * 10n ** 18n, USDG: 39_840_000n };
+  const higher = structuredClone(input);
+  higher.positions[1]!.priceUsdE8 += USD / 10n;
+  const unconstrained = planRebalance(higher, 'USDG', 500)!;
+  assert(unconstrained.trades.find(trade => trade.sellAssetId === 'AAPL')!.amountIn > limits.AAPL);
+  const sales = planRebalance(higher, 'USDG', 500, limits)!;
+  assert.equal(sales.trades.find(trade => trade.sellAssetId === 'AAPL')!.amountIn, limits.AAPL);
+  const result = planAtomicRebalance(higher, 'USDG', 500, [30_000_000n, 30_000_000n], limits)!;
+  assert.equal(result.trades.filter(trade => trade.sellAssetId === 'USDG').reduce((sum, trade) => sum + trade.amountIn, 0n), limits.USDG);
+  for (const trade of result.trades) assert(trade.amountIn <= limits[trade.sellAssetId as keyof typeof limits]);
+  assert.deepEqual(input, portfolio([20n, 40n, 40n, 0n, 0n]), 'limits never mutate observed holdings');
+});
+
+test('clipped sales and lower minimum outputs determine the actual bounded purchase budget', () => {
+  const input = portfolio([20n, 40n, 40n, 0n, 0n]);
+  const limits = { AAPL: 10n * 10n ** 18n, USDG: 39_840_000n };
+  const sales = planRebalance(input, 'USDG', 500, limits)!;
+  assert.deepEqual(sales.trades.map(trade => [trade.sellAssetId, trade.amountIn]), [['AAPL', limits.AAPL]]);
+  const result = planAtomicRebalance(input, 'USDG', 500, [9_950_000n], limits)!;
+  const spend = result.trades.filter(trade => trade.sellAssetId === 'USDG').reduce((sum, trade) => sum + trade.amountIn, 0n);
+  assert.equal(spend, 9_960_000n, 'reserve is computed after only the capped sale, not the original full sales');
+  assert.equal(20_000_000n + 9_950_000n - spend, 19_990_000n);
+  assert(!result.trades.some(trade => trade.sellAssetId === 'NVDA'));
+  assert.equal(planRebalance(input, 'USDG', 500, {}), null);
+});
+
+test('cash limits apportion atomic units once across every buy and omitted limits retain existing behavior', () => {
+  const input = portfolio([5n, 0n, 0n, 0n, 0n], [0, 2500, 2500, 2500, 2500]);
+  const result = planAtomicRebalance(input, 'USDG', 0, [], { USDG: 1_000_001n })!;
+  assert.deepEqual(result.trades.map(trade => trade.amountIn), [250_001n, 250_000n, 250_000n, 250_000n]);
+  assert.equal(result.trades.reduce((sum, trade) => sum + trade.amountIn, 0n), 1_000_001n);
+  assert.deepEqual(planAtomicRebalance(input, 'USDG', 0, [], undefined), planAtomicRebalance(input, 'USDG', 0));
+  for (const limits of [{ UNKNOWN: 1n }, { USDG: -1n }, { USDG: 1n << 256n }, { USDG: '1' }, null, []]) {
+    assert.throws(() => planRebalance(input, 'USDG', 0, limits as never), /Invalid rebalance input limits/);
+  }
+});

@@ -12,7 +12,7 @@ import {
 } from "viem";
 import { ASSETS, DISCOVERY_TTL_MS, QUOTER, ROBINHOOD, ROUTER, RPC_RETRY_COUNT, RPC_TIMEOUT_MS,
   createChain, type ChainConfig } from "../src/chain.js";
-import { planRebalance, RebalanceNotRequiredError, type RebalancePlan, type TradePlan } from "../src/core.js";
+import { planRebalance, RebalanceNotRequiredError, RebalanceInputLimitError, type RebalancePlan, type TradePlan } from "../src/core.js";
 
 // Local protocol fixtures only: no mainnet requests, wallets, or bytecode copies.
 // These addresses and the seven-field SwapRouter02 layout are documented in
@@ -668,4 +668,116 @@ test('future-funding is available only through fresh internal atomic preparation
   await assert.rejects(chain.transactionBatch(forged, { quotes: [{amountOut: maxUint256, minimumOut: maxUint256, fee:100, blockNumber:100n}], blockNumber:100n }), /separate rebalance batches/);
   await assert.rejects(chain.quoteBatch(buyBatch(), { driftThresholdBps: -1 }), /Invalid rebalance/);
   assert.equal(state.requests.length, 0);
+});
+
+
+function capturedInputs(plan: RebalancePlan): Record<string, bigint> {
+  const limits: Record<string, bigint> = {};
+  for (const trade of plan.trades) limits[trade.sellAssetId] = (limits[trade.sellAssetId] ?? 0n) + trade.amountIn;
+  return limits;
+}
+
+for (const movement of ['rising', 'shrink-then-rise'] as const) {
+  test(`bounded preparations need one exact approval per input despite ${movement} quotes`, async t => {
+    const { state, chain } = fixture(t);
+    investedBalances(state);
+    const plan = planRebalance((await chain.snapshot()).portfolio, 'USDG', 500)!;
+    const previous = await chain.quoteBatch(plan, atomicContext);
+    let limits: Record<string, bigint> | undefined;
+    const approvals: string[] = [];
+    let originalLimits: Record<string, bigint> | undefined;
+    for (let step = 0; step < 4; step++) {
+      const tx = await chain.transactionBatch(plan, previous, { ...atomicContext, inputLimits: limits });
+      const next = capturedInputs(tx.plan!);
+      if (limits) for (const [id, value] of Object.entries(next)) assert(value <= (limits[id] ?? 0n));
+      originalLimits ??= next;
+      // Runtime persists EVERY prepared amount before dispatch; emulate that
+      // monotonic capture here without files, signing or broadcast.
+      limits = next;
+      const decoded = decodeFunctionData({ abi: TRANSACTION_ABI, data: tx.data });
+      if (step < 3) {
+        assert.equal(tx.kind, 'approval');
+        if (decoded.functionName !== 'approve') assert.fail();
+        const asset = Object.values(ASSETS).find(asset => asset.address.toLowerCase() === tx.to.toLowerCase())!.id;
+        assert(!approvals.includes(asset), 'a changing quote must not repeat an already submitted input approval');
+        approvals.push(asset);
+        assert.deepEqual(decoded.args, [ROUTER, limits[asset]]);
+        state.allowances[asset] = decoded.args[1];
+        state.blockNumber++; state.timestamp += 12n; state.now += 12n;
+        for (const fee of Object.keys(state.forward)) {
+          state.forward[Number(fee)]! += movement === 'shrink-then-rise' && step === 0 ? -10_000n : 20_000n;
+        }
+      } else {
+        assert.equal(tx.kind, 'swap'); assert.equal(tx.approvalCount, 0);
+        if (decoded.functionName !== 'multicall') assert.fail();
+        assert.equal(decoded.args[1].length, 4);
+        assert.equal(tx.expiresAt, state.timestamp + 60n);
+        let guaranteed = state.balances.USDG!;
+        for (const data of decoded.args[1]) {
+          const inner = decodeFunctionData({ abi: TRANSACTION_ABI, data });
+          if (inner.functionName !== 'exactInputSingle') assert.fail();
+          const call = inner.args[0];
+          if (call.tokenOut === USDG) guaranteed += call.amountOutMinimum;
+          else { assert(call.amountIn <= guaranteed); guaranteed -= call.amountIn; }
+        }
+        assert(guaranteed >= 0n);
+        assert(limits.USDG! <= originalLimits.USDG!);
+        if (movement === 'shrink-then-rise') assert(limits.TSLA! < originalLimits.TSLA!, 'the smaller later approval stays a hard upper bound');
+      }
+    }
+    assert.deepEqual(approvals, ['NVDA', 'TSLA', 'USDG']);
+  });
+}
+
+test('bounded preparation still requires fresh balances, tradability, quotes and genuine no-trade evidence', async t => {
+  const { state, chain } = fixture(t);
+  investedBalances(state); state.allowance = maxUint256;
+  const plan = planRebalance((await chain.snapshot()).portfolio, 'USDG', 500)!;
+  const previous = await chain.quoteBatch(plan, atomicContext);
+  const limits = capturedInputs(previous.plan!);
+  await assert.rejects(chain.transactionBatch(plan, previous, { ...atomicContext, inputLimits: {} }), RebalanceInputLimitError);
+  assert.equal((await chain.transactionBatch(plan, previous, atomicContext)).kind, 'swap', 'the cap exhaustion was not an on-target observation');
+  state.paused.add('NVDA');
+  await assert.rejects(chain.transactionBatch(plan, previous, { ...atomicContext, inputLimits: limits }), /paused for a corporate action/);
+  state.paused.clear(); state.unquotable.add('TSLA');
+  await assert.rejects(chain.transactionBatch(plan, previous, { ...atomicContext, inputLimits: limits }), /No positive TSLA/);
+  state.unquotable.clear();
+  state.balances.TSLA = 100_000_000_000_000_000n;
+  state.balances.NVDA = 100_000_000_000_000_000n;
+  state.balances.AAPL = 100_050_025_012_506_254n;
+  state.balances.AMZN = 100_000_000_000_000_000n;
+  await assert.rejects(chain.transactionBatch(plan, previous, { ...atomicContext, inputLimits: limits }), RebalanceNotRequiredError);
+});
+
+test('input limits are validated and copied before asynchronous preparation', async t => {
+  const { state, chain } = fixture(t);
+  for (const limits of [{ UNKNOWN: 1n }, { USDG: -1n }, { USDG: 1n << 256n }, { USDG: '1' }, null, []]) {
+    await assert.rejects(chain.quoteBatch(buyBatch(), { ...atomicContext, inputLimits: limits as never }), /Invalid rebalance input limits/);
+  }
+  assert.deepEqual(state.requests, []);
+  investedBalances(state); state.allowance = maxUint256;
+  const plan = planRebalance((await chain.snapshot()).portfolio, 'USDG', 500)!;
+  const original = await chain.quoteBatch(plan, atomicContext);
+  const limits = capturedInputs(original.plan!);
+  const pending = chain.transactionBatch(plan, original, { ...atomicContext, inputLimits: limits });
+  for (const id of Object.keys(limits)) limits[id] = 0n;
+  const tx = await pending;
+  assert.equal(tx.kind, 'swap'); assert.equal(tx.plan!.trades.length, 4);
+});
+
+
+test('capped-out sales never misalign minima and held cash remains usable without those sales', async t => {
+  const { state, chain } = fixture(t);
+  investedBalances(state); state.allowance = maxUint256;
+  const plan = planRebalance((await chain.snapshot()).portfolio, 'USDG', 500)!;
+  const partial = await chain.quoteBatch(plan, { ...atomicContext, inputLimits: { TSLA: 50_000_000_000_000_000n, USDG: 10_000_000n } });
+  assert.equal(partial.plan!.trades[0]!.sellAssetId, 'TSLA');
+  assert.equal(partial.plan!.trades[0]!.amountIn, 50_000_000_000_000_000n);
+  assert(!partial.plan!.trades.some(trade => trade.sellAssetId === 'NVDA'));
+  assert.equal(partial.quotes.length, partial.plan!.trades.length);
+  state.balances.USDG = 45_000_000n;
+  const cashOnly = await chain.transactionBatch(plan, partial, { ...atomicContext, inputLimits: { USDG: 10_000_000n } });
+  assert.equal(cashOnly.kind, 'swap');
+  assert(cashOnly.plan!.trades.every(trade => trade.sellAssetId === 'USDG'));
+  assert.equal(cashOnly.plan!.trades.reduce((sum, trade) => sum + trade.amountIn, 0n), 10_000_000n);
 });

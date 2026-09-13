@@ -13,7 +13,7 @@ import {
   type Address,
   type Hex,
 } from "viem";
-import { evaluatePortfolio, planRebalance, planAtomicRebalance, RebalanceNotRequiredError, type Portfolio, type TradePlan, type RebalancePlan } from "./core.ts";
+import { evaluatePortfolio, planRebalance, planAtomicRebalance, copyRebalanceInputLimits, RebalanceNotRequiredError, RebalanceInputLimitError, type RebalanceInputLimits, type Portfolio, type TradePlan, type RebalancePlan } from "./core.ts";
 import { ASSETS } from "./assets.ts";
 export { ASSETS } from "./assets.ts";
 
@@ -53,7 +53,7 @@ export type RouteQuote = {
   blockNumber: bigint;
 };
 
-export type RebalanceContext = { driftThresholdBps: number };
+export type RebalanceContext = { driftThresholdBps: number; inputLimits?: RebalanceInputLimits };
 export type BatchQuote = { quotes: RouteQuote[]; blockNumber: bigint; plan?: RebalancePlan };
 
 export type ChainTransaction = {
@@ -421,20 +421,24 @@ export function createChain(config: ChainConfig) {
     if (!context || !Number.isInteger(context.driftThresholdBps) || context.driftThresholdBps < 0 || context.driftThresholdBps > 10_000) {
       throw new Error("Invalid rebalance preparation context");
     }
-    return { driftThresholdBps: context.driftThresholdBps };
+    const inputLimits = copyRebalanceInputLimits(context.inputLimits, assetList.map(asset => asset.id));
+    return { driftThresholdBps: context.driftThresholdBps, ...(inputLimits === undefined ? {} : { inputLimits }) };
   }
 
   /** All funding proof is created here from fresh, encoded sale minima. */
   async function atomicBatchAt(block: Header, context: RebalanceContext) {
     const observation = await snapshotAt(block);
-    const initial = planRebalance(observation.portfolio, "USDG", context.driftThresholdBps);
-    if (!initial) throw new RebalanceNotRequiredError();
+    const needed = planRebalance(observation.portfolio, "USDG", context.driftThresholdBps);
+    if (!needed) throw new RebalanceNotRequiredError();
+    const initial = context.inputLimits === undefined ? needed
+      : planRebalance(observation.portfolio, "USDG", context.driftThresholdBps, context.inputLimits);
+    if (!initial) throw new RebalanceInputLimitError();
     const initialTrades = validatedBatch(initial);
     await batchState(initialTrades, block);
     const initialQuotes = await Promise.all(initialTrades.map(trade => quoteAt(trade, block)));
     const selling = initialTrades[0]!.buyAssetId === "USDG";
     const minimums = selling ? initialQuotes.map(quote => quote.minimumOut) : [];
-    const plan = planAtomicRebalance(observation.portfolio, "USDG", context.driftThresholdBps, minimums)!;
+    const plan = planAtomicRebalance(observation.portfolio, "USDG", context.driftThresholdBps, minimums, context.inputLimits)!;
     const trades = validatedBatch(plan, true);
     const purchases = selling ? trades.slice(initialTrades.length) : [];
     const purchaseQuotes = await Promise.all(purchases.map(trade => quoteAt(trade, block)));

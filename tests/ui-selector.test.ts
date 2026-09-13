@@ -74,6 +74,7 @@ async function browser(options: { hidden?: boolean; hash?: string; pathname?: st
   }
   await flush();
   return {
+    hold: () => (window as typeof window & { rebalanceView: { suspendForControl: () => () => void } }).rebalanceView.suspendForControl(),
     byId, calls, navigations, timers, streams, setupStreams, get uuidCalls() { return uuidCalls; },
     cards: () => byId('portfolio-grid').children,
     async click(node: Node) { node.click(); await flush(); },
@@ -714,4 +715,58 @@ test('a chart returns to the selector when its chat is detached, including the f
     assert.equal(page.calls.filter(call=>call.url==='/api/disconnect').length,0,'observing deselection never writes it again');
     await page.hide();
   }
+});
+
+
+test('control holds release the companion connection and preserve the current selection baseline', async () => {
+  const page = await browser({ selector: false });
+  await page.send(snapshot());
+  const request = page.calls.find(call => call.url === '/api/view/events')!;
+  const release = page.hold(), releaseNested = page.hold();
+  assert.equal(request.signal!.aborted, true, 'the stream connection is released before control dispatch');
+  await flush(); await page.retry();
+  assert.equal(page.calls.length, 1);
+  assert.equal(page.timers.size, 0, 'intentional abort does not schedule a stream retry');
+  release(); release(); await flush();
+  assert.equal(page.calls.length, 1);
+  releaseNested(); releaseNested(); await flush();
+  assert.equal(page.calls.length, 2);
+  await page.send(snapshot(walletB));
+  assert.deepEqual(page.navigations, [`${portfolios[1]!.chartUrl}${fragment}`], 'changed selection while paused still navigates after reconnect');
+  await page.hide();
+});
+
+test('companion control holds survive visibility and back-forward-cache transitions', async () => {
+  const page = await browser({ selector: false });
+  await page.send(snapshot());
+  const release = page.hold();
+  await page.visible(false); await page.visible(true); await page.show();
+  assert.equal(page.calls.length, 1);
+  release(); await flush();
+  assert.equal(page.calls.length, 2);
+  const releaseNext = page.hold();
+  await page.hide(); releaseNext(); await page.visible(true);
+  assert.equal(page.calls.length, 2);
+  await page.show(); await page.show();
+  assert.equal(page.calls.length, 3);
+  await page.hide();
+});
+
+test('a late aborted companion response cannot replace selection or reconnect during a control hold', async () => {
+  let finish!: (value: Reply) => void;
+  let count = 0;
+  const page = await browser({ selector: false, reply: async call => call.url === '/api/view/events' && ++count === 1
+    ? new Promise(resolve => { finish = resolve; }) : undefined });
+  const release = page.hold();
+  const body = new ReadableStream<Uint8Array>({ start(controller) {
+    controller.enqueue(new TextEncoder().encode(`event: view\ndata: ${JSON.stringify(snapshot(null))}\n\n`));
+  } });
+  finish({ ...ok(null), body }); await flush(); await page.retry();
+  assert.equal(page.navigations.length, 0, 'a stale disconnect frame must not navigate away');
+  assert.equal(page.calls.length, 1);
+  release(); await flush();
+  assert.equal(page.calls.length, 2);
+  await page.send(snapshot());
+  assert.equal(page.navigations.length, 0);
+  await page.hide();
 });

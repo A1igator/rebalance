@@ -29,6 +29,15 @@ export class RebalanceNotRequiredError extends Error {
   constructor() { super("Fresh holdings no longer require this rebalance; observing again before new work."); }
 }
 
+/** Upper bounds retained for one prepared batch, never permission to spend more. */
+export type RebalanceInputLimits = Readonly<Record<string, bigint>>;
+
+/** Fresh drift remains, but this batch has no useful input left within its bounds. */
+export class RebalanceInputLimitError extends Error {
+  override name = "RebalanceInputLimitError";
+  constructor() { super("Fresh holdings require a different rebalance input; this bounded batch will wait for the next eligible cycle."); }
+}
+
 export type RebalancePlan = {
   trades: TradePlan[];
   reason: string;
@@ -246,6 +255,25 @@ export function planTrade(
 }
 
 
+/** Copy and validate before asynchronous callers may observe changes. Missing inputs stay zero. */
+export function copyRebalanceInputLimits(value: unknown, assetIds: readonly string[]): RebalanceInputLimits | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid rebalance input limits");
+  const entries = Object.entries(value);
+  for (const [id, maximum] of entries) {
+    if (!assetIds.includes(id) || typeof maximum !== "bigint" || maximum < 0n || maximum >= 1n << 256n) {
+      throw new Error("Invalid rebalance input limits");
+    }
+  }
+  return Object.fromEntries(entries);
+}
+
+function limitedInput(id: string, proposed: bigint, limits: RebalanceInputLimits | undefined): bigint {
+  if (limits === undefined) return proposed;
+  const maximum = Object.hasOwn(limits, id) ? limits[id]! : 0n;
+  return proposed < maximum ? proposed : maximum;
+}
+
 /**
  * Plan one atomic phase: sell material overweight assets first, then use a later
  * fresh observation to buy with cash held. Tolerated sale residuals do not delay
@@ -255,10 +283,12 @@ export function planRebalance(
   portfolio: Portfolio,
   quoteAssetId: string,
   driftThresholdBps: number,
+  inputLimits?: RebalanceInputLimits,
 ): RebalancePlan | null {
   checkBps(driftThresholdBps, "Drift threshold");
   checkId(quoteAssetId);
   const current = evaluatePortfolio(portfolio.positions);
+  const limits = copyRebalanceInputLimits(inputLimits, current.positions.map(position => position.id));
   if (current.positions.length === 0) return null;
   const quote = current.positions.find(({ id }) => id === quoteAssetId);
   if (!quote) throw new Error(`Unknown quote asset ID: ${quoteAssetId}`);
@@ -283,7 +313,7 @@ export function planRebalance(
   const sells: TradePlan[] = [];
   for (const { position, delta } of (prioritizeSales ? overweights : []).sort(largestFirst)) {
     const correction = (delta * 10n ** BigInt(position.decimals)) / (BPS * position.priceUsdE8);
-    const amountIn = correction < position.balance ? correction : position.balance;
+    const amountIn = limitedInput(position.id, correction < position.balance ? correction : position.balance, limits);
     if (amountIn === 0n || estimatedOutput(amountIn, position, quote) === 0n) continue;
     sells.push({ sellAssetId: position.id, buyAssetId: quoteAssetId, amountIn,
       reason: `Sell overweight ${position.symbol} into ${quote.symbol}` });
@@ -291,7 +321,7 @@ export function planRebalance(
   if (sells.length) return { trades: sells, reason: `Sell ${sells.length} overweight asset${sells.length === 1 ? "" : "s"} into ${quote.symbol}` };
   if (surplus <= 0n) return null;
   const available = (surplus * 10n ** BigInt(quote.decimals)) / (BPS * quote.priceUsdE8);
-  const budget = available < quote.balance ? available : quote.balance;
+  const budget = limitedInput(quoteAssetId, available < quote.balance ? available : quote.balance, limits);
   if (budget === 0n) return null;
   const deficits = deviations.filter(({ position, delta }) => position.id !== quoteAssetId && delta < 0n).sort(largestFirst);
   if (!deficits.length) return null;
@@ -315,9 +345,11 @@ export function planAtomicRebalance(
   quoteAssetId: string,
   driftThresholdBps: number,
   minimumSaleOutputs: bigint[] = [],
+  inputLimits?: RebalanceInputLimits,
 ): RebalancePlan | null {
   const current = evaluatePortfolio(portfolio.positions);
-  const initial = planRebalance(current, quoteAssetId, driftThresholdBps);
+  const limits = copyRebalanceInputLimits(inputLimits, current.positions.map(position => position.id));
+  const initial = planRebalance(current, quoteAssetId, driftThresholdBps, limits);
   const sales = initial?.trades.filter(trade => trade.buyAssetId === quoteAssetId) ?? [];
   if (!Array.isArray(minimumSaleOutputs) || minimumSaleOutputs.length !== sales.length) {
     throw new Error("Sale minimum outputs must match the current deterministic sales plan");
@@ -358,7 +390,7 @@ export function planAtomicRebalance(
   if (!deficits.length) return initial;
   const needed = deficits.reduce((sum, { delta }) => sum - delta, 0n) * 10n ** BigInt(quote.decimals) / denominator;
   const available = quote.balance - reserve;
-  const budget = available < needed ? available : needed;
+  const budget = limitedInput(quoteAssetId, available < needed ? available : needed, limits);
   if (budget <= 0n) return initial;
   const portions = apportion(budget, deficits.map(({ position, delta }) => ({ id: position.id, weight: -delta })));
   const purchases = deficits.flatMap(({ position }): TradePlan[] => {

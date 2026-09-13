@@ -11,11 +11,50 @@
   let wallet = null, mode = null, runner = null, attached = null, viewReady = false;
   let statusFresh = false, runnerFresh = false, busy = false, suspended = false;
   let readGeneration = 0, runnerRevision = 0;
+  let transitionTimer = null, transitionKey = null, transitionReads = 0, transitionReading = false;
   let retrySource = null, ledgerConnected = false, retryUnsupported = false, retryBusy = false;
   const attemptedRetries = new Set();
 
   function tell(text) { message.textContent = text; message.hidden = !text; }
+  function suspendControlStreams() {
+    const releases = [];
+    const release = () => { while (releases.length) releases.pop()(); };
+    try {
+      // Reserve HTTP/1 slots for an explicit control or a bounded transition read.
+      for (const transport of [window.rebalanceView, window.rebalanceStatus]) {
+        const resume = transport?.suspendForControl?.();
+        if (typeof resume === "function") releases.push(resume);
+      }
+      return release;
+    } catch (error) { release(); throw error; }
+  }
+  function reconcileTransition() {
+    const key = !suspended && !busy && statusFresh && runnerFresh && viewReady &&
+      Boolean(window.rebalanceView?.token) && same(wallet, attached) && same(wallet, runner?.wallet) &&
+      ["starting", "stopping"].includes(runner.state) ? `${wallet.toLowerCase()}:${runner.state}` : null;
+    if (key !== transitionKey) {
+      clearTimeout(transitionTimer); transitionTimer = null;
+      transitionKey = key; transitionReads = 0;
+    }
+    if (!key || transitionReading || transitionTimer !== null) return;
+    // Process exit need not replace a file after the last Stopping event. Read
+    // only during that transition, serially and with a finite retry budget.
+    if (transitionReads >= 30) {
+      runner = { wallet, state: "unavailable", message: "Runner state has not settled. Refresh the page to check it." };
+      return;
+    }
+    const expectedWallet = wallet;
+    transitionTimer = setTimeout(async () => {
+      transitionTimer = null;
+      if (key !== transitionKey) return;
+      transitionReads++; transitionReading = true;
+      let releaseStreams = () => {};
+      try { releaseStreams = suspendControlStreams(); await refreshRunner(expectedWallet); }
+      finally { releaseStreams(); transitionReading = false; render(); }
+    }, 1000);
+  }
   function render() {
+    reconcileTransition();
     const state = runnerFresh && same(wallet, runner?.wallet) ? runner.state : "unavailable";
     run.textContent = busy ? (run.dataset.action === "stop" ? "Stopping…" : "Starting…")
       : ({ running: "Stop", stopped: "Start", starting: "Starting…", stopping: "Stopping…", deferred: "Start", unavailable: "Unavailable" })[state];
@@ -88,18 +127,38 @@
       if (!suspended && generation === readGeneration && revision === runnerRevision && same(wallet, expectedWallet)) updateRunner(null, true);
     } finally { clearTimeout(timeout); }
   }
+  async function requestRunnerChange(body) {
+    const controller = new AbortController();
+    let timeout;
+    try {
+      return await Promise.race([
+        (async () => {
+          const response = await fetch("/api/runner", {
+            method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body), signal: controller.signal,
+          });
+          if (!response.ok) throw new Error("Control request unavailable");
+          return response.json();
+        })(),
+        new Promise((_, reject) => {
+          timeout = setTimeout(() => {
+            // This stops waiting on HTTP; it cannot cancel a dispatched command.
+            controller.abort(); reject(new Error("Control outcome is unknown"));
+          }, 15000);
+        }),
+      ]);
+    } finally { clearTimeout(timeout); controller.abort(); }
+  }
   run.addEventListener("click", async () => {
     if (run.disabled || busy || !same(wallet, runner?.wallet)) return;
     const action = runner.state === "running" ? "stop" : "start";
     const targetWallet = wallet, requestId = crypto.randomUUID(), revision = runnerRevision;
     busy = true; run.dataset.action = action; tell(""); render();
+    let releaseStreams = () => {};
     try {
-      const response = await fetch("/api/runner", {
-        method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: window.rebalanceView.token, wallet: targetWallet, action, requestId }),
-      });
-      if (!response.ok) throw new Error("Control request unavailable");
-      const result = await response.json();
+      // Keep the slots free through the command's read-only reconciliation.
+      releaseStreams = suspendControlStreams();
+      const result = await requestRunnerChange({ token: window.rebalanceView.token, wallet: targetWallet, action, requestId });
       if (!same(result.wallet, targetWallet) || result.requestId !== requestId || !states.has(result.state) || typeof result.outcome !== "string") throw new Error("Control result unavailable");
       if (!suspended && same(wallet, targetWallet)) {
         if (revision === runnerRevision) updateRunner(result);
@@ -109,11 +168,14 @@
     } catch {
       if (!suspended && same(wallet, targetWallet)) {
         updateRunner(null, true);
-        tell("Could not confirm the request. The button shows the latest runner state.");
+        tell("Could not confirm this request. Its outcome is unknown and it may still finish. Check the runner state before trying again; this request will not be repeated automatically.");
       }
     } finally {
-      if (!suspended) await refreshRunner(targetWallet);
-      busy = false; render();
+      try { if (!suspended) await refreshRunner(targetWallet); }
+      finally {
+        releaseStreams();
+        busy = false; render();
+      }
     }
   });
 

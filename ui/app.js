@@ -491,6 +491,7 @@
   let suspended = document.visibilityState === "hidden", pageHidden = false;
   let lastRendered = null;
   let streamGeneration = 0;
+  const controlHolds = new Set();
 
   function show(snapshot, disconnected = false) {
     // Controls must regain freshness after browser restoration even when the chart pixels are unchanged.
@@ -518,7 +519,7 @@
 
   async function refresh() {
     refreshTimer = null;
-    if (streamReady || suspended || refreshing) return;
+    if (streamReady || suspended || controlHolds.size || refreshing) return;
     refreshing = true;
     const generation = streamGeneration;
     const request = new AbortController();
@@ -542,11 +543,11 @@
   }
 
   function fallback() {
-    if (!refreshTimer && !refreshing && !suspended) void refresh();
+    if (!refreshTimer && !refreshing && !suspended && !controlHolds.size) void refresh();
   }
 
   function connect() {
-    if (suspended || stream) return;
+    if (suspended || controlHolds.size || stream) return;
     if (typeof EventSource !== "function") { fallback(); return; }
     try {
       const source = new EventSource("/api/status/events");
@@ -584,14 +585,29 @@
     } catch { fallback(); }
   }
 
-  function suspend() {
-    if (suspended) return;
-    suspended = true; streamReady = false; streamGeneration++;
+  function stopTransport() {
+    streamReady = false; streamGeneration++;
     stream?.close(); stream = null;
     clearTimeout(initialTimer); initialTimer = null;
     clearTimeout(refreshTimer); refreshTimer = null;
-    clearTimeout(feeExpiryTimer); feeExpiryTimer = null;
     controller?.abort(); controller = null; refreshing = false;
+  }
+  function suspendForControl() {
+    const hold = {};
+    controlHolds.add(hold);
+    // Keep the displayed snapshot and control revision while the explicit
+    // request uses the connections normally occupied by live updates.
+    if (controlHolds.size === 1) stopTransport();
+    return () => {
+      if (!controlHolds.delete(hold) || controlHolds.size || suspended || pageHidden || document.visibilityState === "hidden") return;
+      connect();
+    };
+  }
+  window.rebalanceStatus = { suspendForControl };
+  function suspend() {
+    if (suspended) return;
+    suspended = true; stopTransport();
+    clearTimeout(feeExpiryTimer); feeExpiryTimer = null;
     window.rebalanceControls?.updateStatus(lastSnapshot, true);
     window.rebalanceShare?.update(lastSnapshot, true);
     window.rebalanceControls?.updateRunner(null, true);

@@ -2,7 +2,7 @@
   "use strict";
   const token = /^#view=([a-f0-9]{64})$/i.exec(window.location.hash)?.[1] || null;
   const fragment = token ? `#view=${token}` : "";
-  const subscribers = new Set();
+  const subscribers = new Set(), controlHolds = new Set();
   let latest = null, controller = null, retryTimer = null, suspended = document.visibilityState === "hidden", generation = 0;
   let pageHidden = false, returningToSelector = false;
   function openSelector() {
@@ -29,7 +29,7 @@
     else if (changed && value.connectedWallet && value.chartUrl) window.location.assign(chartUrl(value.chartUrl));
   }
   async function connect() {
-    if (!token || suspended || controller) return;
+    if (!token || suspended || controlHolds.size || controller) return;
     const request = new AbortController(), currentGeneration = generation;
     controller = request;
     let reader = null, retry = true;
@@ -65,22 +65,34 @@
     } finally {
       void reader?.cancel().catch(() => {}); reader?.releaseLock(); request.abort();
       if (controller === request) controller = null;
-      if (!suspended && currentGeneration === generation && retry) retryTimer = setTimeout(() => { retryTimer = null; void connect(); }, 3000);
+      if (!suspended && !controlHolds.size && currentGeneration === generation && retry) retryTimer = setTimeout(() => { retryTimer = null; void connect(); }, 3000);
     }
   }
   window.rebalanceView = {
-    token, fragment, chartUrl, openSelector,
+    token, fragment, chartUrl, openSelector, suspendForControl,
     subscribe(subscriber) {
       subscribers.add(subscriber);
       if (latest) subscriber({ snapshot: latest });
       return () => subscribers.delete(subscriber);
     },
   };
-  function suspend() {
-    if (suspended) return;
-    suspended = true; generation++;
+  function stopTransport() {
+    generation++;
     clearTimeout(retryTimer); retryTimer = null;
     controller?.abort(); controller = null;
+  }
+  function suspendForControl() {
+    const hold = {};
+    controlHolds.add(hold);
+    if (controlHolds.size === 1) stopTransport();
+    return () => {
+      if (!controlHolds.delete(hold) || controlHolds.size || suspended || pageHidden || document.visibilityState === "hidden") return;
+      void connect();
+    };
+  }
+  function suspend() {
+    if (suspended) return;
+    suspended = true; stopTransport();
   }
   function resume() {
     if (!suspended || pageHidden || document.visibilityState === "hidden") return;
