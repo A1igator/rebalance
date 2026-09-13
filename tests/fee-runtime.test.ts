@@ -187,7 +187,7 @@ for (const quote of ['above-target', 'unavailable'] as const) {
   }
 }
 
-for (const changed of ['targets', 'drift-threshold'] as const) {
+for (const changed of ['targets', 'drift-threshold', 'execution'] as const) {
   test(`status clears a saved fee wait after ${changed} changes without querying or rewriting state`, async t => {
     const ledgerConfig = { ...config, mode: 'ledger' as const };
     await atomicWriteJson(CONFIG_PATH, ledgerConfig);
@@ -207,12 +207,13 @@ for (const changed of ['targets', 'drift-threshold'] as const) {
       const stateBytes = await readFile(STATE_PATH, 'utf8');
       const next = validateConfig({ ...ledgerConfig, ...(changed === 'targets'
         ? { targets: { ...targets, USDG: 600, AAPL: 2275 } }
-        : { driftThresholdBps: 600 }) });
+        : changed === 'execution' ? { execution: 'calibur' } : { driftThresholdBps: 600 }) });
       await atomicWriteJson(CONFIG_PATH, next);
       const current = await status();
       assert.equal(current.error, null); assert.equal(current.operation, null);
       assert.equal(Object.hasOwn(current, 'feeCheck'), false);
       assert.deepEqual(current.config?.targets, next.targets);
+      assert.equal(current.config?.execution, next.execution);
       assert.equal(current.config?.driftThresholdBps, next.driftThresholdBps);
       assert.equal(current.config?.rebalanceFeeTargetUsdE8, ledgerConfig.rebalanceFeeTargetUsdE8);
       assert.equal(await readFile(STATE_PATH, 'utf8'), stateBytes, 'display reads must not mutate the runtime journal');

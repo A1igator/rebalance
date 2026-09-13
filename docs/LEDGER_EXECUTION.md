@@ -1,5 +1,8 @@
 # Ledger monitoring and device-confirmed rebalancing
 
+An opt-in [Calibur execution mode](CALIBUR.md) now combines approvals and the existing swap batch. Its source/fixture verification does not establish a mined Calibur rebalance or physical delegation approval; the dated live results below used the direct router path.
+
+
 The initial request-driven integration was implemented September 10, 2026 under [prompt 053](prompts/053-ledger-execution.md). [Prompt 075](prompts/075-ledger-direct-device-validation.md), committed as `920f337` before implementation on September 12, changes the normal workflow to direct backend preparation and device prompts. The integration uses the existing pinned Ledger DMK 1.9.0, Node HID transport 1.0.1, Ethereum Signer Kit 1.18.0 and Context Module 2.5.0 on Robinhood mainnet, chain ID 4663.
 
 **A combined Ledger rebalance completed successfully on September 13.** Two distinct token approvals and one four-leg Uniswap multicall were confirmed, followed by on-target app status. Earlier sequential, phase-batched and failed attempts below are dated history. Fully decoded device display, Clear Signing and explicit rejection evidence remain separate checks.

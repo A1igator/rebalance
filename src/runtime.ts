@@ -27,7 +27,7 @@ export const STOP_PATH = resolve(DATA, 'stop.json');
 export type Status = {
   app: 'Rebalance'; chain: { id: 4663; name: 'Robinhood' };
   mode: Config['mode'] | null; wallet: string | null;
-  config: { targets: Record<string, number>; rebalanceIntervalSeconds: number; driftThresholdBps: number; rebalanceFeeTargetUsdE8?: string; allocation?: ReturnType<typeof allocationSummary> } | null;
+  config: { execution?: Config['execution']; targets: Record<string, number>; rebalanceIntervalSeconds: number; driftThresholdBps: number; rebalanceFeeTargetUsdE8?: string; allocation?: ReturnType<typeof allocationSummary> } | null;
   cycle: RebalanceCycle | null;
   portfolio: Portfolio | null;
   operation: Operation | null;
@@ -73,6 +73,7 @@ export async function status(): Promise<Status> {
     state.mode = config.mode;
     state.config = { targets: config.targets, rebalanceIntervalSeconds: config.rebalanceIntervalSeconds,
       driftThresholdBps: config.driftThresholdBps,
+      ...(config.execution !== undefined ? { execution: config.execution } : {}),
       ...(config.rebalanceFeeTargetUsdE8 !== undefined ? { rebalanceFeeTargetUsdE8: config.rebalanceFeeTargetUsdE8 } : {}),
       ...(config.allocation ? { allocation: allocationSummary(config) } : {}) };
     state.portfolio = withCurrentTargets(state.portfolio, config);
@@ -83,8 +84,8 @@ export async function status(): Promise<Status> {
       delete state.valuationNote;
       delete state.proposal;
     }
-    if (JSON.stringify(saved?.config?.targets) !== JSON.stringify(config.targets)) delete state.proposal;
-    if (saved?.config?.rebalanceFeeTargetUsdE8 !== config.rebalanceFeeTargetUsdE8 ||
+    if (JSON.stringify(saved?.config?.targets) !== JSON.stringify(config.targets) || saved?.config?.execution !== config.execution) delete state.proposal;
+    if (saved?.config?.execution !== config.execution || saved?.config?.rebalanceFeeTargetUsdE8 !== config.rebalanceFeeTargetUsdE8 ||
         saved?.config?.driftThresholdBps !== config.driftThresholdBps ||
         JSON.stringify(saved?.config?.targets) !== JSON.stringify(config.targets)) {
       delete state.feeCheck;
@@ -199,6 +200,7 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
       state.wallet = config.wallet;
       state.config = { targets: config.targets, rebalanceIntervalSeconds: config.rebalanceIntervalSeconds,
         driftThresholdBps: config.driftThresholdBps,
+        ...(config.execution !== undefined ? { execution: config.execution } : {}),
         ...(config.rebalanceFeeTargetUsdE8 !== undefined ? { rebalanceFeeTargetUsdE8: config.rebalanceFeeTargetUsdE8 } : {}),
         ...(config.allocation ? { allocation: allocationSummary(config) } : {}) };
       state.armed = execute;

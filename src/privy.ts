@@ -1,11 +1,19 @@
 import { execFile, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { getAddress, parseTransaction, recoverTransactionAddress, toHex, type Address, type Hex, type TransactionSerialized } from 'viem';
+import { getAddress, parseTransaction, recoverTransactionAddress, toHex, type Address, type Hex, type TransactionSerialized, type SignedAuthorization } from 'viem';
 
-export type PreparedTransaction = {
+export type LegacyPreparedTransaction = {
   chainId: 4663; type: 'legacy'; nonce: number; gas: bigint; gasPrice: bigint;
   to: Address; data: Hex; value: bigint;
 };
+export type CaliburAuthorizationRequest = { chainId: 4663; address: Address; nonce: number };
+export type CaliburPreparedTransaction = {
+  chainId: 4663; type: 'eip7702'; nonce: number; gas: bigint;
+  maxFeePerGas: bigint; maxPriorityFeePerGas: bigint;
+  to: Address; data: Hex; value: bigint;
+  authorizationList: readonly [SignedAuthorization<number>];
+};
+export type PreparedTransaction = LegacyPreparedTransaction | CaliburPreparedTransaction;
 export type PrivyCommand = (args: readonly string[], input?: string) => Promise<string>;
 const cliPath = () => createRequire(import.meta.url).resolve('@privy-io/agent-wallet-cli');
 
@@ -59,6 +67,7 @@ export function privySigningRequest(wallet: Address, tx: PreparedTransaction) {
 /** Provider output is untrusted: recover the sender and compare every transaction field. */
 export async function verifiedPrivyTransaction(output: string, wallet: Address, tx: PreparedTransaction): Promise<Hex> {
   try {
+    if (tx.type !== 'legacy') throw new Error();
     const response = JSON.parse(output);
     const raw = response?.data?.signed_transaction;
     if (response?.method !== 'eth_signTransaction' || response?.data?.encoding !== 'rlp' ||

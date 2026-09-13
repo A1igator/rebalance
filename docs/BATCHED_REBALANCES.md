@@ -1,5 +1,8 @@
 # Batched rebalances
 
+The default path below uses separate token approvals. The explicit [Calibur option](CALIBUR.md) also batches those approvals into the swap transaction for a Ledger wallet. First use requires a delegation authorization plus transaction signature; later rebalances require one transaction signature. This new path has separate validation evidence from the September 13 direct-router result.
+
+
 Phase batching was added September 12 under [prompt 081](prompts/081-hackathon-demo-and-batched-rebalance.md). [Prompt 082](prompts/082-ledger-completion-and-mixed-batch-check.md) verified the successful sequential Ledger run and removed tiny residual-sale churn. [Prompt 083](prompts/083-atomic-sales-and-purchases.md) combines sales and purchases in one atomic transaction.
 
 The production runtime prepares a Uniswap SwapRouter02 deadline multicall using the existing Robinhood router and signing backends. Every sale precedes every purchase; every output goes directly to the configured wallet. No new contract, custody, smart account, relayer or service is required. A live combined Ledger rebalance was verified on **September 13 at 05:24:24 UTC**: one AAPL approval, one USDG approval and one multicall containing an AAPL sale followed by AMD, NVDA and MSFT purchases. Fresh app status recorded on-target completion at 05:24:28.752 UTC. [Public receipts and bounded nonce audit](evidence/ledger-combined-rebalance-2026-09-13.json).

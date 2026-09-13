@@ -175,3 +175,44 @@ test('normal notification shutdown does not turn selection watcher closure into 
   await w.stop();
   assert.equal((await codexNotificationStatus(f.deps)).error, null);
 });
+
+
+test('project-wide pause survives automatic selection and Start without changing portfolio or binding state', async t => {
+  const f = await fixture(t);
+  const { portfolioNotificationsEnabled, setPortfolioNotificationsPaused } = await import('../src/notification-delivery.js');
+  const { prepareCodexNotifications } = await import('../src/codex-notifications.js');
+  await selectCodexNotifications({ threadId: chat }, f.deps);
+  const retained = [event('retained-completion')]; await f.write('events.json', retained);
+  const before = await Promise.all(['config.json', 'status.json', 'run.lock', 'codex-notifications.json'].map(file => readJson(join(f.root, file))));
+  assert.equal(await portfolioNotificationsEnabled(f.root), true);
+  await setPortfolioNotificationsPaused(f.root, true);
+  let starts = 0;
+  for (const options of [{}, { explicitSelection: true }, { starting: true, explicitSelection: true }]) {
+    assert.deepEqual(await ensureSelectedCodexNotifications(f.root, chat, options, { start: async () => { starts++; } }), { state: 'paused' });
+  }
+  assert.equal(starts, 0);
+  assert.equal((await prepareCodexNotifications({}, f.deps)).token, null, 'ordinary notifier Start cannot override the project pause');
+  assert.equal((await codexNotificationStatus(f.deps)).enabled, false);
+  assert.deepEqual(await Promise.all(['config.json', 'status.json', 'run.lock', 'codex-notifications.json'].map(file => readJson(join(f.root, file)))), before);
+  assert.deepEqual(await readJson(join(f.root, 'events.json')), retained);
+  await setPortfolioNotificationsPaused(f.root, false);
+  assert.equal(await portfolioNotificationsEnabled(f.root), true);
+  for (const malformed of [null, {}, { version: 2, paused: false }, { version: 1, paused: 'false' }, { version: 1, paused: false, unknown: true }, []]) {
+    await f.write('notifications-paused.json', malformed);
+    assert.equal(await portfolioNotificationsEnabled(f.root), false, 'unknown pause state must fail closed');
+  }
+});
+
+test('project pause blocks a selected Codex event at the final dispatch boundary and retains history', async t => {
+  const f = await fixture(t); await selectCodexNotifications({ threadId: chat }, f.deps);
+  const w = await f.worker(); const retained = event('pause-race'); await f.write('events.json', [retained]);
+  let release!: () => void, entered!: () => void;
+  const ready = new Promise<void>(done => { entered = done; });
+  const held = withNotificationSelection(f.root, chat, async () => { entered(); await new Promise<void>(done => { release = done; }); });
+  await ready; const sending = w.deliver(retained);
+  await until(async () => Boolean((await readJson<any[]>(join(f.root, 'codex-notification-deliveries.json')))?.length));
+  await f.write('notifications-paused.json', { version: 1, paused: true }); release(); await held; await sending;
+  assert.equal(w.sends.length, 0); assert.deepEqual(await w.read(), []);
+  assert.deepEqual(await readJson(join(f.root, 'events.json')), [retained]);
+  assert.deepEqual(await readJson(join(f.root, 'codex-notification-deliveries.json')), []);
+});

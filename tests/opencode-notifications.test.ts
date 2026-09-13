@@ -343,3 +343,29 @@ test('selected-only final dispatch rechecks acknowledgement after waiting for a 
   await until(async () => (await f.entries()).length === 0);
   assert.equal(f.calls.length, 0); assert.deepEqual(f.errors, []);
 });
+
+
+test('project pause blocks OpenCode delivery even for a legacy binding and retains every event', async t => {
+  const f = await fixture(t);
+  const retained = [event('complete'), event('ledger', 'ledger-rebalance-needed'), event('failure', 'rebalance-attention')];
+  await f.write(retained); await atomicWriteJson(join(f.directory, 'notifications-paused.json'), { version: 1, paused: true });
+  await f.start(); await until(() => f.timers.size === 0); await delay(30);
+  assert.equal(f.calls.length, 0); assert.equal(f.historyCalls.length, 0);
+  assert.deepEqual(await readJson(join(f.directory, 'events.json')), retained);
+  assert.deepEqual(await f.entries(), []);
+});
+
+test('OpenCode rechecks project pause after saving an intent and never starts the native request', async t => {
+  const f = await fixture(t); const retained = [event('pause-after-intent')];
+  await f.write(retained);
+  f.deps.persistJournal = async (path, value) => {
+    await atomicWriteJson(path, value);
+    if ((value as Saved).entries.some(entry => entry.state === 'prepared')) {
+      await atomicWriteJson(join(f.directory, 'notifications-paused.json'), { version: 1, paused: true });
+    }
+  };
+  await f.start(); await until(async () => (await readJson<{ paused: boolean }>(join(f.directory, 'notifications-paused.json')))?.paused === true);
+  await until(async () => (await f.entries()).length === 0);
+  assert.equal(f.calls.length, 0); assert.equal(f.historyCalls.length, 0);
+  assert.deepEqual(await readJson(join(f.directory, 'events.json')), retained);
+});

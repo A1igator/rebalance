@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { after, beforeEach, test, type TestContext } from 'node:test';
 import { promisify } from 'node:util';
 import { ASSETS } from '../src/assets.js';
+import { ROUTER } from '../src/chain.js';
 import { evaluatePortfolio } from '../src/core.js';
 import { runGraph, type GraphDependencies } from '../src/graph.js';
 import { atomicWriteJson, readJson, type PendingTransaction } from '../src/storage.js';
@@ -162,7 +163,7 @@ test('runtime failure alerts omit provider text, stop repeating after acknowledg
     const portfolio = evaluatePortfolio(Object.keys(targets).map(id => ({
       id, symbol: id, decimals: 6, balance: 1000000n, priceUsdE8: 100000000n, targetBps: 2000,
     })));
-    mock.module(process.argv[1], { namedExports: { createChain: () => ({
+    mock.module(process.argv[1], { namedExports: { ROUTER: ${JSON.stringify(ROUTER)}, createChain: () => ({
       snapshot: async () => {
         if (failing) throw new Error(secret);
         return { portfolio, nativeBalance: 0n, blockNumber: 1n, valuationNote: 'Local fixture' };
@@ -435,7 +436,7 @@ test('production tick bounds an approval by the active cycle and rejects expiry 
       quoteBatch: async plan => ({ quotes: await Promise.all(plan.trades.map(trade => chain.quote(trade))), blockNumber: 100n }),
       transactionBatch: async (plan, batch) => ({ ...await chain.transaction(plan.trades[0], batch.quotes[0]), swapCount: plan.trades.length, approvalCount: 1 }),
     };
-    mock.module(process.argv[2], { namedExports: { createChain: () => chain } });
+    mock.module(process.argv[2], { namedExports: { ROUTER: ${JSON.stringify(ROUTER)}, createChain: () => chain } });
     const configModule = await import(process.argv[1]);
     const runtime = await import(process.argv[3]);
     const storage = await import(process.argv[5]);
@@ -530,7 +531,7 @@ test('recovery preserves the remaining attempt window and does not impose an hou
         return cancellationHash;
       },
     };
-    mock.module(process.argv[1], { namedExports: { createChain: () => ({ publicClient: rpc,
+    mock.module(process.argv[1], { namedExports: { ROUTER: ${JSON.stringify(ROUTER)}, createChain: () => ({ publicClient: rpc,
       snapshot: async () => {
         if (observations === 0) {
           const beforeObservation = await storage.readJson(runtime.CYCLE_PATH);

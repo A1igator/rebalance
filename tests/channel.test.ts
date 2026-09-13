@@ -311,11 +311,12 @@ test('Claude sessions pin notifications and acknowledgements while a chat attach
 
 test('new Claude binding ignores historical backlog and stopped-wallet events remain local after restart', {timeout: 15_000}, async t => {
   const root = await mkdtemp(join(tmpdir(), 'rebalance-channel-binding-'));
-  t.after(() => rm(root, {recursive: true, force: true}));
+  let owned: Client | undefined;
+  t.after(async () => { await owned?.close(); await rm(root, {recursive: true, force: true}); });
   await preparePortfolio(root, defaultSession, defaultWallet, false);
   const event = (id: string) => ({id, type: 'rebalance-completed', createdAt: new Date().toISOString(), message: 'Confirmed fixture completion.'});
   const history = [event('historical')];await atomicWriteJson(join(root, 'events.json'), history);
-  const channel = await openSession(root, selectedEnv(root));t.after(() => channel.client.close());
+  const channel = await openSession(root, selectedEnv(root)); owned = channel.client;
   await waitFor(async () => (await readJson<{ignoredEventIds: string[]}>(bindingPath(root, defaultSession)))?.ignoredEventIds.includes('historical') === true, 'initial backlog must be retained as ignored');
   history.push(event('new-running'));await atomicWriteJson(join(root, 'events.json'), history);
   await waitFor(() => channel.received.length === 1, 'new selected-running event should arrive');
@@ -332,15 +333,38 @@ test('new Claude binding ignores historical backlog and stopped-wallet events re
 
 test('unknown or malformed runner ownership never delivers portfolio events', {timeout: 15_000}, async t => {
   const root = await mkdtemp(join(tmpdir(), 'rebalance-channel-running-'));
-  t.after(() => rm(root, {recursive: true, force: true}));await preparePortfolio(root);
+  let owned: Client | undefined;
+  t.after(async () => { await owned?.close(); await rm(root, {recursive: true, force: true}); });
+  await preparePortfolio(root);
   await atomicWriteJson(join(root, 'run.lock'), {pid: process.pid});
   const history = [{id: 'invalid-owner', type: 'rebalance-attention', createdAt: new Date().toISOString(), message: 'Should stay local.'}];
   await atomicWriteJson(join(root, 'events.json'), history);
-  const channel = await openSession(root, selectedEnv(root));t.after(() => channel.client.close());
+  const channel = await openSession(root, selectedEnv(root)); owned = channel.client;
   await waitFor(async () => (await readJson<{ignoredEventIds: string[]}>(bindingPath(root, defaultSession)))?.ignoredEventIds.includes('invalid-owner') === true, 'unknown runner cannot authorize notification');
   assert.deepEqual(channel.received, []);
   await atomicWriteJson(join(root, 'run.lock'), {pid: process.pid, createdAt: new Date().toISOString(), token: 'fixture-owned-runner'});
   history.push({id: 'current-valid-owner', type: 'rebalance-attention', createdAt: new Date().toISOString(), message: 'Current meaningful failure.'});
   await atomicWriteJson(join(root, 'events.json'), history);await waitFor(() => channel.received.length === 1, 'later verified running event can arrive');
   assert.deepEqual(channel.received.map(eventId), ['current-valid-owner']);assert.equal(channel.stderr(), '');
+});
+
+
+test('project pause keeps Claude portfolio events local without changing the selected running state', { timeout: 12_000 }, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'rebalance-channel-paused-'));
+  let owned: Client | undefined;
+  t.after(async () => { await owned?.close(); await rm(root, { recursive: true, force: true }); });
+  await preparePortfolio(root);
+  const retained = [{ id: 'paused-completion', type: 'rebalance-completed', createdAt: new Date().toISOString(), message: 'Local completion' }];
+  await atomicWriteJson(join(root, 'events.json'), retained);
+  await atomicWriteJson(join(root, 'notifications-paused.json'), { version: 1, paused: true });
+  const before = await Promise.all(['config.json', 'status.json', 'run.lock'].map(file => readJson(join(root, file))));
+  const session = await openSession(root, selectedEnv(root)); owned = session.client;
+  await session.client.listTools(); await delay(200);
+  assert.deepEqual(session.received, []);
+  const next = [...retained, { ...retained[0]!, id: 'paused-ledger', type: 'ledger-rebalance-needed' }];
+  await atomicWriteJson(join(root, 'events.json'), next); await delay(200);
+  assert.deepEqual(session.received, []);
+  assert.deepEqual(await readJson(join(root, 'events.json')), next);
+  assert.deepEqual(await Promise.all(['config.json', 'status.json', 'run.lock'].map(file => readJson(join(root, file)))), before);
+  assert.deepEqual(session.errors, []); assert.equal(session.stderr(), '');
 });

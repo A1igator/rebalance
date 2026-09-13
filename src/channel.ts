@@ -1,3 +1,4 @@
+import { portfolioNotificationsEnabled } from './notification-delivery.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
@@ -146,6 +147,7 @@ let financialSession: string | undefined;
 const sessionDigest = (session: string) => createHash('sha256').update(session).digest('hex');
 const bindingPath = (session: string) => resolve(DATA, `claude-notification-${sessionDigest(session)}.json`);
 async function eligibleEvents(currentSession: string) {
+  if (!await portfolioNotificationsEnabled(rootDir)) return [];
   const history = await eventHistory();
   const digest = sessionDigest(currentSession);
   let binding = await readJson<ChannelBinding>(bindingPath(currentSession));
@@ -186,6 +188,7 @@ async function connectFinancialStream(currentSession: string) {
         await withNotificationSelection(rootDir, currentSession, async () => {
           const current = await eligibleEvents(currentSession);
           if (stopped || !current.some(item => item.id === event.id && item.type === event.type)) return;
+          if (!await portfolioNotificationsEnabled(rootDir)) return;
           const retained = (await eventHistory()).find(item => item.id === event.id && item.type === event.type);
           if (!retained || retained.acknowledgedAt || stopped) return;
           // Recheck the durable acknowledgement and selection immediately before

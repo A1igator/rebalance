@@ -88,3 +88,12 @@ test('retired gas-payment settings are rejected rather than silently selecting n
   }
   assert.equal(Object.hasOwn(validateConfig(config), 'gasPayment'), false);
 });
+
+
+test('Calibur is a deliberate Ledger-only setting; existing configs remain direct', () => {
+  assert.equal(validateConfig(config).execution, undefined);
+  assert.equal(validateConfig({ ...config, mode: 'ledger', execution: 'calibur' }).execution, 'calibur');
+  assert.equal(validateConfig({ ...config, execution: 'direct' }).execution, 'direct');
+  for (const mode of ['private-key', 'privy']) assert.throws(() => validateConfig({ ...config, mode, execution: 'calibur' }), /requires the Ledger/);
+  for (const execution of ['unknown', null, 7702]) assert.throws(() => validateConfig({ ...config, mode: 'ledger', execution }), /Unknown execution/);
+});

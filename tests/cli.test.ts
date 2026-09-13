@@ -421,3 +421,35 @@ test('actual start persists running intent and an unexpected process exit does n
   assert.equal(existsSync(join(directory, 'unexpected-network')), false);
   assert.equal(existsSync(join(directory, 'private-key')), false);
 });
+
+test('CLI Calibur opt-in requires an idle wallet and preserves targets and pending barriers', async t => {
+  const { directory, command } = await fixture(t);
+  const release = await acquireLock(directory, 'run.lock');
+  try {
+    await assert.rejects(command(['configure', '--execution', 'calibur']), /Stop this wallet runner/);
+    assert.equal((await readJson<{ execution?: string }>(join(directory, 'config.json')))?.execution, undefined);
+  } finally { await release(); }
+  await atomicWriteJson(join(directory, 'pending.json'), { retained: true });
+  await assert.rejects(command(['configure', '--execution', 'calibur']), /Reconcile the pending operation/);
+  await rm(join(directory, 'pending.json'));
+  const applied = JSON.parse((await command(['configure', '--execution', 'calibur'])).stdout);
+  assert.equal(applied.execution, 'calibur'); assert.deepEqual(applied.targets, targets);
+  await command(['configure', '--threshold', '6']);
+  assert.equal((await readJson<{ execution: string }>(join(directory, 'config.json')))?.execution, 'calibur');
+  await assert.rejects(command(['status', '--execution', 'direct']), /only to configure/);
+  const old = JSON.parse((await command(['configure', '--execution', 'direct'])).stdout);
+  assert.equal(old.execution, 'direct');
+  for (const file of ['run.lock', 'private-key', 'unexpected-network', 'start.log']) assert.equal(existsSync(join(directory, file)), false);
+});
+
+test('CLI project notification pause works without a selected wallet and preserves daemon records', async t => {
+  const { directory, command } = await fixture(t);
+  await rm(join(directory, 'config.json'));
+  const event = [{ id: 'fixture-completion', type: 'rebalance-completed' }];
+  await atomicWriteJson(join(directory, 'events.json'), event);
+  assert.equal(JSON.parse((await command(['notifications', 'pause-all'])).stdout).paused, true);
+  assert.equal(JSON.parse((await command(['notifications', 'delivery-status'])).stdout).paused, true);
+  assert.deepEqual(await readJson(join(directory, 'events.json')), event);
+  assert.equal(JSON.parse((await command(['notifications', 'resume-all'])).stdout).paused, false);
+  for (const file of ['run.lock', 'private-key', 'unexpected-network', 'start.log', 'config.json']) assert.equal(existsSync(join(directory, file)), false);
+});

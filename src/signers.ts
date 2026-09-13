@@ -1,9 +1,13 @@
-import type { Address, Hex } from 'viem';
+import type { Address, Hex, SignedAuthorization } from 'viem';
 import { localAccount, type Config } from './config.js';
-import { privySigner, type PreparedTransaction } from './privy.js';
+import { privySigner, type PreparedTransaction, type CaliburAuthorizationRequest } from './privy.js';
 import { ledgerSigner } from './ledger-signing.js';
 export type { PreparedTransaction } from './privy.js';
-export type TransactionSigner = { address: Address; signTransaction(tx: PreparedTransaction): Promise<Hex> };
+export type TransactionSigner = {
+  address: Address;
+  signTransaction(tx: PreparedTransaction): Promise<Hex>;
+  signDelegationAuthorization?(authorization: CaliburAuthorizationRequest): Promise<SignedAuthorization<number>>;
+};
 
 /** Signer selection is explicit. Only the local-key branch can read its local key. */
 export async function loadSigner(config: Config, options: { signal?: AbortSignal } = {}): Promise<TransactionSigner> {

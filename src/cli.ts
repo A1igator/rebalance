@@ -40,6 +40,13 @@ async function main() {
   const explicit = option(args, '--profile');
   const sessionId = sessionIdentity(option(args, '--session'));
   const root = portfolioRoot();
+  if (args[0] === 'notifications' && ['pause-all', 'resume-all', 'delivery-status'].includes(args[1] ?? '')) {
+    if (args.length !== 2 || explicit) throw new Error('Use notifications pause-all, resume-all or delivery-status without a wallet profile');
+    const { portfolioNotificationsEnabled, setPortfolioNotificationsPaused } = await import('./notification-delivery.js');
+    if (args[1] !== 'delivery-status') await setPortfolioNotificationsPaused(root, args[1] === 'pause-all');
+    print({ scope: 'all portfolio chat notifications', paused: !await portfolioNotificationsEnabled(root),
+      retainedEvents: true, tradingChanged: false }); return;
+  }
   if (args[0] === 'share' && args[1] === 'receive') {
     const requestId = option(args, '--request-id');
     if (args.length !== 3 || !requestId || !sessionId) throw new Error('Use share receive <code> --request-id <native-request-id> --session <session> with optional --profile.');

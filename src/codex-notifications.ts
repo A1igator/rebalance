@@ -1,3 +1,4 @@
+import { portfolioNotificationsEnabled } from './notification-delivery.js';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { watch } from 'node:fs';
@@ -160,7 +161,7 @@ export async function codexNotificationStatus(overrides: Partial<CodexNotificati
   const queuedEventIds = deliveries.filter(entry => entry.state === 'accepted' && !entry.withdrawal).map(entry => entry.id);
   const diagnostic = await readJson<{ error: Failure | null }>(pathFor(deps, STATE));
   return {
-    configured: b !== null, enabled: b?.enabled ?? false, running: await running(deps), threadId: b?.threadId ?? null,
+    configured: b !== null, enabled: (b?.enabled ?? false) && await portfolioNotificationsEnabled(deps.rootDir), running: await running(deps), threadId: b?.threadId ?? null,
     command: b?.command ?? null, acceptedCount: queuedEventIds.length, queuedEventIds, uncertainEventIds,
     error: uncertainEventIds.length ? 'delivery-uncertain' : diagnostic?.error === 'delivery-uncertain' ? null : diagnostic?.error ?? null,
     note: 'Queue acceptance is not agent acknowledgement or verified phone delivery. Events remain until the agent acknowledges them.',
@@ -213,6 +214,7 @@ export async function prepareCodexNotifications(
 ): Promise<{ status: CodexNotificationStatus; token: string | null }> {
   const deps = depsFor(overrides);
   const token = await controlled(deps, async () => {
+    if (!await portfolioNotificationsEnabled(deps.rootDir)) return null;
     const saved = await readJson<unknown>(pathFor(deps, BINDING));
     if (saved === null) return null;
     let b = binding(saved);
@@ -290,7 +292,8 @@ export async function runCodexNotifications(
     const controlChanged = () => { void shouldStop().catch(() => { void diagnostic('read-unavailable').catch(() => {}); finish(); }); };
     try { unwatch = deps.watchStop(deps.dataDir, controlChanged, () => { if (!closed) { void diagnostic('watch-unavailable').catch(() => {}); finish(); } }); }
     catch { await diagnostic('watch-unavailable'); finish(); }
-    const eligibleSelection = () => deps.selectionActive(deps.rootDir, b.threadId, deps.dataDir);
+    const eligibleSelection = async () => await portfolioNotificationsEnabled(deps.rootDir) &&
+      await deps.selectionActive(deps.rootDir, b.threadId, deps.dataDir);
     const ignoreInactiveHistory = async () => {
       const ids = (await queue(deps)).map(event => event.id);
       if (JSON.stringify(ids) === JSON.stringify(b.ignoredEventIds ?? [])) return;
@@ -418,7 +421,7 @@ export async function runCodexNotifications(
       stream = deps.stream({ directory: deps.dataDir,
         watchFiles: ['events.json', 'status.json', 'run.lock', 'stop.json', 'config.json'], nextWakeAt: () => nextWakeAt,
         read: async () => {
-          if (await shouldStop()) return [];
+          if (await shouldStop() || !await portfolioNotificationsEnabled(deps.rootDir)) return [];
           if (!await eligibleSelection()) { await ignoreInactiveHistory(); return []; }
           const history = await queue(deps);
           const selection = await filter.select(history);

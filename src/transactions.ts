@@ -2,8 +2,12 @@ import { checkRebalanceFee, FeeTargetError, type FeeCheck } from './fee-target.j
 import { acquireConfigLock } from './config-lock.js';
 import { rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { keccak256, TransactionReceiptNotFoundError, type Hex } from 'viem';
+import { keccak256, TransactionReceiptNotFoundError, type Hex, type SignedAuthorization } from 'viem';
 import { createChain, type ChainTransaction } from './chain.js';
+import { recoverAuthorizationAddress } from 'viem/utils';
+import { CALIBUR_ADDRESS } from './calibur.js';
+import { estimateCaliburGas, readCaliburState, validateCaliburTransaction, type CaliburState } from './calibur-execution.js';
+import type { PreparedTransaction } from './privy.js';
 import { noteSuccessfulSwap } from './cadence.js';
 import { DATA, LAST_TRANSACTION_PATH, PENDING_PATH, loadConfig, type Config } from './config.js';
 import { loadSigner } from './signers.js';
@@ -177,7 +181,10 @@ export async function readRebalanceFee(config: Config, chain: Chain, tx: ChainTr
   try {
     const rpc = chain.publicClient;
     if (await rpc.getChainId() !== 4663) return unavailable;
-    const gasEstimate = await rpc.estimateGas({ account: config.wallet, to: tx.to, data: tx.data, value: tx.value });
+    if (config.execution === 'calibur' || tx.calibur) validateCaliburTransaction(config, tx);
+    const gasEstimate = tx.calibur
+      ? await estimateCaliburGas(config, chain, tx, await readCaliburState(chain, config.wallet))
+      : await rpc.estimateGas({ account: config.wallet, to: tx.to, data: tx.data, value: tx.value });
     const suggestedPrice = await rpc.getGasPrice();
     if (typeof gasEstimate !== 'bigint' || typeof suggestedPrice !== 'bigint' || gasEstimate <= 0n || suggestedPrice <= 0n) return unavailable;
     const gas = (gasEstimate * 120n + 99n) / 100n;
@@ -189,6 +196,10 @@ export async function readRebalanceFee(config: Config, chain: Chain, tx: ChainTr
 /** The caller holds run.lock. The selected signer owns its credential handling. */
 export async function dispatch(config: Config, chain: Chain, tx: ChainTransaction, signer: typeof loadSigner = loadSigner,
   ledger?: { signal?: AbortSignal; assertReady(): Promise<void> }, fees?: FeeContext): Promise<Operation> {
+  // Capture the full reviewed payload before any RPC or device wait. A caller
+  // cannot replace calldata, expiry or exact approval inputs during authorization.
+  tx = structuredClone(tx);
+  if (config.execution === 'calibur' || tx.calibur) validateCaliburTransaction(config, tx);
   if (!['private-key', 'privy', 'ledger'].includes(config.mode)) throw new Error(`${config.mode} execution is not connected yet; no fallback signer was used`);
   if (config.mode === 'ledger' && !ledger) throw new Error('Ledger needs an explicit rebalance request; no fallback signer was used');
   let feeInput: Parameters<typeof checkRebalanceFee>[0] | undefined;
@@ -239,8 +250,31 @@ export async function dispatch(config: Config, chain: Chain, tx: ChainTransactio
     const nonce = await rpc.getTransactionCount({ address: config.wallet, blockTag: 'pending' });
     const confirmedNonce = await rpc.getTransactionCount({ address: config.wallet, blockTag: 'latest' });
     if (nonce !== confirmedNonce) throw new Error('Wallet has another pending transaction; wait for it to settle');
+    const caliburState: CaliburState | undefined = tx.calibur ? await readCaliburState(chain, config.wallet) : undefined;
+    const requireCaliburCurrent = async () => {
+      if (caliburState === undefined) return;
+      await ready();
+      const [currentNonce, confirmed, state, chainId] = await Promise.all([
+        rpc.getTransactionCount({ address: config.wallet, blockTag: 'pending' }),
+        rpc.getTransactionCount({ address: config.wallet, blockTag: 'latest' }),
+        readCaliburState(chain, config.wallet), rpc.getChainId(),
+      ]);
+      if (chainId !== 4663 || currentNonce !== nonce || confirmed !== nonce || state !== caliburState) {
+        throw new Error('Calibur account or nonce changed; rebuild before signing or sending');
+      }
+      await ready();
+    };
+    if (caliburState !== undefined && (!Number.isSafeInteger(nonce) || nonce < 0 || nonce >= Number.MAX_SAFE_INTEGER)) {
+      throw new Error('Invalid Calibur account nonce');
+    }
     let gas: bigint;
-    try { gas = (await rpc.estimateGas({ account: config.wallet, to: tx.to, data: tx.data, value: tx.value }) * 120n + 99n) / 100n; }
+    try {
+      const estimate = caliburState === undefined
+        ? await rpc.estimateGas({ account: config.wallet, to: tx.to, data: tx.data, value: tx.value })
+        : await estimateCaliburGas(config, chain, tx, caliburState);
+      if (typeof estimate !== 'bigint' || estimate <= 0n) throw new Error();
+      gas = (estimate * 120n + 99n) / 100n;
+    }
     catch { throw new Error('Sender simulation/gas estimation failed; no transaction was signed'); }
     const suggestedGasPrice = await rpc.getGasPrice();
     if (typeof suggestedGasPrice !== 'bigint' || suggestedGasPrice <= 0n || suggestedGasPrice >= 2n ** 256n) {
@@ -258,10 +292,27 @@ export async function dispatch(config: Config, chain: Chain, tx: ChainTransactio
     const balance = await rpc.getBalance({ address: config.wallet, blockTag: 'pending' });
     if (gasPrice <= 0n || balance < tx.value + gas * gasPrice) throw new Error('Insufficient native ETH for this transaction and estimated gas');
     await ready();
-    const serialized = await account.signTransaction({ chainId: 4663, type: 'legacy', nonce, gas, gasPrice,
-      to: tx.to, data: tx.data, value: tx.value })
+    await requireCaliburCurrent();
+    let authorization: SignedAuthorization<number> | undefined;
+    if (caliburState === 'undelegated') {
+      if (!account.signDelegationAuthorization) throw new Error('Selected signer cannot authorize Calibur; no fallback was used');
+      authorization = await account.signDelegationAuthorization({ chainId: 4663, address: CALIBUR_ADDRESS, nonce: nonce + 1 })
+        .catch(async error => { await requireConfig(); throw error; });
+      await requireCaliburCurrent();
+      // Independently verify the adapter result before constructing the outer transaction.
+      if (authorization.chainId !== 4663 || authorization.address.toLowerCase() !== CALIBUR_ADDRESS.toLowerCase() ||
+          authorization.nonce !== nonce + 1 || (await recoverAuthorizationAddress({ authorization })).toLowerCase() !== config.wallet.toLowerCase()) {
+        throw new Error('Invalid Calibur delegation authorization; no transaction was broadcast');
+      }
+    }
+    const prepared: PreparedTransaction = authorization
+      ? { chainId: 4663, type: 'eip7702', nonce, gas, maxFeePerGas: gasPrice, maxPriorityFeePerGas: gasPrice,
+          to: tx.to, data: tx.data, value: tx.value, authorizationList: [authorization] }
+      : { chainId: 4663, type: 'legacy', nonce, gas, gasPrice, to: tx.to, data: tx.data, value: tx.value };
+    const serialized = await account.signTransaction(prepared)
       .catch(async error => { await requireConfig(); throw error; });
     await ready();
+    await requireCaliburCurrent();
     const hash = keccak256(serialized);
     const pending: PendingTransaction = { chainId: 4663, wallet: config.wallet, hash, nonce,
       kind: tx.kind, createdAt: new Date().toISOString(), status: 'prepared', gas: gas.toString(), gasPrice: gasPrice.toString() };
@@ -270,6 +321,7 @@ export async function dispatch(config: Config, chain: Chain, tx: ChainTransactio
     let sending: Promise<{ hash: Hex } | { error: unknown }>;
     while (true) {
       await ready();
+      await requireCaliburCurrent();
       const release = await acquireConfigLock(DATA, { signal: ledger?.signal });
       let prepared = false;
       try {

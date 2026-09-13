@@ -1,3 +1,4 @@
+import { portfolioNotificationsEnabled } from './notification-delivery.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { isAbsolute, resolve } from 'node:path';
 import { createEventStream, type EventStream, type EventStreamDependencies } from './event-stream.js';
@@ -189,7 +190,8 @@ export async function createOpenCodeNotifications(
       saved.ignoredEventIds = queue(await deps.read(resolve(dataDir, 'events.json'))).map(event => event.id);
       await save();
     }
-    const eligibleSelection = () => options.selectedOnly ? deps.selectionActive(rootDir, `opencode:${sessionId}`, dataDir) : Promise.resolve(true);
+    const eligibleSelection = async () => await portfolioNotificationsEnabled(rootDir) &&
+      (!options.selectedOnly || await deps.selectionActive(rootDir, `opencode:${sessionId}`, dataDir));
     const selected = async () => await eligibleSelection() ? (await filter.select(queue(await deps.read(resolve(dataDir, 'events.json'))))).events.filter(event => !saved.ignoredEventIds?.includes(event.id)) : [];
     const reconcile = async () => {
       const entries = saved.entries.filter(entry => entry.state !== 'accepted' && !checked.has(entry.id));
@@ -214,6 +216,7 @@ export async function createOpenCodeNotifications(
     stream = createEventStream({ directory: dataDir,
       watchFiles: options.selectedOnly ? ['events.json', 'status.json', 'run.lock', 'stop.json', 'config.json'] : ['events.json'],
       read: () => track(async () => {
+        if (!await portfolioNotificationsEnabled(rootDir)) return [];
         if (!await eligibleSelection()) {
           const ids = queue(await deps.read(resolve(dataDir, 'events.json'))).map(event => event.id);
           if (JSON.stringify(ids) !== JSON.stringify(saved.ignoredEventIds ?? [])) { saved.ignoredEventIds = ids; await save(); }
@@ -243,7 +246,7 @@ export async function createOpenCodeNotifications(
         }
         const dispatch: { result?: Promise<{ ok: boolean; value?: unknown }> } = {};
         const begin = async () => {
-          if (closed) return;
+          if (closed || !await portfolioNotificationsEnabled(rootDir)) return;
           if (options.selectedOnly) {
             if (!await eligibleSelection()) return;
             const latest = await selected();

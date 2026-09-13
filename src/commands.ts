@@ -44,7 +44,7 @@ const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
   status                               Read local graph/portfolio state
   configure --targets USDG=5,AAPL=23.75,NVDA=23.75,MSFT=23.75,AMD=23.75
                                        Set explicit percentages (example only)
-    [--wallet 0x...] [--mode private-key|privy|ledger] [--rpc https://...]
+    [--wallet 0x...] [--mode private-key|privy|ledger] [--execution direct|calibur] [--rpc https://...]
     [--threshold 5] [--slippage 0.5] [--deadline 120] [--poll 30] [--rebalance-interval-seconds 3600]
   targets set AAPL 30                   Change one percentage; redistribute the rest
   targets replace <ASSET=percent,...>   Replace all five targets explicitly
@@ -73,6 +73,9 @@ const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
   graph                                Print the app graph edges
   events                               Read retained notification events
   events ack <id>                      Mark an event handled in the agent session
+  notifications pause-all              Pause portfolio events to every chat; keep daemon state
+  notifications resume-all             Remove the project-wide pause; preserve per-chat preferences
+  notifications delivery-status        Read the project-wide delivery preference
   notifications configure --thread <id> [--codex <executable>]
                                        Bind notification delivery to the existing Codex conversation
   notifications start [--background]   Enable/reuse the notification-only listener
@@ -86,7 +89,7 @@ Privy uses its logged-in agent CLI; Ledger requires physical confirmation for ev
 
 const { values, positionals: args } = parseArgs({ allowPositionals: true, options: {
   background: { type: 'boolean', default: false }, targets: { type: 'string' }, wallet: { type: 'string' },
-  mode: { type: 'string' }, rpc: { type: 'string' }, threshold: { type: 'string' },
+  mode: { type: 'string' }, execution: { type: 'string' }, rpc: { type: 'string' }, threshold: { type: 'string' },
   slippage: { type: 'string' }, deadline: { type: 'string' }, poll: { type: 'string' }, help: { type: 'boolean' },
   'rebalance-interval-seconds': { type: 'string' },
   'resume-start': { type: 'boolean', default: false },
@@ -276,6 +279,7 @@ async function notificationCommand() {
 
 async function main() {
   const command = args[0];
+  if (values.execution !== undefined && command !== 'configure') throw new Error('--execution applies only to configure');
   if (!command || command === 'help' || values.help) { process.stdout.write(HELP); return; }
   if (values['resume-start'] && (command !== 'start' || values.background)) throw new Error('Invalid background-start continuation');
   if (values['setup-only'] && command !== 'launch') throw new Error('--setup-only applies only to launch');
@@ -395,17 +399,20 @@ async function main() {
           throw new Error('A portfolio belongs to one wallet. Use wallet add/connect to select another portfolio.');
         }
         let releaseSignerChange: (() => Promise<void>) | undefined;
-        if (previous && values.mode !== undefined && values.mode !== previous.mode) {
+        if (previous && ((values.mode !== undefined && values.mode !== previous.mode) ||
+            (values.execution !== undefined && values.execution !== (previous.execution ?? 'direct')))) {
           try { releaseSignerChange = await acquireLock(DATA, 'run.lock'); }
-          catch { throw new Error('Stop this wallet runner before changing its signing mode.'); }
+          catch { throw new Error('Stop this wallet runner before changing its signing or account execution mode.'); }
         }
         try {
-          if (releaseSignerChange && await readJson(PENDING_PATH)) throw new Error('Reconcile the pending operation before changing the signing mode.');
+          if (releaseSignerChange && await readJson(PENDING_PATH)) throw new Error('Reconcile the pending operation before changing the signing or account execution mode.');
           const wallet = await readJson<{ address: string }>(resolve(DATA, 'wallet.json'));
           if (values.targets === undefined && !previous) throw new Error('Specify the target percentages');
           const config = validateConfig({ version: 1, chainId: 4663,
             wallet: values.wallet ?? previous?.wallet ?? wallet?.address,
             mode: values.mode ?? previous?.mode ?? 'private-key',
+            ...(values.execution !== undefined || previous?.execution !== undefined
+              ? { execution: values.execution ?? previous?.execution } : {}),
             rpcUrl: values.rpc ?? previous?.rpcUrl ?? ROBINHOOD.rpcUrls.default.http[0],
             targets: values.targets !== undefined ? parseTargets(values.targets) : previous?.targets,
             ...(values.targets === undefined && previous?.allocation ? { allocation: previous.allocation } : {}),
@@ -421,7 +428,7 @@ async function main() {
             throw new Error('Configuration wallet differs from this pinned portfolio; no other wallet was selected.');
           }
           await atomicWriteJson(CONFIG_PATH, config);
-          print({ wallet: config.wallet, mode: config.mode, targets: config.targets, chainId: 4663,
+          print({ wallet: config.wallet, mode: config.mode, execution: config.execution ?? 'direct', targets: config.targets, chainId: 4663,
             driftThresholdBps: config.driftThresholdBps, slippageBps: config.slippageBps, deadlineSeconds: config.deadlineSeconds,
             pollSeconds: config.pollSeconds, rebalanceIntervalSeconds: config.rebalanceIntervalSeconds });
         } finally { await releaseSignerChange?.(); }

@@ -2,11 +2,13 @@ import { createHash } from 'node:crypto';
 import type { Subscription } from 'rxjs';
 import { LedgerDiagnostics, type LedgerDiagnostic } from './ledger-diagnostics.js';
 import { getAddress, hexToBytes, isAddress, parseTransaction, recoverTransactionAddress, serializeTransaction,
-  type Address, type Hex } from 'viem';
+  type Address, type Hex, type SignedAuthorization, type TransactionSerialized } from 'viem';
+import { recoverAuthorizationAddress } from 'viem/utils';
 import { portfolioRoot } from '../scripts/profile-routing.mjs';
 import { completedAddress, findLedgerAccount, withLedgerDevice,
-  type LedgerAddressAction, type LedgerOnboardingDependencies } from './ledger-onboarding.js';
-import type { PreparedTransaction } from './privy.js';
+  type LedgerAddressAction, type LedgerDevice, type LedgerOnboardingDependencies } from './ledger-onboarding.js';
+import type { CaliburAuthorizationRequest, PreparedTransaction } from './privy.js';
+import { CALIBUR_ADDRESS } from './calibur.js';
 
 export type LedgerSigningOutcome = 'rejected' | 'cancelled' | 'timeout' | 'unavailable' |
   'account-mismatch' | 'invalid-transaction' | 'invalid-signature' | 'unsupported';
@@ -39,16 +41,76 @@ const readOptions = { checkOnDevice: false, returnChainCode: false } as const;
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 const fingerprint = (wallet: Address) => createHash('sha256').update(wallet.toLowerCase()).digest('hex');
 
-/** Preserve the exact prepared payload across every asynchronous device step. */
+const uint256 = (value: unknown): value is bigint => typeof value === 'bigint' && value >= 0n && value < 2n ** 256n;
+
+/** This adapter can authorize only the pinned Calibur deployment on Robinhood. */
+export function preparedLedgerAuthorization(request: CaliburAuthorizationRequest): CaliburAuthorizationRequest {
+  if (!object(request) || Object.keys(request).some(key => !['chainId', 'address', 'nonce'].includes(key)) ||
+      request.chainId !== 4663 || typeof request.address !== 'string' || request.address.toLowerCase() !== CALIBUR_ADDRESS.toLowerCase() ||
+      !Number.isSafeInteger(request.nonce) || request.nonce < 0) throw new LedgerSigningError('invalid-transaction');
+  return Object.freeze({ chainId: 4663, address: CALIBUR_ADDRESS, nonce: request.nonce });
+}
+
+function signatureScalars(output: Record<string, unknown>): { r: Hex; s: Hex } {
+  if (typeof output.r !== 'string' || !/^0x[a-fA-F0-9]{64}$/.test(output.r) ||
+      typeof output.s !== 'string' || !/^0x[a-fA-F0-9]{64}$/.test(output.s)) throw new Error();
+  const r = BigInt(output.r), s = BigInt(output.s);
+  if (r <= 0n || r >= CURVE_ORDER || s <= 0n || s > CURVE_ORDER / 2n) throw new Error();
+  return { r: output.r.toLowerCase() as Hex, s: output.s.toLowerCase() as Hex };
+}
+
+/** Nonlegacy SDK responses contain parity or the conventional 27/28 recovery byte. */
+function sdkParity(output: unknown): { r: Hex; s: Hex; yParity: number } {
+  if (!object(output) || Object.keys(output).some(key => !['r', 's', 'v'].includes(key)) ||
+      ![0, 1, 27, 28].includes(output.v as number)) throw new Error();
+  return { ...signatureScalars(output), yParity: Number(output.v) >= 27 ? Number(output.v) - 27 : Number(output.v) };
+}
+
+function preparedSignedAuthorization(value: unknown): SignedAuthorization<number> {
+  if (!object(value) || Object.keys(value).some(key => !['chainId', 'address', 'nonce', 'r', 's', 'yParity', 'v'].includes(key)) ||
+      (value.yParity !== 0 && value.yParity !== 1) ||
+      (value.v !== undefined && value.v !== BigInt(value.yParity + 27))) throw new Error();
+  const request = preparedLedgerAuthorization({ chainId: value.chainId, address: value.address, nonce: value.nonce } as CaliburAuthorizationRequest);
+  return Object.freeze({ ...request, ...signatureScalars(value), yParity: value.yParity });
+}
+
+/** Recover the authorization signer independently of the SDK and its device display. */
+export async function verifiedLedgerAuthorization(output: unknown, wallet: Address, request: CaliburAuthorizationRequest): Promise<SignedAuthorization<number>> {
+  try {
+    const authorization = Object.freeze({ ...preparedLedgerAuthorization(request), ...sdkParity(output) });
+    if ((await recoverAuthorizationAddress({ authorization })).toLowerCase() !== wallet.toLowerCase()) throw new Error();
+    return authorization;
+  } catch { throw new LedgerSigningError('invalid-signature'); }
+}
+
+/** Preserve the exact payload, including nested authorization, across async device steps. */
 export function preparedLedgerTransaction(tx: PreparedTransaction): PreparedTransaction {
-  if (!tx || Object.keys(tx).some(key => !['chainId', 'type', 'nonce', 'gas', 'gasPrice', 'to', 'data', 'value'].includes(key)) || tx.chainId !== 4663 || tx.type !== 'legacy' || !Number.isSafeInteger(tx.nonce) || tx.nonce < 0 ||
-      ![tx.gas, tx.gasPrice, tx.value].every(n => typeof n === 'bigint' && n >= 0n && n < 2n ** 256n) ||
-      tx.gas === 0n || tx.gasPrice === 0n || !isAddress(tx.to, { strict: false }) ||
-      typeof tx.data !== 'string' || !/^0x(?:[a-fA-F0-9]{2})*$/.test(tx.data)) {
-    throw new LedgerSigningError('invalid-transaction');
-  }
-  return Object.freeze({ chainId: 4663, type: 'legacy', nonce: tx.nonce, gas: tx.gas, gasPrice: tx.gasPrice,
-    to: getAddress(tx.to), data: tx.data, value: tx.value });
+  try {
+    const commonKeys = ['chainId', 'type', 'nonce', 'gas', 'to', 'data', 'value'];
+    if (!object(tx) || tx.chainId !== 4663 || !Number.isSafeInteger(tx.nonce) || tx.nonce < 0 ||
+        !uint256(tx.gas) || tx.gas === 0n || !uint256(tx.value) || !isAddress(tx.to, { strict: false }) ||
+        typeof tx.data !== 'string' || !/^0x(?:[a-fA-F0-9]{2})*$/.test(tx.data)) throw new Error();
+    const common = { chainId: 4663 as const, nonce: tx.nonce, gas: tx.gas, to: getAddress(tx.to), data: tx.data, value: tx.value };
+    if (tx.type === 'legacy') {
+      if (Object.keys(tx).some(key => ![...commonKeys, 'gasPrice'].includes(key)) || !uint256(tx.gasPrice) || tx.gasPrice === 0n) throw new Error();
+      return Object.freeze({ ...common, type: 'legacy', gasPrice: tx.gasPrice });
+    }
+    if (tx.type !== 'eip7702' || Object.keys(tx).some(key => ![...commonKeys, 'maxFeePerGas', 'maxPriorityFeePerGas', 'authorizationList'].includes(key)) ||
+        !uint256(tx.maxFeePerGas) || tx.maxFeePerGas === 0n || !uint256(tx.maxPriorityFeePerGas) || tx.maxPriorityFeePerGas > tx.maxFeePerGas ||
+        tx.nonce >= Number.MAX_SAFE_INTEGER || !Array.isArray(tx.authorizationList) || tx.authorizationList.length !== 1 || tx.value !== 0n) throw new Error();
+    const authorization = preparedSignedAuthorization(tx.authorizationList[0]);
+    if (authorization.nonce !== tx.nonce + 1) throw new Error(); // Self-sponsored sender nonce increments before authorization processing.
+    return Object.freeze({ ...common, type: 'eip7702', maxFeePerGas: tx.maxFeePerGas, maxPriorityFeePerGas: tx.maxPriorityFeePerGas,
+      authorizationList: Object.freeze([authorization] as const) });
+  } catch { throw new LedgerSigningError('invalid-transaction'); }
+}
+
+async function requireAuthorizationWallet(tx: PreparedTransaction, wallet: Address): Promise<void> {
+  if (tx.type !== 'eip7702') return;
+  try {
+    if (tx.to.toLowerCase() !== wallet.toLowerCase() ||
+        (await recoverAuthorizationAddress({ authorization: tx.authorizationList[0] })).toLowerCase() !== wallet.toLowerCase()) throw new Error();
+  } catch { throw new LedgerSigningError('invalid-signature'); }
 }
 
 function rejectedOnDevice(error: unknown): boolean {
@@ -113,22 +175,30 @@ function completedSignature(action: LedgerAddressAction, signal: AbortSignal): P
   });
 }
 
-/** The pinned SDK already expands legacy v to EIP-155; accept only this chain's v. */
+/** Compare all prepared fields and recover both signatures before returning bytes. */
 export async function verifiedLedgerTransaction(output: unknown, wallet: Address, tx: PreparedTransaction): Promise<Hex> {
   try {
     const prepared = preparedLedgerTransaction(tx);
-    if (!object(output) || Object.keys(output).some(key => !['r', 's', 'v'].includes(key)) ||
-        typeof output.r !== 'string' || !/^0x[a-fA-F0-9]{64}$/.test(output.r) ||
-        typeof output.s !== 'string' || !/^0x[a-fA-F0-9]{64}$/.test(output.s) ||
-        (output.v !== 9361 && output.v !== 9362)) throw new Error();
-    const r = BigInt(output.r), s = BigInt(output.s);
-    if (r <= 0n || r >= CURVE_ORDER || s <= 0n || s > CURVE_ORDER / 2n) throw new Error();
-    const serialized = serializeTransaction(prepared, { r: output.r as Hex, s: output.s as Hex, v: BigInt(output.v) });
+    await requireAuthorizationWallet(prepared, wallet);
+    let serialized: Hex;
+    if (prepared.type === 'legacy') {
+      if (!object(output) || Object.keys(output).some(key => !['r', 's', 'v'].includes(key)) ||
+          (output.v !== 9361 && output.v !== 9362)) throw new Error();
+      serialized = serializeTransaction(prepared, { ...signatureScalars(output), v: BigInt(output.v) });
+    } else serialized = serializeTransaction(prepared, sdkParity(output));
     const decoded = parseTransaction(serialized);
     if (decoded.type !== prepared.type || decoded.chainId !== prepared.chainId || (decoded.nonce ?? 0) !== prepared.nonce ||
-        decoded.gas !== prepared.gas || decoded.gasPrice !== prepared.gasPrice || (decoded.value ?? 0n) !== prepared.value ||
-        decoded.to?.toLowerCase() !== prepared.to.toLowerCase() || (decoded.data ?? '0x').toLowerCase() !== prepared.data.toLowerCase() ||
-        (await recoverTransactionAddress({ serializedTransaction: serialized })).toLowerCase() !== wallet.toLowerCase()) throw new Error();
+        decoded.gas !== prepared.gas || (decoded.value ?? 0n) !== prepared.value ||
+        decoded.to?.toLowerCase() !== prepared.to.toLowerCase() || (decoded.data ?? '0x').toLowerCase() !== prepared.data.toLowerCase()) throw new Error();
+    if (prepared.type === 'legacy') {
+      if (decoded.gasPrice !== prepared.gasPrice) throw new Error();
+    } else {
+      if (decoded.type !== 'eip7702' || decoded.maxFeePerGas !== prepared.maxFeePerGas || decoded.maxPriorityFeePerGas !== prepared.maxPriorityFeePerGas ||
+          (decoded.accessList?.length ?? 0) !== 0 || decoded.authorizationList?.length !== 1) throw new Error();
+      const expected = prepared.authorizationList[0], actual = preparedSignedAuthorization(decoded.authorizationList[0]);
+      for (const key of ['chainId', 'address', 'nonce', 'r', 's', 'yParity'] as const) if (actual[key] !== expected[key]) throw new Error();
+    }
+    if ((await recoverTransactionAddress({ serializedTransaction: serialized as TransactionSerialized })).toLowerCase() !== wallet.toLowerCase()) throw new Error();
     return serialized;
   } catch { throw new LedgerSigningError('invalid-signature'); }
 }
@@ -141,8 +211,7 @@ export async function ledgerSigner(wallet: Address, options: LedgerSigningOption
   catch { throw new LedgerSigningError('account-mismatch'); }
   const timeoutMs = options.timeoutMs ?? MAX_TIMEOUT_MS;
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > MAX_TIMEOUT_MS) throw new LedgerSigningError('invalid-transaction');
-  return { address: selected, signTransaction: async (tx: PreparedTransaction): Promise<Hex> => {
-    const prepared = preparedLedgerTransaction(tx);
+  const sign = async <T>(capability: 'signTransaction' | 'signDelegationAuthorization', action: (device: LedgerDevice, path: string) => LedgerAddressAction, verify: (output: unknown) => Promise<T>): Promise<T> => {
     const diagnostics = new LedgerDiagnostics();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new LedgerSigningError('timeout')), timeoutMs);
@@ -155,7 +224,7 @@ export async function ledgerSigner(wallet: Address, options: LedgerSigningOption
         try { account = await findLedgerAccount(rootDir, selected); }
         catch { throw new LedgerSigningError('account-mismatch'); }
         active(signal);
-        if (!device.signTransaction) throw new LedgerSigningError('unavailable');
+        if (typeof device[capability] !== 'function') throw new LedgerSigningError('unavailable');
         diagnostics.phase('anchor-read');
         const anchor = await completedAddress(diagnostics.observe(device.getAddress(ANCHOR_PATH, readOptions)), signal);
         if (fingerprint(anchor) !== account.fingerprint) throw new LedgerSigningError('account-mismatch');
@@ -164,14 +233,14 @@ export async function ledgerSigner(wallet: Address, options: LedgerSigningOption
         if (derived.toLowerCase() !== selected.toLowerCase()) throw new LedgerSigningError('account-mismatch');
         active(signal);
         diagnostics.phase('sign');
-        const signature = await completedSignature(diagnostics.observe(device.signTransaction(account.derivationPath, hexToBytes(serializeTransaction(prepared)))), signal);
+        const signature = await completedSignature(diagnostics.observe(action(device, account.derivationPath)), signal);
         active(signal);
         diagnostics.phase('final-anchor-read');
         const finalAnchor = await completedAddress(diagnostics.observe(device.getAddress(ANCHOR_PATH, readOptions)), signal);
         if (fingerprint(finalAnchor) !== account.fingerprint) throw new LedgerSigningError('account-mismatch');
         active(signal);
         diagnostics.phase('signature-validation');
-        const serialized = await verifiedLedgerTransaction(signature, selected, prepared);
+        const serialized = await verify(signature);
         active(signal);
         diagnostics.phase('cleanup');
         return serialized;
@@ -182,5 +251,22 @@ export async function ledgerSigner(wallet: Address, options: LedgerSigningOption
       const result = signal.aborted ? abortError(signal) : error instanceof LedgerSigningError ? error : new LedgerSigningError('unavailable');
       throw new LedgerSigningError(result.outcome, diagnostics.snapshot(error));
     } finally { clearTimeout(timer); }
-  } };
+  };
+  return { address: selected,
+    signTransaction: async (tx: PreparedTransaction): Promise<Hex> => {
+      const prepared = preparedLedgerTransaction(tx);
+      await requireAuthorizationWallet(prepared, selected);
+      return sign('signTransaction', (device, path) => {
+        if (!device.signTransaction) throw new LedgerSigningError('unavailable');
+        return device.signTransaction(path, hexToBytes(serializeTransaction(prepared)));
+      }, output => verifiedLedgerTransaction(output, selected, prepared));
+    },
+    signDelegationAuthorization: async (request: CaliburAuthorizationRequest): Promise<SignedAuthorization<number>> => {
+      const prepared = preparedLedgerAuthorization(request);
+      return sign('signDelegationAuthorization', (device, path) => {
+        if (!device.signDelegationAuthorization) throw new LedgerSigningError('unavailable');
+        return device.signDelegationAuthorization(path, prepared.chainId, prepared.address, prepared.nonce);
+      }, output => verifiedLedgerAuthorization(output, selected, prepared));
+    },
+  };
 }

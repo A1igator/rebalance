@@ -12,6 +12,7 @@ import {
 } from "viem";
 import { ASSETS, DISCOVERY_TTL_MS, QUOTER, ROBINHOOD, ROUTER, RPC_RETRY_COUNT, RPC_TIMEOUT_MS,
   createChain, type ChainConfig } from "../src/chain.js";
+import { CALIBUR_ABI } from "../src/calibur.js";
 import { planRebalance, RebalanceNotRequiredError, RebalanceInputLimitError, type RebalancePlan, type TradePlan } from "../src/core.js";
 
 // Local protocol fixtures only: no mainnet requests, wallets, or bytecode copies.
@@ -780,4 +781,55 @@ test('capped-out sales never misalign minima and held cash remains usable withou
   assert.equal(cashOnly.kind, 'swap');
   assert(cashOnly.plan!.trades.every(trade => trade.sellAssetId === 'USDG'));
   assert.equal(cashOnly.plan!.trades.reduce((sum, trade) => sum + trade.amountIn, 0n), 10_000_000n);
+});
+
+
+test('Calibur batches every exact deficient input approval and the unchanged mixed router call', async t => {
+  const { state, config } = fixture(t);
+  investedBalances(state);
+  const chain = createChain({ ...config, mode: 'ledger', execution: 'calibur' });
+  const original = planRebalance((await chain.snapshot()).portfolio, 'USDG', 500)!;
+  const quote = await chain.quoteBatch(original, atomicContext);
+  const tx = await chain.transactionBatch(original, quote, atomicContext);
+  assert.equal(tx.kind, 'swap'); assert.equal(tx.to, WALLET); assert.equal(tx.value, 0n);
+  assert.equal(tx.approvalCount, 0); assert.deepEqual(tx.calibur, { approvalCount: 3 });
+  const envelope = decodeFunctionData({ abi: CALIBUR_ABI, data: tx.data }).args[0];
+  assert.equal(envelope.revertOnFailure, true); assert.equal(envelope.calls.length, 4);
+  const inputs = new Map<string, bigint>();
+  for (const trade of tx.plan!.trades) inputs.set(trade.sellAssetId, (inputs.get(trade.sellAssetId) ?? 0n) + trade.amountIn);
+  for (const call of envelope.calls.slice(0, -1)) {
+    const asset = Object.values(ASSETS).find(asset => asset.address.toLowerCase() === call.to.toLowerCase())!;
+    const approval = decodeFunctionData({ abi: TRANSACTION_ABI, data: call.data });
+    assert.equal(approval.functionName, 'approve'); assert.equal(call.value, 0n);
+    assert.deepEqual(approval.args, [ROUTER, inputs.get(asset.id)]);
+  }
+  const routerCall = envelope.calls.at(-1)!;
+  assert.equal(getAddress(routerCall.to), ROUTER); assert.equal(routerCall.value, 0n);
+  const router = decodeFunctionData({ abi: TRANSACTION_ABI, data: routerCall.data });
+  assert.equal(router.functionName, 'multicall');
+  if (router.functionName !== 'multicall') assert.fail();
+  assert.equal(router.args[0], tx.expiresAt); assert.equal(router.args[1].length, 4);
+  const observedOrder = router.args[1].map(data => {
+    const swap = decodeFunctionData({ abi: TRANSACTION_ABI, data });
+    if (swap.functionName !== 'exactInputSingle') assert.fail();
+    assert.equal(getAddress(swap.args[0].recipient), WALLET);
+    assert(swap.args[0].amountOutMinimum > 0n);
+    return [swap.args[0].tokenIn, swap.args[0].tokenOut];
+  });
+  assert.deepEqual(observedOrder, tx.plan!.trades.map(trade => [ASSETS[trade.sellAssetId as keyof typeof ASSETS].address, ASSETS[trade.buyAssetId as keyof typeof ASSETS].address]));
+  await assert.rejects(chain.transactionBatch(original, quote), /fresh full-portfolio/);
+});
+
+test('preapproved Calibur portfolio has one router call and preserves input bounds', async t => {
+  const { state, config } = fixture(t);
+  investedBalances(state); state.allowance = maxUint256;
+  const chain = createChain({ ...config, mode: 'ledger', execution: 'calibur' });
+  const plan = planRebalance((await chain.snapshot()).portfolio, 'USDG', 500)!;
+  const quote = await chain.quoteBatch(plan, atomicContext);
+  const tx = await chain.transactionBatch(plan, quote, atomicContext);
+  const envelope = decodeFunctionData({ abi: CALIBUR_ABI, data: tx.data }).args[0];
+  assert.equal(envelope.calls.length, 1); assert.deepEqual(tx.calibur, { approvalCount: 0 });
+  assert.equal(tx.swapCount, 4);
+  await assert.rejects(chain.transaction(trade, quote.quotes[0]!), /full rebalance batch/);
+  assert.throws(() => createChain({ ...config, mode: 'privy', execution: 'calibur' }), /requires Ledger/);
 });

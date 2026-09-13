@@ -318,3 +318,18 @@ test('unknown Claude startup identity receives no portfolio alerts before truste
   assert.deepEqual(JSON.parse(await readFile(join(f.root, 'events.json'), 'utf8')), history);
   assert.deepEqual(channel.errors, []);assert.equal(channel.stderr(), '');
 });
+
+
+test('project portfolio notification pause does not block explicit Claude wallet setup intent', { timeout: 12_000 }, async t => {
+  const f = await fixture(t);
+  await atomicWriteJson(join(f.root, 'notifications-paused.json'), { version: 1, paused: true });
+  const view = await issueView(f.root, sessionA, { kind: 'claude' });
+  const setup = await f.setup(view.token, 'ledger');
+  const channel = await f.open(nativeA);
+  await waitFor(() => channel.received.length === 1, 'wallet setup remains available while portfolio alerts are paused');
+  assert.deepEqual(ids(channel.received), [setup.id]);
+  assert.equal(metadata(channel.received[0]!).event_id, undefined);
+  assert.equal((await f.record(setup.id)).acknowledgedAt, undefined);
+  assert.deepEqual(channel.errors, []); assert.equal(channel.stderr(), '');
+  f.noTradingChanges();
+});

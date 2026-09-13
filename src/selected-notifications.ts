@@ -1,3 +1,4 @@
+import { portfolioNotificationsEnabled } from './notification-delivery.js';
 import { spawn } from 'node:child_process';
 import { open } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -55,6 +56,7 @@ export async function ensureSelectedCodexNotifications(root: string, sessionId: 
   options: { dataDir?: string; command?: string; starting?: boolean; explicitSelection?: boolean } = {},
   overrides: Partial<SelectedNotificationDependencies> = {}) {
   if (!isCodexSession(sessionId)) return { state: 'not-applicable' as const };
+  if (!await portfolioNotificationsEnabled(root)) return { state: 'paused' as const };
   const id = sessionId.toLowerCase();
   const profile = await withNotificationSelection(root, id, async () => {
     const selected = await selectedNotificationProfile(root, id);

@@ -17,6 +17,7 @@ export type LedgerAddressAction = { observable: Observable<ActionState>; cancel(
 export type LedgerDevice = {
   getAddress(path: string, options: { checkOnDevice: boolean; returnChainCode: false }): LedgerAddressAction;
   signTransaction?(path: string, transaction: Uint8Array): LedgerAddressAction;
+  signDelegationAuthorization?(path: string, chainId: number, address: string, nonce: number): LedgerAddressAction;
   close(): Promise<void>;
 };
 type LedgerManager = {
@@ -27,7 +28,7 @@ type LedgerManager = {
 };
 export type LedgerSdk = {
   manager: LedgerManager;
-  signer(sessionId: string): Pick<LedgerDevice, 'getAddress' | 'signTransaction'>;
+  signer(sessionId: string): Pick<LedgerDevice, 'getAddress' | 'signTransaction' | 'signDelegationAuthorization'>;
 };
 export type LedgerOnboardingDependencies = {
   connect?: (signal: AbortSignal) => Promise<LedgerDevice>;
@@ -219,11 +220,26 @@ function singleDevice(manager: LedgerManager, signal: AbortSignal): Promise<unkn
   });
 }
 
-/** Metadata lookups remain available; optional SDK signing telemetry is disabled. */
+/** The SDK's transaction-check loader sends the complete unsigned raw transaction
+ * remotely. For type4 that already contains a reusable signed authorization.
+ * Keep only its public call subset for metadata; raw bytes go to the device only. */
+function ledgerPublicContextInput<T>(input: T): { input: T | Record<string, unknown>; enrollment: boolean } {
+  if (!object(input)) return { input, enrollment: false };
+  const raw = input.transaction;
+  const enrollment = (raw instanceof Uint8Array && raw[0] === 4) || (typeof raw === 'string' && /^0x04/i.test(raw));
+  if (!enrollment) return { input, enrollment: false };
+  const allowed = ['challenge', 'deviceModelId', 'chainId', 'from', 'to', 'data', 'selector', 'value'];
+  return { input: Object.fromEntries(Object.entries(input).filter(([key]) => allowed.includes(key))), enrollment: true };
+}
+
+/** Metadata remains available without signing telemetry or outbound enrollment authorizations. */
 export function ledgerContextWithoutReports(context: ContextModule): ContextModule {
   return {
-    getContexts: context.getContexts.bind(context),
-    getFieldContext: context.getFieldContext.bind(context),
+    getContexts: (input, expectedTypes) => {
+      const safe = ledgerPublicContextInput(input);
+      return context.getContexts(safe.input, safe.enrollment ? expectedTypes?.filter(type => type !== 'ethereumTransactionCheck') : expectedTypes);
+    },
+    getFieldContext: (input, expectedType) => context.getFieldContext(ledgerPublicContextInput(input).input, expectedType),
     getTypedDataFilters: context.getTypedDataFilters.bind(context),
     report: async () => {},
     signReport: async () => {},
@@ -305,6 +321,8 @@ async function connectDevice(signal: AbortSignal, load: () => LedgerSdk): Promis
     return {
       getAddress: (path, options) => signer.getAddress(path, options),
       ...(signer.signTransaction ? { signTransaction: (path: string, transaction: Uint8Array) => signer.signTransaction!(path, transaction) } : {}),
+      ...(signer.signDelegationAuthorization ? { signDelegationAuthorization: (path: string, chainId: number, address: string, nonce: number) =>
+        signer.signDelegationAuthorization!(path, chainId, address, nonce) } : {}),
       close: () => closed ??= (async () => {
         // Destroy the owned native transport even if session disconnection stalls.
         const disconnecting = sdk.manager.disconnect({ sessionId: sessionId! });
