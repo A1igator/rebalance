@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ViewError, publicViewFailure } from './view-error.js';
-import { portfolioRoot, readProfiles, resolveProfile, sessionIdentity, walletIdentity, type RoutedProfile } from '../scripts/profile-routing.mjs';
+import { connectionPath, portfolioRoot, readProfiles, readRoutingJson, resolveProfile, sessionIdentity, walletIdentity, type RoutedProfile } from '../scripts/profile-routing.mjs';
 
 const repository = fileURLToPath(new URL('..', import.meta.url));
 const cli = fileURLToPath(import.meta.url);
@@ -129,14 +129,32 @@ async function main() {
     print({ app: 'Rebalance', portfolios: results }); return;
   }
   let profile: RoutedProfile;
+  // The strict command parser accepts flags before/between positionals. Apply
+  // the routing restriction conservatively before that parser; invalid token
+  // combinations will still fail there and cannot acquire fallback authority.
+  const sharpe = ['allocation', 'optimize', 'sharpe'].every(token => args.includes(token)) && !args.includes('--help');
+  // Optimizing cannot inherit the legacy lone-wallet fallback. Capture the
+  // selected public identity once so a later chat switch cannot retarget it.
+  let sharpeWallet = explicit;
+  if (sharpe && process.env.REBALANCE_PROFILE_PINNED !== '1' && !sharpeWallet) {
+    const connection = sessionId ? await readRoutingJson(connectionPath(root, sessionId)) : null;
+    if (connection !== null) {
+      if (connection.version !== 1 || connection.chainId !== 4663) throw new Error('The saved portfolio connection is invalid. Select a portfolio again.');
+      sharpeWallet = walletIdentity(connection.wallet);
+    } else {
+      print({ mode: 'needs-selection', changesTargets: false,
+        message: 'Pick a portfolio before optimizing Sharpe, or provide --profile <public-address>.' });
+      return;
+    }
+  }
   if (process.env.REBALANCE_PROFILE_PINNED === '1') {
     const dataDir = resolve(process.env.REBALANCE_DATA_DIR || root);
-    const wallet = process.env.REBALANCE_PROFILE_WALLET || null;
+    const wallet = sharpe ? walletIdentity(process.env.REBALANCE_PROFILE_WALLET) : process.env.REBALANCE_PROFILE_WALLET || null;
     if (explicit && walletIdentity(explicit) !== wallet) throw new Error('A pinned wallet worker cannot switch portfolios.');
     profile = { rootDir: root, dataDir, wallet, chainId: 4663, directory: '', chartPort: Number(process.env.REBALANCE_CHART_PORT || 4663) };
   } else if (['help', undefined].includes(args[0]) || args.includes('--help')) {
     profile = { rootDir: root, dataDir: root, wallet: null, chainId: 4663, directory: '.', chartPort: 4663 };
-  } else profile = await resolveProfile(root, { wallet: explicit, sessionId });
+  } else profile = await resolveProfile(root, { wallet: sharpe ? sharpeWallet : explicit, sessionId });
   Object.assign(process.env, pin(profile, sessionId));
   process.argv.splice(2, process.argv.length - 2, ...args);
   await import('./commands.js');

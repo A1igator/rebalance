@@ -9,6 +9,8 @@ import { test, type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { addPortfolio, connectPortfolio } from '../src/profiles.js';
+import { withAllocation } from '../src/allocation-management.js';
+import { validateConfig } from '../src/config.js';
 import { acquireLock, atomicWriteJson, readJson } from '../src/storage.js';
 
 const execute = promisify(execFile);
@@ -201,4 +203,58 @@ test('allocation policy and manual overrides stay with their wallet across chat 
   assert.equal((await f.saved(second.dataDir))!.allocation, undefined);
   assert.equal((await f.saved(second.dataDir))!.targets.USDG, 1000);
   assert.equal(await f.bytes(), beforeFirst); f.isolated(f.root, second.dataDir);
+});
+
+
+const frozenSharpe = () => ({
+  version: 1, objective: 'sharpe', horizonMonths: 12, stepBps: 100, benchmarkReturnBps: 0,
+  assets: Object.fromEntries(Object.entries(targets).map(([id, weight]) => [id, { minBps: weight, maxBps: weight }])),
+  history: { source: 'Offline stock/USDG fixture', basis: 'underlying-proxy', quoteCurrency: 'USD', interval: 'daily',
+    asOf: '2026-01-21', benchmarkPeriodReturn: 0,
+    observations: Array.from({ length: 20 }, (_, i) => ({ date: `2026-01-${String(i + 1).padStart(2, '0')}`,
+      returns: Object.fromEntries(Object.keys(targets).map((id, index) => [id, 0.001 * (index + 1) + 0.01 * (i % 5 - 2)])) })) },
+});
+
+test('one-command Sharpe asks for an explicit preset on a manual portfolio without fetching or writing', async t => {
+  const f = await fixture(t); const before = await f.bytes();
+  const result = JSON.parse((await f.command(['allocation', 'optimize', 'sharpe'])).stdout);
+  assert.equal(result.outcome, 'needs-input'); assert.equal(result.applied, false);
+  assert.equal(result.preset, 'stock-usdg-1y'); assert.match(result.question, /actual USDG\/USD/);
+  assert.equal(await f.bytes(), before); f.isolated();
+});
+
+test('one-command Sharpe uses only saved frozen history; preview stays read-only and default saves one request', async t => {
+  const f = await fixture(t);
+  await atomicWriteJson(join(f.root, 'config.json'), withAllocation(validateConfig(configuration()), frozenSharpe(), new Date()));
+  await atomicWriteJson(join(f.root, 'stop.json'), { preserved: true });
+  const before = await f.bytes();
+  const preview = JSON.parse((await f.command(['allocation', 'optimize', 'sharpe', '--preview'])).stdout);
+  assert.equal(preview.outcome, 'preview'); assert.equal(preview.historySelection, 'saved-frozen');
+  assert.equal(preview.history.observationCount, 20); assert.match(preview.history.asOf, /^2026-01-21/);
+  assert.equal(JSON.stringify(preview).includes('observations'), false); assert.equal(await f.bytes(), before);
+  const applied = JSON.parse((await f.command(['allocation', 'optimize', 'sharpe'])).stdout);
+  assert.equal(applied.outcome, 'applied'); assert.deepEqual(applied.targets, preview.targets);
+  const saved = (await f.saved())!;
+  assert.match(saved.rebalanceRequestId, /^[a-f0-9-]{36}$/);
+  assert.equal(saved.allocation.policyHash, applied.policyHash);
+  assert.deepEqual(await readJson(join(f.root, 'stop.json')), { preserved: true }); f.isolated();
+});
+
+test('Sharpe options cannot escape into startup, legacy allocation commands or unsupported optimizers', async t => {
+  const f = await fixture(t); const before = await f.bytes();
+  for (const args of [
+    ['allocation', 'optimize', 'sharpe', '--background'], ['allocation', 'optimize', 'sharpe', '--targets', targetArgument],
+    ['allocation', 'optimize', 'sharpe', '--setup-only'], ['allocation', 'optimize', 'sharpe', '--preset', 'other'],
+    ['allocation', 'optimize', 'sharpe', 'extra'], ['allocation', 'optimize', 'user-risk'],
+    ['allocation', 'status', '--preset', 'stock-usdg-1y'], ['start', '--preview'],
+  ]) await assert.rejects(f.command(args), args.join(' '));
+  assert.equal(await f.bytes(), before); f.isolated();
+});
+
+test('explicit preset provider failure is bounded and cannot change the selected configuration', async t => {
+  const f = await fixture(t); const before = await f.bytes();
+  const result = JSON.parse((await f.command(['allocation', 'optimize', 'sharpe', '--preset', 'stock-usdg-1y'])).stdout);
+  assert.equal(result.outcome, 'history-unavailable'); assert.equal(result.applied, false);
+  assert.equal(await f.bytes(), before); assert.equal(existsSync(join(f.root, 'unexpected-network')), true);
+  for (const file of ['run.lock', 'private-key', 'start.log', 'chart.lock', 'pending.json']) assert.equal(existsSync(join(f.root, file)), false);
 });

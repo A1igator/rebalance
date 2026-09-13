@@ -13,6 +13,7 @@ import { CONFIG_PATH, DATA, PENDING_PATH, createWallet, loadConfig, parseRebalan
 import { redistributeTargets } from './core.js';
 import { acquireConfigLock, ConfigLockBusyError } from './config-lock.js';
 import { allocationStatus, previewAllocation, readAllocationInput, withAllocation, withoutAllocation } from './allocation-management.js';
+import { optimizeSharpeAllocation } from './allocation-sharpe.js';
 import { GRAPH } from './graph.js';
 import { events, acknowledgeEvent, publishEvent } from './events.js';
 import { STOP_PATH, monitor, status, tick } from './runtime.js';
@@ -54,6 +55,8 @@ const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
     [--apply [--settings]]             Save its targets; --settings also saves drift trigger/interval
   allocation preview <policy.json>      Calculate targets from explicit inputs; no changes
   allocation set <policy.json>          Save per-wallet policy and calculated targets together
+  allocation optimize sharpe           Reuse this portfolio's saved Sharpe policy, or ask for assumptions
+    [--preset stock-usdg-1y] [--preview] Fetch the explicit historical preset; preview never writes
   allocation status                    Read policy, assumptions and last calculation
   allocation manual                    Keep current targets; remove the allocation policy
   fees target <USD>                    Set this wallet's estimated rebalance network-fee target
@@ -103,6 +106,7 @@ const { values, positionals: args } = parseArgs({ allowPositionals: true, option
   thread: { type: 'string' }, codex: { type: 'string' },
   'enabled-only': { type: 'boolean', default: false }, 'notification-token': { type: 'string' },
   apply: { type: 'boolean', default: false }, settings: { type: 'boolean', default: false },
+  preset: { type: 'string' }, preview: { type: 'boolean', default: false },
 } });
 const print = (value: unknown) => process.stdout.write(stringifyJson(value));
 const requiredConfig = async () => { const c = await loadConfig(); if (!c) throw new Error('Configure explicit targets through the agent first'); return c; };
@@ -283,6 +287,9 @@ async function notificationCommand() {
 
 async function main() {
   const command = args[0];
+  if ((values.preset !== undefined || values.preview) && !(command === 'allocation' && args[1] === 'optimize' && args[2] === 'sharpe')) {
+    throw new Error('--preset and --preview apply only to allocation optimize sharpe');
+  }
   if (values.execution !== undefined && command !== 'configure') throw new Error('--execution applies only to configure');
   if (!command || command === 'help' || values.help) { process.stdout.write(HELP); return; }
   if (values['resume-start'] && (command !== 'start' || values.background)) throw new Error('Invalid background-start continuation');
@@ -382,6 +389,15 @@ async function main() {
     }
     case 'allocation': {
       const action = args[1];
+      if (action === 'optimize') {
+        if (args.length !== 3 || args[2] !== 'sharpe') throw new Error('Use allocation optimize sharpe [--preset stock-usdg-1y] [--preview]');
+        for (const [name, value] of Object.entries(values)) {
+          if (!['preset', 'preview'].includes(name) && value !== undefined && value !== false) throw new Error(`--${name} does not apply to Sharpe optimization`);
+        }
+        if (values.preset !== undefined && values.preset !== 'stock-usdg-1y') throw new Error('Unknown Sharpe preset; use stock-usdg-1y');
+        print(await optimizeSharpeAllocation({ ...(values.preset ? { preset: values.preset } : {}), preview: values.preview }));
+        return;
+      }
       if (!action || !['preview', 'set', 'status', 'manual'].includes(action) ||
           args.length !== (['preview', 'set'].includes(action) ? 3 : 2)) {
         throw new Error('Use allocation preview/set <policy.json>, allocation status or allocation manual');

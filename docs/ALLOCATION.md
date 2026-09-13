@@ -1,6 +1,36 @@
-# User-defined risk allocation
+# Portfolio allocation
 
 A wallet can keep manual target percentages or derive them from an explicit allocation policy. The agent captures the user's beliefs and intent; local code calculates and saves targets. The existing deterministic runner maintains those targets without an agent connection. The chart remains view-only, including its target ring.
+
+## One-command Sharpe workflow
+
+When the user explicitly asks to maximize Sharpe, the agent runs:
+
+```sh
+npm run cli -- allocation optimize sharpe
+```
+
+This command requires an actual conversation attachment, an explicit `--profile <public-address>`, or a pinned wallet worker. It never guesses the only saved wallet or copies another wallet's policy. If no portfolio is selected, it returns `needs-selection`; open `view` and invite selection. If this wallet already has a Sharpe policy, it recalculates using that wallet's **saved frozen history and constraints**, with no network fetch. The response identifies that basis and its as-of date.
+
+Without a saved Sharpe policy it returns `needs-input` and one bundled question about the built-in test preset: one year of daily adjusted underlying stock prices plus actual USDG/USD prices, a zero-return benchmark, a 1% allocation grid, and existing bounds/risk limits retained. Without saved policy constraints, all five assets, including USDG, can range from 0% to 100%. Manual target percentages do not imply fixed weights or minimum allocations. Once the user accepts those assumptions—or has already explicitly authorized them—the agent runs:
+
+```sh
+npm run cli -- allocation optimize sharpe --preset stock-usdg-1y
+```
+
+An explicit preset fetches a fresh sample. Append `--preview` to either form to calculate without saving. The model need not build return rows, write a temporary policy file or ask the user to supply a CSV. Other methodologies remain available through the policy JSON interface below. Saved variable bounds incompatible with the preset's 1% grid require a choice; they are never silently rounded. Existing fixed weights, subjective risk caps/scores and horizon metadata are retained when switching objectives. The horizon metadata does not annualize the Sharpe calculation.
+
+The command fetches and solves outside the configuration lock, then atomically saves the exact policy, provenance and targets only if the captured wallet configuration is unchanged. A concurrent edit returns `config-changed` without overwriting it. An application also saves one explicit rebalance request: a running portfolio re-evaluates after pending transactions settle, while a stopped portfolio stays stopped. It does not directly start, sign or submit a trade. Preview, missing assumptions, incompatible inputs and provider failure do not save targets. Compact output includes the assumptions, data basis, score, target weights and policy hash; the full frozen panel remains in the saved policy.
+
+### Preset data and interpretation
+
+`stock-usdg-1y` supports USDG plus four stocks from the verified manifest. It fetches only fixed public Yahoo chart URLs and Kraken's `USDGUSD` OHLC endpoint, without wallet addresses, provider login or API keys. Requests run in parallel under a 15-second deadline with a 2 MiB limit per response. There is no silent provider fallback or automatic retry.
+
+Yahoo adjusted closes account for stock splits and dividends ([definition](https://help.yahoo.com/kb/SLN28256.html)). These are **underlying-share proxies**, not historical prices of the Robinhood tokens. The Yahoo chart endpoint has no stable published API guarantee; malformed or changed provider responses are rejected. Actual Kraken USDG/USD closes keep USDG variable rather than assuming a fixed $1 peg or reserving a fixed cash allocation. Kraken's final OHLC row is uncommitted and is always excluded; its endpoint returns at most 720 recent candles ([Kraken documentation](https://docs.kraken.com/api-reference/market-data/get-ohlc-data)).
+
+The builder keeps completed prior-date stock bars over the last year, requires identical stock date sets, and requires an actual USDG price on every selected date. It aligns closes before calculating simple returns; it never fills missing observations or assigns them zero return. Stock closes occur at the US session close, whereas USDG candles close on UTC boundaries. The saved source labels that mismatch. The one-year preset requires at least 200 aligned closes plus coverage/staleness bounds to reject short, sparse or stale samples. These are heuristics, not an independently verified exchange calendar. The general custom-panel validator retains its 20-return minimum. The response records source URLs, fetch time, first/last dates, row count and a history hash.
+
+The preset uses a labelled **zero-return test benchmark**, not an estimate of the risk-free rate. It maximizes the historical, unannualized Sharpe score over the declared grid plus a feasible incumbent. It assumes constant weights per observation and omits execution costs. This is a reproducible test model, not a forecast or proof of the best future portfolio. Samples stay frozen until an explicit preset refresh or policy edit; ordinary market ticks and runner cycles do not rerun optimization.
 
 ## Reading the chart
 
@@ -29,11 +59,11 @@ npm run cli -- allocation status
 npm run cli -- allocation manual
 ```
 
-The agent writes the policy JSON locally from the user's stated inputs and runs these commands; the user need not use a CLI. Preview changes nothing. `set` calculates against the latest saved targets and atomically writes policy, calculation provenance and targets under the existing configuration lock. It does not start trading. An already armed runner consumes changed targets on its next eligible graph evaluation. Policy changes can be saved during pending transactions or an active multi-leg cycle. The next evaluation uses the new policy targets, while submitted transactions, recorded cycle timing and cooldown remain intact. See [live settings](LIVE_SETTINGS.md).
+For custom policies, the agent writes JSON locally from the user's stated inputs and runs these commands; the user need not use a CLI. Preview changes nothing. `set` calculates against the latest saved targets and atomically writes policy, calculation provenance, targets and one explicit rebalance request under the existing configuration lock. It does not start trading. An already armed runner consumes the request after pending transactions settle, bypassing automatic cooldown once. Policy changes can be saved during pending transactions or an active cycle; submitted transactions remain intact. See [live settings](LIVE_SETTINGS.md).
 
 `manual` removes the policy while retaining its last target split. Explicit `targets set`, `targets replace` and `configure --targets` also switch to manual in the same write. Unrelated configuration changes preserve the policy. Each wallet owns its policy independently; changing the chat connection never changes it.
 
-There is no recurring optimizer or scheduled AI task. The same assumptions and current targets yield the same solution. The agent submits a policy/data edit through `allocation set` to recalculate; editing an input JSON file alone has no effect. The saved deterministic runner handles subsequent holdings drift. This first version does not fetch history, infer forecasts from live prices, automatically roll a historical sample forward, or treat market ticks as changes to the user's beliefs.
+There is no recurring optimizer or scheduled AI task. The same assumptions and current targets yield the same solution. The agent submits a policy/data edit through `allocation set` or the Sharpe command above to recalculate; editing an input JSON file alone has no effect. The saved deterministic runner handles subsequent holdings drift. It does not infer forecasts from live prices, automatically roll a historical sample forward, or treat market ticks as changes to the user's beliefs.
 
 ## Policy schema
 
@@ -61,8 +91,8 @@ Supplying a validated aligned return panel also permits descriptive volatility, 
 
 The panel must state its source, quote currency, interval, as-of date and whether it describes tradable tokens, an underlying-asset proxy, or a synthetic fixture. Every dated row must contain all configured assets, with strictly ordered unique dates and finite simple returns. Missing observations are rejected; they are never treated as zero return. Twenty observations is a validation minimum, not evidence of predictive reliability. Synthetic panels work in preview/tests and cannot be adopted into a portfolio. The exact `history` fields are `source`, `basis` (`tradable-token`, `underlying-proxy` or `synthetic`), `quoteCurrency`, `interval` (`daily`, `weekly` or `monthly`), `asOf`, `benchmarkPeriodReturn`, and `observations`. Each observation has `date` (`YYYY-MM-DD`) and `returns` mapping every configured asset to a decimal simple return (0.01 means 1%). `benchmarkPeriodReturn` is constant per observation. Returns and the period benchmark must be between −1 and 1,000 inclusive. There must be 20–2000 rows. Dates must be ordered and no later than `asOf`; adoption rejects a future as-of date. The interval/calendar and source labels are assertions supplied with the data, not independent provider verification. An importer must align the calendar before supplying the panel; this validator cannot detect a missing market session from metadata alone.
 
-No suitable market-history feed currently exists in this repository. The app's spot quotes value Robinhood ERC-20 token units in USDG; they do not provide a time series, measure USDG's dollar/depeg risk, or automatically match split/dividend-adjusted underlying shares. Historical diagnostics assume constant weights rebalanced each observation without costs. They are descriptions of that model, not the realized gas-costed execution graph or guarantees about future loss.
+The stock/USDG preset supplies the labelled proxy history described above. The app's execution spot quotes still value Robinhood ERC-20 token units in USDG; they cannot substitute for historical return rows. Historical diagnostics assume constant weights rebalanced each observation without costs. They are descriptions of that model, not the realized gas-costed execution graph or guarantees about future loss.
 
 ## Implementation boundary
 
-`src/allocation.ts` contains the pure solver, `src/allocation-metrics.ts` validates and measures an optional frozen panel, and `src/allocation-management.ts` handles policy projection and validated adoption. The CLI writes one wallet-scoped config revision; ordinary reads do not rerun optimization. No live wallet policy or target was installed as part of building this feature. Inputs used for implementation verification are isolated fixtures.
+`src/allocation.ts` contains the pure solver, `src/allocation-metrics.ts` validates and measures an optional frozen panel, and `src/allocation-management.ts` handles policy projection and validated adoption. `src/sharpe-history.ts` builds the bounded public proxy panel; `src/allocation-sharpe.ts` orchestrates the one-command workflow and guarded adoption. The CLI writes one wallet-scoped config revision; ordinary reads do not rerun optimization. No live wallet policy or target was installed as part of building this feature. Implementation verification uses isolated fixtures and a public-data preview in disposable storage.
