@@ -11,7 +11,7 @@
   let viewReady = !token, connecting = false, setupBusy = false, setupRequest = null, streamed = false, connectionRevision = 0;
   let setupExisting = null;
   let setupState = null, setupController = null, setupGeneration = 0, setupSuspended = document.visibilityState === "hidden", setupAttachmentAllowed = false;
-  let pageHidden = false, connectionAttempt = 0;
+  let pageHidden = false, connectionAttempt = 0, connectionController = null, connectionRelease = null, connectionError = false;
 
   function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -34,8 +34,8 @@
       return `${url.href}${fragment}`;
     } catch { return null; }
   }
-  async function request(path, body) {
-    const response = await fetch(path, { cache: "no-store", ...(body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}) });
+  async function request(path, body, signal) {
+    const response = await fetch(path, { cache: "no-store", ...(signal ? { signal } : {}), ...(body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}) });
     let result;
     try { result = await response.json(); } catch { /* Some rejected local requests have a plain-text response. */ }
     if (!response.ok) throw new Error(typeof result?.error === "string" ? result.error
@@ -43,6 +43,26 @@
       : "The local app could not complete this request. Check your agent before trying again.");
     if (result === undefined) throw new Error("The local app’s response could not be verified. Check your agent before trying again.");
     return result;
+  }
+  async function connectionRequest(path, body, timeoutMs, signal) {
+    const controller = new AbortController();
+    let timeout, cancel;
+    try {
+      return await Promise.race([
+        request(path, body, controller.signal),
+        new Promise((_, reject) => {
+          cancel = () => { controller.abort(); reject(new Error("The portfolio connection check was interrupted.")); };
+          if (signal.aborted) { cancel(); return; }
+          signal.addEventListener("abort", cancel, { once: true });
+          timeout = setTimeout(() => {
+            controller.abort();
+            reject(new Error("Could not confirm the portfolio connection. It may still finish; no selection was repeated."));
+          }, timeoutMs);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timeout); signal.removeEventListener("abort", cancel); controller.abort();
+    }
   }
   function targetRows(targets) {
     if (!targets || typeof targets !== "object" || Array.isArray(targets)) return [];
@@ -78,22 +98,58 @@
     const url = safeChartUrl(portfolio.chartUrl);
     if (!url) { byId("portfolio-status").textContent = "This portfolio’s chart address is unavailable."; return; }
     if (!authorized) { window.location.assign(url); return; }
-    connecting = true; render();
+    connecting = true; connectionError = false; render();
     const revision = ++connectionRevision, attempt = ++connectionAttempt;
+    const controller = new AbortController();
+    connectionController = controller;
+    let releaseStream, navigating = false;
     byId("portfolio-status").textContent = "Connecting this portfolio to your chat…";
     try {
-      const result = await request("/api/connect", { token, wallet: portfolio.wallet });
+      releaseStream = window.rebalanceView?.suspendForControl?.();
+      connectionRelease = releaseStream;
+      let result, failure, replied = false;
+      try {
+        result = await connectionRequest("/api/connect", { token, wallet: portfolio.wallet }, 15000, controller.signal);
+        replied = true;
+      } catch (error) { failure = error; /* Read the saved attachment once after an uncertain response. */ }
       if (pageHidden || attempt !== connectionAttempt) return;
-      const chartUrl = safeChartUrl(result?.chartUrl);
-      if (typeof result?.wallet !== "string" || result.wallet.toLowerCase() !== portfolio.wallet.toLowerCase() || result.tradingChanged !== false || !chartUrl) throw new Error("The portfolio connection could not be verified. Please try again.");
-      if (connectionRevision !== revision && connectedWallet?.toLowerCase() !== portfolio.wallet.toLowerCase()) throw new Error("The chat’s portfolio changed while connecting. Select a portfolio again if needed.");
+      const chartUrl = replied ? safeChartUrl(result?.chartUrl) : url;
+      if (replied && (typeof result?.wallet !== "string" || result.wallet.toLowerCase() !== portfolio.wallet.toLowerCase() || result.tradingChanged !== false || !chartUrl)) {
+        throw new Error("The portfolio connection could not be verified. Please try again.");
+      }
+      // The stream is paused to free its HTTP connection. A fresh readback also
+      // prevents an older response from hiding a newer chat selection.
+      const current = await connectionRequest("/api/view", { token }, 4500, controller.signal);
+      if (pageHidden || attempt !== connectionAttempt) return;
+      if (typeof current?.canSetup !== "boolean" || (current.connectedWallet !== null &&
+          (typeof current.connectedWallet !== "string" || !/^0x[0-9a-f]{40}$/i.test(current.connectedWallet)))) {
+        throw new Error("The current portfolio connection could not be verified. Refresh the selector to check it.");
+      }
+      if (current.connectedWallet?.toLowerCase() !== portfolio.wallet.toLowerCase() ||
+          connectionRevision !== revision && connectedWallet?.toLowerCase() !== portfolio.wallet.toLowerCase()) {
+        throw new Error(replied ? "The chat’s portfolio changed while connecting. Select a portfolio again if needed."
+          : failure instanceof Error ? failure.message : "Could not confirm this portfolio selection. It may still finish; refresh the selector to check it. No selection was repeated.");
+      }
+      byId("portfolio-status").textContent = "";
       window.location.assign(chartUrl);
+      navigating = true;
     } catch (error) {
       if (pageHidden || attempt !== connectionAttempt) return;
       byId("portfolio-status").textContent = error instanceof Error ? error.message : "The portfolio could not be connected. Please try again.";
+      connectionError = true;
       connecting = false; render();
+    } finally {
+      controller.abort();
+      if (connectionController === controller) connectionController = null;
+      // Leave a connection free for navigation itself. Pagehide releases the
+      // hold while suspended; a restored selector can then reconnect normally.
+      if (!navigating) {
+        if (connectionRelease === releaseStream) connectionRelease = null;
+        if (typeof releaseStream === "function") releaseStream();
+      }
     }
   }
+
   function render() {
     setSetupButtons();
     const grid = byId("portfolio-grid");
@@ -315,10 +371,12 @@
   window.addEventListener("pagehide", () => {
     // Browser Back may restore this document after a completed or pending
     // selection. Old replies cannot navigate it or keep its cards disabled.
-    connectionAttempt++;
+    connectionAttempt++; connectionController?.abort(); connectionController = null;
     if (connecting) byId("portfolio-status").textContent = "";
-    connecting = false;
+    connecting = false; connectionError = false;
     pageHidden = true; setupSuspended = true; setupAttachmentAllowed = false; stopSetupStream();
+    if (typeof connectionRelease === "function") connectionRelease();
+    connectionRelease = null;
   });
   window.addEventListener("pageshow", () => { pageHidden = false; render(); resumeSetup(); });
   document.addEventListener("visibilitychange", () => {
@@ -335,7 +393,7 @@
       canSetup = update.snapshot.canSetup; connectedWallet = update.snapshot.connectedWallet;
       portfolios = validPortfolios(update.snapshot.portfolios);
       byId("view-notice").textContent = "";
-      if (!connecting) byId("portfolio-status").textContent = "";
+      if (!connecting && !connectionError) byId("portfolio-status").textContent = "";
       byId("reload-portfolios").hidden = true;
       setSetupButtons(); render();
     } else if (update.error) {

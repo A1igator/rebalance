@@ -260,6 +260,9 @@ export async function serve(port = chartPort(), overrides: Partial<ChartDependen
         else if (request.url === '/api/connect') {
           const profile = await resolveProfile(deps.rootDir, { wallet: input.wallet as string });
           await deps.ensureChart(profile);
+          // Chart preparation can outlive an abandoned selection request. Do
+          // not attach its wallet after the browser has closed that response.
+          if (response.destroyed) return;
           const connected = await connectView(deps.rootDir, input.token as string, input.wallet as string);
           result = { wallet: connected.wallet, chartUrl: connected.chartUrl, tradingChanged: false };
         } else if (request.url === '/api/setup/status') result = await deps.walletSetups.read(input.token as string, input.requestId as string);

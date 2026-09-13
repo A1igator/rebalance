@@ -19,7 +19,7 @@ const config = (wallet: string) => ({ version: 1, wallet, chainId: 4663, mode: '
   targets: { USDG: 500, AAPL: 2500, NVDA: 2500, MSFT: 2500, AMD: 2000 }, driftThresholdBps: 500,
   slippageBps: 50, deadlineSeconds: 120, pollSeconds: 30, rebalanceIntervalSeconds: 3600 });
 
-async function fixture(t: TestContext, setup?: (context: WalletSetupContext) => Promise<SetupWallet>) {
+async function fixture(t: TestContext, setup?: (context: WalletSetupContext) => Promise<SetupWallet>, beforeEnsure?: (profile: RoutedProfile) => Promise<void>) {
   const root = await mkdtemp(join(tmpdir(), 'rebalance-server-view-'));
   const ensured: RoutedProfile[] = [];
   let setupCalls = 0;
@@ -28,7 +28,7 @@ async function fixture(t: TestContext, setup?: (context: WalletSetupContext) => 
   let ensureFailure = false;
   const unexpectedRead = async (): Promise<never> => { throw new Error('View routes must not query chart balances, gas or process-global configuration'); };
   const server = await serve(0, { dataDir: root, rootDir: root, walletSetups,
-    ensureChart: async profile => { ensured.push(profile); if (ensureFailure) throw new Error('Fixture chart unavailable'); return { state: 'ready', url: `http://127.0.0.1:${profile.chartPort}/chart` }; },
+    ensureChart: async profile => { ensured.push(profile); await beforeEnsure?.(profile); if (ensureFailure) throw new Error('Fixture chart unavailable'); return { state: 'ready', url: `http://127.0.0.1:${profile.chartPort}/chart` }; },
     readConfig: unexpectedRead, readGas: unexpectedRead, readStatus: unexpectedRead,
   });
   const address = server.address(); assert.ok(address && typeof address === 'object');
@@ -266,4 +266,39 @@ test('disconnect HTTP verifies capability and expected selection without touchin
   assert.equal((await readJson<{ wallet: string }>(connectionPath(f.root, sessionB)))?.wallet, walletB);
   for (const [path, bytes] of protectedBytes) assert.equal(await readFile(path, 'utf8'), bytes);
   assert.equal(f.ensured.length, 0); assert.equal(f.setupCalls(), 0);
+});
+
+
+test('an abandoned connection waiting for its chart cannot attach over a newer selection', async t => {
+  let continueOld!: () => void, enteredOld!: () => void;
+  const prepared = new Promise<void>(resolve => { enteredOld = resolve; });
+  const waiting = new Promise<void>(resolve => { continueOld = resolve; });
+  const f = await fixture(t, undefined, async profile => {
+    if (profile.wallet === walletA) { enteredOld(); await waiting; }
+  });
+  t.after(() => continueOld());
+  await f.register();
+  const { token } = await issueView(f.root, sessionA);
+  let closed!: () => void;
+  const abandoned = new Promise<void>(resolve => { closed = resolve; });
+  f.server.once('request', (_request, response) => response.once('close', closed));
+  const old = request(f.url + '/api/connect', { method: 'POST', headers: { Origin: f.url, 'Content-Type': 'application/json' } });
+  old.on('error', () => {});
+  t.after(() => old.destroy());
+  old.end(JSON.stringify({ token, wallet: walletA }));
+  await prepared;
+  assert.equal(await readJson(connectionPath(f.root, sessionA)), null, 'preparing a chart alone does not attach');
+  old.destroy(); await abandoned;
+  const newer = await call(f.url, '/api/connect', { body: { token, wallet: walletB } });
+  assert.equal(newer.code, 200);
+  continueOld();
+  // The abandoned async handler must remain inert after its delayed chart
+  // result, including through later filesystem turns of connectView.
+  for (let i = 0; i < 20; i++) {
+    await delay(5);
+    assert.equal((await readJson<{ wallet: string }>(connectionPath(f.root, sessionA)))?.wallet, walletB);
+  }
+  assert.equal(await readJson(connectionPath(f.root, sessionB)), null);
+  assert.deepEqual(await readJson(join(f.root, 'config.json')), config(walletA));
+  assert.deepEqual(await readJson(join(f.root, 'wallets', walletB, 'config.json')), config(walletB));
 });

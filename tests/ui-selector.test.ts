@@ -33,7 +33,8 @@ function content(node: Node): string { return [node.textContent, ...node.childre
 async function browser(options: { hidden?: boolean; hash?: string; pathname?: string; client?: boolean; selector?: boolean; registry?: typeof portfolios; reply?: (call: Call) => Promise<Reply | undefined> } = {}) {
   const elements = new Map<string, Node>(), lifecycle = new Map<string, (() => void)[]>(), timers = new Map<number, () => void>();
   const calls: Call[] = [], navigations: string[] = [], streams: ReadableStreamDefaultController<Uint8Array>[] = [], setupStreams: ReadableStreamDefaultController<Uint8Array>[] = [];
-  let timerId = 0, uuidCalls = 0;
+  let timerId = 0, uuidCalls = 0, selectedWallet: string | null = walletA;
+  const timerDelays = new Map<number, number>();
   const byId = (id: string) => {
     if (!elements.has(id)) { const node = new Node('div'); node.id = id; elements.set(id, node); }
     return elements.get(id)!;
@@ -47,7 +48,8 @@ async function browser(options: { hidden?: boolean; hash?: string; pathname?: st
     window, URL, AbortController, TextDecoder,
     crypto: { randomUUID: () => { uuidCalls++; return `00000000-0000-4000-8000-${String(uuidCalls).padStart(12, '0')}`; } },
     document,
-    setTimeout: (fn: () => void) => { timers.set(++timerId, fn); return timerId; }, clearTimeout: (id: number) => timers.delete(id),
+    setTimeout: (fn: () => void, delay: number) => { timers.set(++timerId, fn); timerDelays.set(timerId, delay); return timerId; },
+    clearTimeout: (id: number) => { timers.delete(id); timerDelays.delete(id); },
     fetch: async (url: string, init: { body?: string; signal?: AbortSignal; method?: string } = {}) => {
       const call = { url, body: init.body ? JSON.parse(init.body) : undefined, signal: init.signal, method: init.method };
       calls.push(call);
@@ -60,9 +62,9 @@ async function browser(options: { hidden?: boolean; hash?: string; pathname?: st
         } });
         return { ...ok(null), body };
       }
-      if (url === '/api/view') return ok({ connectedWallet: walletA, canSetup: true });
+      if (url === '/api/view') return ok({ connectedWallet: selectedWallet, canSetup: true, chartUrl: portfolios.find(p => p.wallet === selectedWallet)?.chartUrl ?? null });
       if (url === '/api/portfolios') return ok({ portfolios: options.registry ?? portfolios });
-      if (url === '/api/connect') return ok({ wallet: call.body?.wallet, chartUrl: portfolios.find(p => p.wallet === call.body?.wallet)?.chartUrl, tradingChanged: false });
+      if (url === '/api/connect') { selectedWallet = call.body?.wallet as string; return ok({ wallet: selectedWallet, chartUrl: portfolios.find(p => p.wallet === selectedWallet)?.chartUrl, tradingChanged: false }); }
       if (url === '/api/setup') return ok({ state: 'preparing', mode: call.body?.mode, requestId: call.body?.requestId, message: 'Preparing your wallet…', tradingChanged: false });
       throw new Error(`Unexpected request ${url}`);
     },
@@ -76,6 +78,12 @@ async function browser(options: { hidden?: boolean; hash?: string; pathname?: st
   return {
     hold: () => (window as typeof window & { rebalanceView: { suspendForControl: () => () => void } }).rebalanceView.suspendForControl(),
     byId, calls, navigations, timers, streams, setupStreams, get uuidCalls() { return uuidCalls; },
+    select: (value: string | null) => { selectedWallet = value; },
+    async expire(delay: number) {
+      const entry = [...timers].find(([id]) => timerDelays.get(id) === delay);
+      assert.ok(entry, `Expected an active ${delay}ms deadline`);
+      timers.delete(entry[0]); timerDelays.delete(entry[0]); entry[1](); await flush();
+    },
     cards: () => byId('portfolio-grid').children,
     async click(node: Node) { node.click(); await flush(); },
     async send(value: unknown, chunks = false) {
@@ -125,7 +133,7 @@ test('linked card selection waits for connection success and preserves the view 
   await page.click(page.cards()[0]!);
   assert.equal(page.calls.filter(c => c.url === '/api/connect').length, 1);
   assert.deepEqual(page.calls.find(c => c.url === '/api/connect')!.body, { token, wallet: walletB });
-  finish(ok({ wallet: walletB, chartUrl: portfolios[1]!.chartUrl, tradingChanged: false })); await flush();
+  page.select(walletB); finish(ok({ wallet: walletB, chartUrl: portfolios[1]!.chartUrl, tradingChanged: false })); await flush();
   assert.deepEqual(page.navigations, [`http://127.0.0.1:4664/chart${fragment}`]);
   assert.ok(page.calls.every(c => !c.url.includes(token)));
   await page.hide();
@@ -234,7 +242,7 @@ test('ready setup connects through the existing path and navigates only after ve
   assert.equal(page.byId('setup-approval').hidden, true);
   assert.equal(page.byId('setup-approval-link').attrs.href, undefined);
   assert.equal(page.calls.find(c => c.url === '/api/setup/events')!.signal!.aborted, true);
-  finish(ok({ wallet: walletB, chartUrl: portfolios[1]!.chartUrl, tradingChanged: false })); await flush();
+  page.select(walletB); finish(ok({ wallet: walletB, chartUrl: portfolios[1]!.chartUrl, tradingChanged: false })); await flush();
   assert.deepEqual(page.navigations, [`http://127.0.0.1:4664/chart${fragment}`]);
   await page.hide();
 });
@@ -461,19 +469,22 @@ test('malformed and unsafe stream updates cannot leak the handle; failures recon
   assert.equal(missing.calls.length, 0);
 });
 
-test('fresh streamed selection wins over delayed initial reads and stale connection responses', async () => {
-  let finishView!: (value: Reply) => void, finishConnect!: (value: Reply) => void;
-  const page = await browser({ reply: async call => call.url === '/api/view' ? new Promise(resolve => { finishView = resolve; })
+test('fresh authoritative selection wins over delayed initial reads and a stale successful connection response', async () => {
+  let finishView!: (value: Reply) => void, finishConnect!: (value: Reply) => void, reads = 0;
+  const third = { ...portfolios[0]!, wallet: walletC, chartUrl: 'http://127.0.0.1:4665/chart' };
+  const page = await browser({ reply: async call => call.url === '/api/view' ? ++reads === 1
+    ? new Promise(resolve => { finishView = resolve; }) : ok(snapshot(walletC, [...portfolios, third]))
     : call.url === '/api/connect' ? new Promise(resolve => { finishConnect = resolve; }) : undefined });
   await page.send(snapshot(walletA));
   await page.click(page.cards()[1]!);
-  const third = { ...portfolios[0]!, wallet: walletC, chartUrl: 'http://127.0.0.1:4665/chart' };
-  await page.send(snapshot(walletC, [...portfolios, third]));
+  assert.ok(page.calls.filter(call => call.url === '/api/view/events').every(call => call.signal!.aborted));
   finishView(ok({ connectedWallet: walletA, canSetup: true }));
   finishConnect(ok({ wallet: walletB, chartUrl: portfolios[1]!.chartUrl, tradingChanged: false })); await flush();
-  assert.deepEqual(page.navigations, [`http://127.0.0.1:4665/chart${fragment}`]);
-  assert.match(content(page.cards()[2]!), /This chat/);
+  assert.equal(reads, 2, 'fresh readback confirms the actual attachment after the stream was paused');
+  assert.deepEqual(page.navigations, [], 'the stale B reply cannot navigate to B or redirect to unrequested C');
   assert.match(page.byId('portfolio-status').textContent, /changed while connecting/);
+  assert.equal(page.cards()[1]!.disabled, false);
+  assert.equal(page.calls.filter(call => call.url === '/api/connect').length, 1);
   await page.hide();
 });
 
@@ -767,6 +778,165 @@ test('a late aborted companion response cannot replace selection or reconnect du
   release(); await flush();
   assert.equal(page.calls.length, 2);
   await page.send(snapshot());
+  assert.equal(page.navigations.length, 0);
+  await page.hide();
+});
+
+
+test('portfolio selection frees its view stream before POST and holds it through authoritative readback', async () => {
+  let finishConnect!: (value: Reply) => void, finishRead!: (value: Reply) => void, readCount = 0;
+  const streamSignals: AbortSignal[] = [];
+  const page = await browser({ reply: async call => {
+    if (call.url === '/api/view/events') streamSignals.push(call.signal!);
+    if (call.url === '/api/connect') {
+      assert.ok(streamSignals.length > 0 && streamSignals.every(signal => signal.aborted), 'POST must have a free connection slot');
+      return new Promise(resolve => { finishConnect = resolve; });
+    }
+    if (call.url === '/api/view' && ++readCount > 1) {
+      assert.ok(streamSignals.every(signal => signal.aborted), 'readback keeps the same connection slot free');
+      return new Promise(resolve => { finishRead = resolve; });
+    }
+    return undefined;
+  } });
+  await page.click(page.cards()[1]!);
+  await page.click(page.cards()[0]!);
+  assert.equal(page.calls.filter(call => call.url === '/api/connect').length, 1);
+  finishConnect(ok({ wallet: walletB, chartUrl: portfolios[1]!.chartUrl, tradingChanged: false })); await flush();
+  assert.equal(page.navigations.length, 0); assert.ok(page.cards().slice(0, -1).every(card => card.disabled));
+  assert.ok(streamSignals.every(signal => signal.aborted));
+  finishRead(ok(snapshot(walletB))); await flush();
+  assert.deepEqual(page.navigations, [`${portfolios[1]!.chartUrl}${fragment}`]);
+  assert.equal(page.calls.filter(call => call.url === '/api/connect').length, 1);
+  assert.equal(page.uuidCalls, 0);
+  assert.ok(streamSignals.every(signal => signal.aborted), 'successful navigation retains its free browser slot until pagehide');
+  await page.hide();
+});
+
+test('a timed out connection navigates only after readback confirms the requested wallet without repeating POST', async () => {
+  let finish!: (value: Reply) => void;
+  const page = await browser({ reply: async call => call.url === '/api/connect' ? new Promise(resolve => { finish = resolve; }) : undefined });
+  await page.click(page.cards()[1]!);
+  const request = page.calls.find(call => call.url === '/api/connect')!;
+  page.select(walletB); await page.expire(15000);
+  assert.equal(request.signal!.aborted, true, 'deadline ends HTTP waiting, not the server-side connection');
+  assert.deepEqual(page.navigations, [`${portfolios[1]!.chartUrl}${fragment}`]);
+  finish(ok({ wallet: walletA, chartUrl: portfolios[0]!.chartUrl, tradingChanged: false })); await flush();
+  assert.deepEqual(page.navigations, [`${portfolios[1]!.chartUrl}${fragment}`], 'a late result cannot retarget the page');
+  assert.equal(page.calls.filter(call => call.url === '/api/connect').length, 1);
+  assert.equal(page.calls.filter(call => call.url === '/api/view').length, 2);
+  await page.hide();
+});
+
+test('timed out selection stays on the grid and unblocks when readback is unselected, another wallet or unavailable', async () => {
+  for (const current of [null, walletA, 'unavailable']) {
+    let reads = 0;
+    const page = await browser({ reply: async call => {
+      if (call.url === '/api/connect') return new Promise<Reply>(() => {});
+      if (call.url === '/api/view' && ++reads > 1) {
+        if (current === 'unavailable') throw new Error('Readback unavailable');
+        return ok(snapshot(current));
+      }
+      return undefined;
+    } });
+    await page.click(page.cards()[1]!); await page.expire(15000);
+    assert.equal(page.navigations.length, 0, String(current));
+    assert.equal(page.cards()[1]!.disabled, false, String(current));
+    assert.ok(page.byId('portfolio-status').textContent.length > 0);
+    assert.doesNotMatch(page.byId('portfolio-status').textContent, /^Connecting/);
+    assert.equal(page.calls.filter(call => call.url === '/api/connect').length, 1);
+    await page.hide();
+  }
+});
+
+test('connection deadline includes stalled JSON and ignores late body data after readback', async () => {
+  let finishBody!: (value: unknown) => void;
+  const page = await browser({ reply: async call => call.url === '/api/connect'
+    ? { ok: true, status: 200, json: () => new Promise(resolve => { finishBody = resolve; }) } : undefined });
+  await page.click(page.cards()[1]!); page.select(walletB); await page.expire(15000);
+  assert.deepEqual(page.navigations, [`${portfolios[1]!.chartUrl}${fragment}`]);
+  finishBody({ wallet: walletA, chartUrl: portfolios[0]!.chartUrl, tradingChanged: true }); await flush();
+  assert.deepEqual(page.navigations, [`${portfolios[1]!.chartUrl}${fragment}`]);
+  assert.equal(page.calls.filter(call => call.url === '/api/connect').length, 1); await page.hide();
+});
+
+test('readback has its own bounded deadline even when the HTTP response or JSON body ignores abort', async () => {
+  for (const stalled of ['request', 'json']) {
+    let reads = 0;
+    const page = await browser({ reply: async call => {
+      if (call.url !== '/api/view' || ++reads === 1) return undefined;
+      return stalled === 'request' ? new Promise<Reply>(() => {}) : { ok: true, status: 200, json: () => new Promise(() => {}) };
+    } });
+    await page.click(page.cards()[1]!); await page.expire(4500);
+    assert.equal(page.navigations.length, 0);
+    assert.equal(page.cards()[1]!.disabled, false);
+    const read = page.calls.filter(call => call.url === '/api/view').at(-1)!;
+    assert.equal(read.signal!.aborted, true);
+    assert.equal(page.calls.filter(call => call.url === '/api/connect').length, 1);
+    assert.doesNotMatch(page.byId('portfolio-status').textContent, /^Connecting/);
+    await page.hide();
+  }
+});
+
+test('pagehide aborts connection waiting and prevents late selection/readback navigation after pageshow', async () => {
+  for (const phase of ['connect', 'readback']) {
+    let finish!: (value: Reply) => void, reads = 0;
+    const page = await browser({ reply: async call => {
+      if (phase === 'connect' && call.url === '/api/connect') return new Promise(resolve => { finish = resolve; });
+      if (call.url === '/api/view' && ++reads > 1 && phase === 'readback') return new Promise(resolve => { finish = resolve; });
+      return undefined;
+    } });
+    await page.click(page.cards()[1]!);
+    const pending = page.calls.filter(call => call.url === (phase === 'connect' ? '/api/connect' : '/api/view')).at(-1)!;
+    await page.hide();
+    assert.equal(pending.signal!.aborted, true);
+    assert.ok(page.calls.filter(call => call.url === '/api/view/events').every(call => call.signal!.aborted), 'a release cannot reconnect a hidden page');
+    await page.show(); await page.send(snapshot(walletA));
+    finish(phase === 'connect' ? ok({ wallet: walletB, chartUrl: portfolios[1]!.chartUrl, tradingChanged: false }) : ok(snapshot(walletB)));
+    await flush();
+    assert.equal(page.navigations.length, 0);
+    assert.ok(page.cards().slice(0, -1).every(card => !card.disabled));
+    assert.equal(page.byId('portfolio-status').textContent, '');
+    assert.equal(page.calls.filter(call => call.url === '/api/connect').length, 1);
+    await page.hide();
+  }
+});
+
+
+test('same-origin successful selection keeps its stream closed until navigation and a restored selector reconnects once', async () => {
+  const page = await browser();
+  await page.send(snapshot(walletA)); await page.click(page.cards()[0]!);
+  assert.deepEqual(page.navigations, [`${portfolios[0]!.chartUrl}${fragment}`]);
+  const requests = () => page.calls.filter(call => call.url === '/api/view/events');
+  assert.equal(requests().length, 1);
+  assert.ok(requests().every(call => call.signal!.aborted), 'a replacement SSE must not take the HTML navigation slot');
+  await page.hide(); assert.equal(requests().length, 1);
+  await page.show(); assert.equal(requests().length, 2);
+  await page.send(snapshot(walletA));
+  assert.equal(page.navigations.length, 1, 'restoration establishes a baseline without repeating navigation');
+  assert.ok(page.cards().slice(0, -1).every(card => !card.disabled));
+  assert.equal(page.calls.filter(call => call.url === '/api/connect').length, 1);
+  await page.hide();
+});
+
+
+test('an uncertain connection error survives resumed snapshots until a new explicit choice or Back', async () => {
+  const page = await browser({ reply: async call => call.url === '/api/connect' ? new Promise<Reply>(() => {}) : undefined });
+  await page.send(snapshot(walletA)); await page.click(page.cards()[1]!); await page.expire(15000);
+  const error = page.byId('portfolio-status').textContent;
+  assert.ok(error.length > 0); assert.doesNotMatch(error, /^Connecting/);
+  assert.equal(page.cards()[1]!.disabled, false);
+  await page.send(snapshot(walletA));
+  assert.equal(page.byId('portfolio-status').textContent, error, 'a healthy transport does not establish the prior request outcome');
+  assert.equal(page.cards()[1]!.disabled, false);
+  assert.equal(page.calls.filter(call => call.url === '/api/connect').length, 1);
+  assert.equal(page.navigations.length, 0);
+  await page.click(page.cards()[1]!);
+  assert.match(page.byId('portfolio-status').textContent, /^Connecting/);
+  assert.equal(page.calls.filter(call => call.url === '/api/connect').length, 2, 'only the new explicit click sends another selection');
+  await page.hide(); await page.show(); await page.send(snapshot(walletA));
+  assert.equal(page.byId('portfolio-status').textContent, '');
+  assert.ok(page.cards().slice(0, -1).every(card => !card.disabled));
+  assert.equal(page.calls.filter(call => call.url === '/api/connect').length, 2);
   assert.equal(page.navigations.length, 0);
   await page.hide();
 });

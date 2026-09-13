@@ -195,3 +195,8 @@ Isolated mixed-portfolio regressions cover distinct-token approvals, one sales b
 ## Stable Ledger approvals and responsive controls — September13
 
 Prompt091 follows the public audit of seven phase-batched transactions, including one repeated AMD approval from a tiny price increase. Retain and monotonically tighten public prepared input amounts across approvals/restarts, with fresh clipped-sale quotes, bounded USDG allocation and receipt/config/cycle scope. Combined swaps remain the production path. UI Start/Stop transitions use bounded read-only reconciliation; a missing control response must remain visibly uncertain and never automatically retry its mutation. No live Start or signing is performed by this repair.
+
+
+### Selector connection feedback (prompt 092)
+
+Bound the selector's explicit connection wait, release its live stream through navigation, verify the actual saved attachment and prevent an abandoned chart-preparation request from overwriting a later selection. Preserve non-trading selection, existing notification semantics and stale-response guards.
