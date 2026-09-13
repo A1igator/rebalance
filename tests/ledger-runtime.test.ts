@@ -86,6 +86,11 @@ const chain = {
   snapshots++;
   const portfolio=evaluatePortfolio(Object.keys(targets).map(id=>({id,symbol:id,decimals:6,
     balance:swapDone?20000000n:id==='USDG'?100000000n:0n, priceUsdE8:100000000n,targetBps:targets[id]})));
+  if(scenario==='unexecutable-drift') {
+   const rounded=evaluatePortfolio(Object.keys(targets).map(id=>({id,symbol:id,decimals:0,
+    balance:id==='AAPL'?1n:0n,priceUsdE8:100000000n,targetBps:targets[id]})));
+   return {portfolio:rounded,nativeBalance:10n**18n,blockNumber:102n,valuationNote:'Offline indivisible-unit fixture'};
+  }
   return {portfolio,nativeBalance:10n**18n,blockNumber:102n,valuationNote:'Offline fixture'};
  },
  quote:async()=>{quotes++; if(scenario==='quote-failed') throw new Error('Quote fixture failed'); if(scenario==='config-changed') await storage.atomicWriteJson(configModule.CONFIG_PATH,{...config,slippageBps:75}); return {amountOut:1n,minimumOut:1n,fee:500,blockNumber:102n};},
@@ -142,6 +147,13 @@ try {
     assert.equal(signatures,3); assert.equal(sends,3);
     assert.notEqual((await request.readLedgerRequest()).id,firstId);
    }
+  } else if(scenario==='unexecutable-drift') {
+   assert.equal(first.operation.status,'observation-changed');
+   assert.match(first.operation.message,/outside the drift threshold/);
+   assert.equal((await request.readLedgerRequest()).outcome,'observation-changed');
+   assert.equal(first.proposal,undefined); assert.equal(signatures,0); assert.equal(sends,0);
+   assert.equal(await storage.readJson(runtime.CYCLE_PATH),null,'no false cycle completion');
+   assert.equal((await events()).filter(e=>e.type==='rebalance-completed').length,0);
   } else if(scenario==='unknown-send') {
    assert.equal(first.operation.status,'unresolved'); assert.equal(ledger.active,false);
    assert.equal((await request.readLedgerRequest()).outcome,'unresolved');
@@ -202,7 +214,7 @@ try {
 
 for (const scenario of ['sequence', 'automatic-sequence', 'automatic-fees', 'disconnected', 'read-only-intent', 'automatic-read-only',
   'restart', 'config-changed', 'rejected', 'discovery-error-restart', 'unavailable', 'timeout', 'unsupported', 'reconnect-retry', 'explicit-retry',
-  'quote-failed', 'stopped-during-sign', 'expired-during-sign', 'unknown-send', 'cooling-down', 'pending-barrier']) {
+  'quote-failed', 'stopped-during-sign', 'expired-during-sign', 'unknown-send', 'cooling-down', 'pending-barrier', 'unexecutable-drift']) {
   test(`Ledger runtime: ${scenario}`, async () => {
     const directory = await mkdtemp(join(tmpdir(), 'rebalance-ledger-runtime-'));
     try {

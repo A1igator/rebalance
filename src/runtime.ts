@@ -23,6 +23,18 @@ import { watchLedgerPresence } from './ledger-onboarding.js';
 import { createWakeSource } from './wake.js';
 export type LedgerPresence = { connected: boolean; revision: number; observed?: boolean };
 
+class NoExecutableRebalanceError extends Error {
+  constructor() { super('Portfolio remains outside the drift threshold, but no useful trade can be prepared from these balances. Waiting for a fresh observation.'); }
+}
+
+function withinRebalanceThreshold(portfolio: Portfolio, thresholdBps: number): boolean {
+  const total = portfolio.totalUsdE8;
+  return total > 0n && portfolio.positions.every(position => {
+    const delta = position.valueUsdE8 * 10000n - total * BigInt(position.targetBps);
+    return (delta < 0n ? -delta : delta) <= total * BigInt(thresholdBps);
+  });
+}
+
 export const STOP_PATH = resolve(DATA, 'stop.json');
 export type Status = {
   app: 'Rebalance'; chain: { id: 4663; name: 'Robinhood' };
@@ -236,6 +248,11 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
       const proposal = planRebalance(portfolio, 'USDG', config.driftThresholdBps);
       state.proposal = proposal;
       if (!proposal) {
+        // Integer rounding or unavailable bounded inputs can leave no useful
+        // trade even while drift remains. An empty plan is not completion.
+        if (portfolio.totalUsdE8 > 0n && !withinRebalanceThreshold(portfolio, config.driftThresholdBps)) {
+          throw new NoExecutableRebalanceError();
+        }
         await withCurrentConfig(() => finishRebalanceCycle());
         state.cycle = publicCycle(await readCycle());
       }
@@ -348,7 +365,7 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
       delete state.proposal; delete state.feeCheck;
       state.cycle = publicCycle(await readCycle());
       state.graph = { node: 'wait', trace: [...state.graph.trace.filter(node => node !== 'error'), 'wait'] };
-    } else if (error instanceof RebalanceInputLimitError) {
+    } else if (error instanceof RebalanceInputLimitError || error instanceof NoExecutableRebalanceError) {
       state.error = null;
       state.operation = { status: 'observation-changed', message: error.message };
       delete state.proposal; delete state.feeCheck;
@@ -369,7 +386,7 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
       state.operation = { status: `ledger-${error.outcome}`, message: error.message };
       if (!['rejected', 'cancelled', 'timeout'].includes(error.outcome)) state.error = error.message;
     } else state.error = publicError(error);
-    await ledger?.finish(error instanceof RebalanceNotRequiredError || error instanceof RebalanceInputLimitError ? 'observation-changed' : error instanceof ConfigChangedError || error instanceof ConfigLockBusyError ? 'configuration-changed' : error instanceof FeeTargetError ? 'fee-target' : error instanceof LedgerSigningError ? error.outcome : 'failed');
+    await ledger?.finish(error instanceof RebalanceNotRequiredError || error instanceof RebalanceInputLimitError || error instanceof NoExecutableRebalanceError ? 'observation-changed' : error instanceof ConfigChangedError || error instanceof ConfigLockBusyError ? 'configuration-changed' : error instanceof FeeTargetError ? 'fee-target' : error instanceof LedgerSigningError ? error.outcome : 'failed');
     await atomicWriteJson(STATE_PATH, state);
   });
   if (configured?.mode === 'ledger') {
@@ -392,11 +409,7 @@ export async function tick(execute: boolean, chainFor: typeof createChain = crea
     if (!state.error && configured && state.portfolio && state.proposal !== undefined &&
         state.operation?.status !== 'configuration-changed' && JSON.stringify(await loadConfig()) === JSON.stringify(configured)) {
       // Connected Ledger work proceeds in this backend; drift never wakes a model.
-      const total = state.portfolio.totalUsdE8;
-      const withinThreshold = total > 0n && state.portfolio.positions.every(position => {
-        const delta = position.valueUsdE8 * 10000n - total * BigInt(position.targetBps);
-        return (delta < 0n ? -delta : delta) <= total * BigInt(configured.driftThresholdBps);
-      });
+      const withinThreshold = withinRebalanceThreshold(state.portfolio, configured.driftThresholdBps);
       if (!state.proposal && withinThreshold && state.operation?.status === 'confirmed' && state.operation.kind === 'swap' && state.operation.hash) {
         await withCurrentConfig(() => rebalanceCompleted(state.operation!.hash!));
       }

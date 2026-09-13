@@ -145,14 +145,24 @@
   async function refreshRunner(expectedWallet) {
     const generation = ++readGeneration, revision = runnerRevision;
     const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 4500);
+    let cancel;
     try {
-      const response = await fetch("/api/runner", { cache: "no-store", signal: controller.signal });
-      if (!response.ok) throw new Error("Runner status unavailable");
-      const result = await response.json();
+      const result = await Promise.race([
+        (async () => {
+          const response = await fetch("/api/runner", { cache: "no-store", signal: controller.signal });
+          if (!response.ok) throw new Error("Runner status unavailable");
+          return response.json();
+        })(),
+        new Promise((_, reject) => {
+          cancel = () => reject(new Error("Runner status check interrupted"));
+          controller.signal.addEventListener("abort", cancel, { once: true });
+          if (controller.signal.aborted) cancel();
+        }),
+      ]);
       if (!suspended && generation === readGeneration && revision === runnerRevision && same(wallet, expectedWallet)) updateRunner(result);
     } catch {
       if (!suspended && generation === readGeneration && revision === runnerRevision && same(wallet, expectedWallet)) updateRunner(null, true);
-    } finally { clearTimeout(timeout); }
+    } finally { clearTimeout(timeout); controller.signal.removeEventListener("abort", cancel); }
   }
   async function requestRunnerChange(body) {
     const controller = new AbortController();

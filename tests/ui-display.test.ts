@@ -1256,3 +1256,36 @@ test('Back releases its own busy state when the selector document fails to load'
   failure('obsolete navigation failure');
   assert.doesNotMatch(page.element('control-message').textContent, /obsolete/);
 });
+
+
+test('planned status-stream rotation verifies with short reads without invalidating runner controls', async () => {
+  const page = await browser({ trackControls: true });
+  page.source.handlers.get('runner')!({ data: JSON.stringify({ wallet: current.wallet, state: 'running' }) });
+  const before = page.runnerUpdates.length;
+  page.source.handlers.get('rotate')!({ data: '{}' });
+  await flush();
+  assert.equal(page.source.closed, true);
+  assert.equal(page.calls.length, 1, 'rotation requests fresh public status immediately');
+  assert.equal(page.sources.length, 1, 'native reconnection is deferred to avoid another eviction loop');
+  assert.equal(page.runnerUpdates.slice(before).some(([, disconnected]) => disconnected), false);
+  assert.equal(page.statusUpdates.some(([, disconnected]) => disconnected), false);
+  page.source.onerror!(); await flush();
+  assert.equal(page.runnerUpdates.slice(before).some(([, disconnected]) => disconnected), false, 'the closed old source cannot invalidate refreshed controls');
+  await page.advance(15000);
+  assert.equal(page.sources.length, 2, 'stream reconnect uses a bounded backoff');
+  page.hide();
+});
+
+test('planned rotation with an unresponsive status read marks data stale at the deadline and ignores late JSON', async () => {
+  let finish!: (value: unknown) => void;
+  const page = await browser({ trackControls: true, status: async () => ({ ok: true, json: () => new Promise(resolve => { finish = resolve; }) }) });
+  page.source.handlers.get('rotate')!({ data: '{}' }); await flush();
+  assert.equal(page.statusUpdates.some(([, disconnected]) => disconnected), false);
+  await page.advance(4500);
+  assert.equal(page.calls[0]!.signal.aborted, true);
+  assert.equal(page.statusUpdates.at(-1)![1], true, 'stalled rotation read cannot keep stale state enabled');
+  const count = page.statusUpdates.length;
+  finish(current); await flush();
+  assert.equal(page.statusUpdates.length, count);
+  page.hide();
+});

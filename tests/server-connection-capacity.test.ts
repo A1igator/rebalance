@@ -29,6 +29,7 @@ test('live streams yield capacity so another tab can load a document and issue s
   const root = await mkdtemp(join(tmpdir(), 'rebalance-server-capacity-'));
   const pool = new Agent({ keepAlive: true, maxSockets: 6, maxTotalSockets: 6 });
   const requests: ClientRequest[] = [], streams: IncomingMessage[] = [];
+  const streamBodies = new Map<IncomingMessage, string>();
   const commands: Command[] = [], received: string[] = [];
   const unexpected = async (): Promise<never> => { throw new Error('Capacity fixture must not read gas, configuration or a signer'); };
   const server = await serve(0, { rootDir: root, dataDir: root,
@@ -71,7 +72,7 @@ test('live streams yield capacity so another tab can load a document and issue s
         response.setEncoding('utf8');
         response.on('error', reject);
         response.on('data', chunk => {
-          body += chunk;
+          body += chunk; streamBodies.set(response, body);
           const event = post ? 'view' : 'status';
           if (body.split('\n\n').slice(0, -1).some(frame => frame.startsWith(`event: ${event}\n`))) resolve(response);
         });
@@ -99,6 +100,7 @@ test('live streams yield capacity so another tab can load a document and issue s
   const pages: IncomingMessage[][] = [];
   for (let index = 0; index < 3; index++) pages.push(await Promise.all([stream('/api/status/events'), stream('/api/view/events')]));
   await until(() => pages[0]!.every(response => response.readableEnded), 'the oldest streams end without requiring their tab to close');
+  assert.ok(pages[0]!.every(response => streamBodies.get(response)?.includes('event: rotate\ndata: {}\n\n')), 'both closed stream types announce planned rotation before EOF');
   assert.ok(sockets() <= 6); assert.equal(queued(), 0);
   assert.equal(streams.filter(response => !response.readableEnded && !response.destroyed).length, 4);
 

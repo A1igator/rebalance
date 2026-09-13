@@ -28,7 +28,7 @@ class Node {
   click() { if (!this.disabled) this.dispatch('click'); }
   dispatch(name: string) { for (const handler of this.handlers.get(name) || []) handler(); }
 }
-type Controls = { updateStatus: (value: unknown, disconnected?: boolean) => void; updateRunner: (value: unknown, disconnected?: boolean) => void };
+type Controls = { refreshRunner: (wallet: string) => Promise<void>; updateStatus: (value: unknown, disconnected?: boolean) => void; updateRunner: (value: unknown, disconnected?: boolean) => void };
 async function browser(options: { token?: string | null; reply?: (call: Call) => Promise<Reply | undefined>; onTransport?: (event: string) => void } = {}) {
   const nodes = new Map<string, Node>(), events = new Map<string, (() => void)[]>(), subscribers = new Set<(value: unknown) => void>();
   const timers = new Map<number, () => void>(), calls: Call[] = [];
@@ -69,6 +69,7 @@ async function browser(options: { token?: string | null; reply?: (call: Call) =>
   assert.ok(controls, 'the chart controls expose their input boundary');
   return { byId, calls, timers, advance: (milliseconds: number) => { now += milliseconds; }, get uuidCalls() { return uuidCalls; },
     posts: () => calls.filter(call => call.method === 'POST'),
+    refreshRunner: () => controls.refreshRunner(wallet),
     async status(value: unknown = chart(), disconnected = false) { controls.updateStatus(value, disconnected); await flush(); },
     async runner(value: unknown = runner(), disconnected = false) { controls.updateRunner(value, disconnected); await flush(); },
     async view(value: unknown = { snapshot: { connectedWallet: wallet } }) { for (const subscriber of subscribers) subscriber(value); await flush(); },
@@ -837,4 +838,24 @@ test('a document navigation failure stays visible across healthy runner and conn
   await page.view(); await page.runner(runner('running')); await page.status();
   assert.match(page.byId('control-message').textContent, /page did not open/);
   assert.equal(page.posts().length, 0);
+});
+
+
+test('bounded runner readback fails closed even when the transport or JSON ignores abort', async () => {
+  for (const phase of ['transport', 'body']) {
+    const pending = deferred<Reply>(), body = deferred<unknown>();
+    const page = await browser({ reply: async call => call.url === '/api/runner' && call.method === 'GET'
+      ? phase === 'transport' ? pending.promise : { ok: true, json: () => body.promise } : undefined });
+    await page.ready('running');
+    const read = page.refreshRunner(); await flush();
+    assert.equal(page.byId('portfolio-run').textContent, 'Stop');
+    await page.timersRun(); await read;
+    assert.equal(page.byId('portfolio-run').disabled, true);
+    assert.equal(page.byId('portfolio-run').textContent, 'Unavailable');
+    assert.equal(page.calls[0]!.signal!.aborted, true);
+    pending.resolve(ok(runner('running'))); body.resolve(runner('running')); await flush();
+    assert.equal(page.byId('portfolio-run').disabled, true, 'late read data cannot revive stale controls');
+    await page.click('portfolio-run', true);
+    assert.equal(page.posts().length, 0);
+  }
 });

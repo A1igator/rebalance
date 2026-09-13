@@ -38,7 +38,7 @@ Multicall delegates each swap in order while preserving the wallet as payer. An 
 
 Final preparation independently rebuilds holdings, sales, minima, purchase allocation, quotes and exact aggregate approvals together. A previous quote or caller-supplied future balance cannot bypass funding validation. The status proposal and fee counts follow the freshly prepared full plan; projected post-sale holdings are never displayed as actual balances.
 
-The original phase planner remains useful for legacy explicit-phase APIs and projections. With actual cash surplus available, stock residuals within the user's saved drift band do not delay purchases. Material stock overweights, cash shortfalls and zero-threshold behavior preserve required sales. This avoids the tiny corrective sales observed during the old sequential run.
+The original phase planner remains useful for legacy explicit-phase APIs and projections. Stock residuals within the user's saved drift band do not delay purchases when actual, integer-rounded and input-capped cash purchases can bring every material stock deficit inside the band. Positive cash dust alone is insufficient: otherwise bounded stock sales fund the purchases, even when each stock surplus is individually tolerated. This projection selects the funding phase only; actual purchase authority still comes from held cash and encoded sale minima. If retained input bounds exclude the funding stocks, the runtime waits rather than submitting cash-dust follow-ups or declaring completion. Material stock overweights, cash shortfalls and zero-threshold behavior retain required sales. See [prompt 099](prompts/099-funded-batch-planning-and-stream-rotation.md).
 
 ## Receipts, estimates and validation limits
 

@@ -3,7 +3,7 @@
   const token = /^#view=([a-f0-9]{64})$/i.exec(window.location.hash)?.[1] || null;
   const fragment = token ? `#view=${token}` : "";
   const subscribers = new Set(), controlHolds = new Set();
-  let latest = null, controller = null, retryTimer = null, suspended = document.visibilityState === "hidden", generation = 0;
+  let latest = null, controller = null, rotationController = null, retryTimer = null, suspended = document.visibilityState === "hidden", generation = 0;
   let pageHidden = false, returningToSelector = false, navigating = false;
   let navigationReleases = [], navigationTimer = null, failedNavigation = null;
   function releaseNavigation() {
@@ -68,11 +68,37 @@
     if (value.connectedWallet === null && window.location.pathname === "/chart") openSelector(undefined, false);
     else if (changed && value.connectedWallet && value.chartUrl) navigate(chartUrl(value.chartUrl));
   }
+  async function refreshRotation(currentGeneration) {
+    const request = new AbortController();
+    rotationController = request;
+    let timeout, cancel, unauthorized = false;
+    try {
+      const value = await Promise.race([
+        (async () => {
+          const response = await fetch("/api/view", { method: "POST", cache: "no-store",
+            headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token }), signal: request.signal });
+          if (!response.ok) { unauthorized = response.status === 403; throw new Error(unauthorized ? "This view link is unavailable." : "Connection updates unavailable."); }
+          return response.json();
+        })(),
+        new Promise((_, reject) => {
+          cancel = () => reject(new Error("Connection updates unavailable."));
+          request.signal.addEventListener("abort", cancel, { once: true });
+          timeout = setTimeout(() => request.abort(), 4500);
+        }),
+      ]);
+      if (!suspended && currentGeneration === generation && !request.signal.aborted) accept(value);
+    } catch (error) {
+      if (!suspended && currentGeneration === generation) emit({ error: error instanceof Error ? error.message : "Connection updates unavailable.", unauthorized });
+    } finally {
+      clearTimeout(timeout); request.signal.removeEventListener("abort", cancel); request.abort();
+      if (rotationController === request) rotationController = null;
+    }
+  }
   async function connect() {
-    if (!token || suspended || controlHolds.size || controller) return;
+    if (!token || suspended || controlHolds.size || controller || rotationController) return;
     const request = new AbortController(), currentGeneration = generation;
     controller = request;
-    let reader = null, retry = true;
+    let reader = null, retry = true, rotated = false;
     try {
       const response = await fetch("/api/view/events", { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json", Accept: "text/event-stream" }, body: JSON.stringify({ token }), signal: request.signal });
       if (!response.ok || !response.body) {
@@ -82,7 +108,7 @@
       reader = response.body.getReader();
       const decoder = new TextDecoder();
       let pending = "";
-      while (!suspended && currentGeneration === generation) {
+      readLoop: while (!suspended && currentGeneration === generation) {
         const part = await reader.read();
         if (suspended || currentGeneration !== generation) break;
         if (part.done) throw new Error("Connection updates unavailable.");
@@ -98,6 +124,10 @@
             if (line.startsWith("event:")) event = line.slice(6).trim();
             if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
           }
+          if (event === "rotate") {
+            if (data.join("\n") !== "{}") throw new Error("Connection updates unavailable.");
+            rotated = true; break readLoop;
+          }
           if (event === "view" && data.length) accept(JSON.parse(data.join("\n")));
         }
       }
@@ -106,7 +136,10 @@
     } finally {
       void reader?.cancel().catch(() => {}); reader?.releaseLock(); request.abort();
       if (controller === request) controller = null;
-      if (!suspended && !controlHolds.size && currentGeneration === generation && retry) retryTimer = setTimeout(() => { retryTimer = null; void connect(); }, 3000);
+      if (!suspended && !controlHolds.size && currentGeneration === generation && retry) {
+        if (rotated) void refreshRotation(currentGeneration);
+        retryTimer = setTimeout(() => { retryTimer = null; void connect(); }, rotated ? 15000 : 3000);
+      }
     }
   }
   window.rebalanceView = {
@@ -121,6 +154,7 @@
     generation++;
     clearTimeout(retryTimer); retryTimer = null;
     controller?.abort(); controller = null;
+    rotationController?.abort(); rotationController = null;
   }
   function suspendForControl() {
     const hold = {};

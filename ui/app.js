@@ -514,7 +514,7 @@
   let stream = null;
   let streamReady = false;
   let refreshTimer = null;
-  let initialTimer = null;
+  let initialTimer = null, rotationReconnectTimer = null;
   let feeExpiryTimer = null;
   let controller = null;
   let refreshing = false;
@@ -555,10 +555,20 @@
     const request = new AbortController();
     controller = request;
     const timeout = setTimeout(() => request.abort(), 4500);
+    let cancel;
     try {
-      const response = await fetch("/api/status", { cache: "no-store", signal: request.signal });
-      if (!response.ok) throw new Error("Local status unavailable");
-      const snapshot = await response.json();
+      const snapshot = await Promise.race([
+        (async () => {
+          const response = await fetch("/api/status", { cache: "no-store", signal: request.signal });
+          if (!response.ok) throw new Error("Local status unavailable");
+          return response.json();
+        })(),
+        new Promise((_, reject) => {
+          cancel = () => reject(new Error("Local status check interrupted"));
+          request.signal.addEventListener("abort", cancel, { once: true });
+          if (request.signal.aborted) cancel();
+        }),
+      ]);
       if (!streamReady && !suspended && generation === streamGeneration) {
         accept(snapshot);
         if (window.rebalanceControls) await window.rebalanceControls.refreshRunner(snapshot.wallet);
@@ -566,7 +576,7 @@
     } catch {
       if (!streamReady && !suspended && generation === streamGeneration) show(lastSnapshot, true);
     } finally {
-      clearTimeout(timeout);
+      clearTimeout(timeout); request.signal.removeEventListener("abort", cancel);
       if (controller === request) { controller = null; refreshing = false; }
       if (!streamReady && !suspended && generation === streamGeneration && !refreshing) refreshTimer = setTimeout(refresh, 5000);
     }
@@ -605,7 +615,20 @@
         try { window.rebalanceControls?.updateRunner(JSON.parse(event.data)); }
         catch { window.rebalanceControls?.updateRunner(null, true); }
       });
-      // EventSource reconnects itself; polling runs only until a valid event.
+      source.addEventListener("rotate", (event) => {
+        if (stream !== source || suspended) return;
+        if (event.data !== "{}") { source.onerror(); return; }
+        // Deliberate capacity rotation is not a failed runner observation.
+        // Close native automatic reconnect and verify current state through
+        // bounded short reads while giving other tabs their stream turn.
+        source.close(); stream = null; streamReady = false;
+        clearTimeout(initialTimer); initialTimer = null;
+        clearTimeout(rotationReconnectTimer);
+        rotationReconnectTimer = setTimeout(() => { rotationReconnectTimer = null; connect(); }, 15000);
+        fallback();
+      });
+      // EventSource reconnects itself after actual failures; polling runs only
+      // until a valid event. Deliberate rotation above has its own backoff.
       source.onerror = () => {
         if (stream !== source || suspended) return;
         streamReady = false;
@@ -619,6 +642,7 @@
     streamReady = false; streamGeneration++;
     stream?.close(); stream = null;
     clearTimeout(initialTimer); initialTimer = null;
+    clearTimeout(rotationReconnectTimer); rotationReconnectTimer = null;
     clearTimeout(refreshTimer); refreshTimer = null;
     controller?.abort(); controller = null; refreshing = false;
   }

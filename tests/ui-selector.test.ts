@@ -68,7 +68,7 @@ async function browser(options: { origin?: string; onNavigate?: (url: string) =>
         } });
         return { ...ok(null), body };
       }
-      if (url === '/api/view') return ok({ connectedWallet: selectedWallet, canSetup: true, chartUrl: portfolios.find(p => p.wallet === selectedWallet)?.chartUrl ?? null });
+      if (url === '/api/view') return ok({ connectedWallet: selectedWallet, canSetup: true, portfolios: options.registry ?? portfolios, chartUrl: portfolios.find(p => p.wallet === selectedWallet)?.chartUrl ?? null });
       if (url === '/api/portfolios') return ok({ portfolios: options.registry ?? portfolios });
       if (url === '/api/connect') { selectedWallet = call.body?.wallet as string; return ok({ wallet: selectedWallet, chartUrl: portfolios.find(p => p.wallet === selectedWallet)?.chartUrl, tradingChanged: false }); }
       if (url === '/api/setup') return ok({ state: 'preparing', mode: call.body?.mode, requestId: call.body?.requestId, message: 'Preparing your wallet…', tradingChanged: false });
@@ -82,6 +82,11 @@ async function browser(options: { origin?: string; onNavigate?: (url: string) =>
   }
   await flush();
   return {
+    subscribe: (callback: (value: any) => void) => (window as typeof window & { rebalanceView: { subscribe: (callback: (value: any) => void) => () => void } }).rebalanceView.subscribe(callback),
+    async rotate() {
+      const stream = streams.at(-1)!;
+      stream.enqueue(new TextEncoder().encode('event: rotate\ndata: {}\n\n')); stream.close(); await flush();
+    },
     hold: () => (window as typeof window & { rebalanceView: { suspendForControl: () => () => void } }).rebalanceView.suspendForControl(),
     async openSelector() { (window as typeof window & { rebalanceView: { openSelector: () => void } }).rebalanceView.openSelector(); await flush(); },
     byId, calls, navigations, timers, streams, setupStreams, get uuidCalls() { return uuidCalls; }, get stops() { return stops; },
@@ -1150,4 +1155,55 @@ test('a stalled agent-driven chart change retains its error after fresh connecti
   assert.match(page.byId('portfolio-status').textContent, /page did not open/);
   assert.ok(page.cards().slice(0, -1).every(card => !card.disabled));
   await page.hide();
+});
+
+
+test('planned view rotation reads fresh attachment without a false disconnection or reconnect loop', async () => {
+  const page = await browser({ selector: false });
+  const updates: any[] = []; page.subscribe(value => updates.push(value));
+  await page.send(snapshot(walletA)); await page.rotate();
+  assert.equal(updates.some(value => value.error), false);
+  assert.equal(updates.at(-1).snapshot.connectedWallet, walletA);
+  assert.equal(page.calls.filter(call => call.url === '/api/view').length, 1);
+  assert.equal(page.streams.length, 1);
+  assert.equal(page.calls.filter(call => call.url === '/api/connect').length, 0);
+  await page.expire(15000); assert.equal(page.streams.length, 2);
+  await page.hide();
+});
+
+test('rotation readback follows actual attachment changes while a stalled or denied read fails closed', async () => {
+  const changed = await browser({ selector: false });
+  await changed.send(snapshot(walletA)); changed.select(walletB); await changed.rotate();
+  assert.deepEqual(changed.navigations, [`${portfolios[1]!.chartUrl}${fragment}`]);
+  assert.equal(changed.calls.some(call => call.url === '/api/connect'), false); await changed.hide();
+  for (const phase of ['transport', 'body', 'denied']) {
+    let finish!: (value: any) => void;
+    const page = await browser({ selector: false, reply: async call => call.url === '/api/view'
+      ? phase === 'denied' ? { ok: false, status: 403, json: async () => ({}) }
+      : phase === 'transport' ? new Promise(resolve => { finish = resolve; })
+      : { ok: true, json: () => new Promise(resolve => { finish = resolve; }) } : undefined });
+    const updates: any[] = []; page.subscribe(value => updates.push(value));
+    await page.send(snapshot(walletA)); await page.rotate();
+    if (phase !== 'denied') {
+      assert.equal(updates.some(value => value.error), false);
+      await page.expire(4500);
+    }
+    assert.equal(typeof updates.at(-1).error, 'string');
+    assert.equal(updates.at(-1).unauthorized, phase === 'denied');
+    const count = updates.length;
+    if (finish) finish(phase === 'transport' ? ok(snapshot(walletB)) : snapshot(walletB));
+    await flush(); assert.equal(updates.length, count); assert.equal(page.navigations.length, 0);
+    assert.equal(page.calls.some(call => call.url === '/api/connect'), false); await page.hide();
+  }
+});
+
+test('a hidden page cancels planned-rotation readback and ignores its later attachment', async () => {
+  let finish!: (value: Reply) => void;
+  const page = await browser({ selector: false, reply: async call => call.url === '/api/view' ? new Promise(resolve => { finish = resolve; }) : undefined });
+  const updates: any[] = []; page.subscribe(value => updates.push(value));
+  await page.send(snapshot(walletA)); await page.rotate(); await page.hide();
+  assert.equal(page.calls.find(call => call.url === '/api/view')!.signal!.aborted, true);
+  finish(ok(snapshot(walletB))); await flush();
+  assert.equal(updates.length, 1); assert.equal(page.navigations.length, 0);
+  await page.show(); assert.equal(page.streams.length, 2); await page.hide();
 });

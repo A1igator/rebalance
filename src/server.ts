@@ -111,6 +111,13 @@ function streamStatus(response: ServerResponse, deps: ChartDependencies): void {
   }
 }
 
+/** Keep short readbacks and streamed view snapshots on one public contract. */
+async function publicViewSnapshot(rootDir: string, token: string) {
+  const [state, entries] = await Promise.all([viewState(rootDir, token), portfolios(rootDir)]);
+  const current = entries.find(p => p.wallet.toLowerCase() === state.connectedWallet?.toLowerCase());
+  return { ...state, chartUrl: current?.chartUrl ?? null, portfolios: entries };
+}
+
 async function streamView(response: ServerResponse, deps: ChartDependencies, token: string) {
   const view = await readView(deps.rootDir, token);
   const directory = resolve(deps.rootDir, 'connections');
@@ -136,7 +143,7 @@ async function streamView(response: ServerResponse, deps: ChartDependencies, tok
     if (closed || reading || !dirty || !writable) return;
     reading = true; dirty = false;
     try {
-      const [state, entries] = await Promise.all([viewState(deps.rootDir, token), portfolios(deps.rootDir)]);
+      const snapshot = await publicViewSnapshot(deps.rootDir, token);
       const routed = await import('../scripts/profile-routing.mjs').then(module => module.readProfiles(deps.rootDir));
       if (closed) return;
       const directories = new Set(routed.filter(p => p.directory !== '.').map(p => p.dataDir));
@@ -147,8 +154,7 @@ async function streamView(response: ServerResponse, deps: ChartDependencies, tok
           w.on('error', fail); profileWatchers.set(path, w);
         } catch { /* Unavailable wallets already have their own unavailable card. */ }
       }
-      const current = entries.find(p => p.wallet.toLowerCase() === state.connectedWallet?.toLowerCase());
-      const payload = JSON.stringify({ ...state, chartUrl: current?.chartUrl ?? null, portfolios: entries });
+      const payload = JSON.stringify(snapshot);
       if (!closed && payload !== last) { writable = response.write(`event: view\ndata: ${payload}\n\n`); last = payload; }
     } catch { fail(); }
     finally { reading = false; schedule(); }
@@ -215,6 +221,7 @@ export async function serve(port = chartPort(), overrides: Partial<ChartDependen
     while (liveStreams.size >= 4) {
       const oldest = liveStreams.values().next().value!;
       liveStreams.delete(oldest);
+      if (oldest.headersSent) oldest.write('event: rotate\ndata: {}\n\n');
       oldest.end();
     }
     liveStreams.add(response);
@@ -275,7 +282,7 @@ export async function serve(port = chartPort(), overrides: Partial<ChartDependen
         if (request.url === '/api/ledger/retry') result = await deps.portfolioControls.retry(input as LedgerRetryRequest);
         else if (request.url === '/api/runner') result = await deps.portfolioControls.command(input as { token: string; wallet: string; action: 'start' | 'stop'; requestId: string });
         else if (request.url === '/api/disconnect') result = await disconnectView(deps.rootDir, input.token as string, input.wallet as string);
-        else if (request.url === '/api/view') result = await viewState(deps.rootDir, input.token as string);
+        else if (request.url === '/api/view') result = await publicViewSnapshot(deps.rootDir, input.token as string);
         else if (request.url === '/api/connect') {
           const profile = await resolveProfile(deps.rootDir, { wallet: input.wallet as string });
           await deps.ensureChart(profile);

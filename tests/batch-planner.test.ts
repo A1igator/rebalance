@@ -199,3 +199,39 @@ test('cash limits apportion atomic units once across every buy and omitted limit
     assert.throws(() => planRebalance(input, 'USDG', 0, limits as never), /Invalid rebalance input limits/);
   }
 });
+
+
+function usdMicros(values: bigint[], targets = [459, 3000, 2180, 2180, 2181]): Portfolio {
+  return evaluatePortfolio(ids.map((id, index) => ({ id, symbol: id, decimals: id === 'USDG' ? 6 : 18,
+    balance: values[index]! * (id === 'USDG' ? 1n : 10n ** 12n), priceUsdE8: USD, targetBps: targets[index]! })));
+}
+
+test('material AAPL underweight uses stock funding rather than insufficient or rounded-zero cash dust', () => {
+  for (const values of [
+    [5_050_000n, 23_820_000n, 23_700_000n, 23_800_000n, 23_630_000n],
+    [4_590_014n, 24_280_000n, 23_710_000n, 23_709_986n, 23_710_000n],
+    [4_590_000n, 24_280_000n, 23_710_000n, 23_709_990n, 23_710_000n],
+  ]) {
+    const observed = usdMicros(values), before = structuredClone(observed);
+    const sales = planRebalance(observed, 'USDG', 500)!;
+    assert.equal(sales.trades.length, 3);
+    assert(sales.trades.every(trade => trade.buyAssetId === 'USDG' && trade.sellAssetId !== 'AAPL'));
+    const minimums = sales.trades.map(trade => trade.amountIn * 995n / 1000n / 10n ** 12n);
+    const combined = planAtomicRebalance(observed, 'USDG', 500, minimums)!;
+    assert.equal(combined.trades.length, 4);
+    assert.equal(combined.trades.at(-1)!.buyAssetId, 'AAPL');
+    assert(combined.trades.at(-1)!.amountIn > 5_000_000n, 'the purchase is funded by all encoded sale minima, not cash dust');
+    assert.equal(planRebalance(observed, 'USDG', 500, { USDG: 2n }), null, 'bounds cannot turn missing sale funding into a dust-only swap');
+    assert.deepEqual(observed, before);
+  }
+});
+
+test('cash-only residual protection uses exact rational threshold and actual apportioned outputs', () => {
+  const enough = usdMicros([5_770_000n, 23_820_000n, 23_470_000n, 23_470_000n, 23_470_000n]);
+  const buys = planRebalance(enough, 'USDG', 500)!;
+  assert.deepEqual(buys.trades.map(trade => [trade.sellAssetId, trade.buyAssetId, trade.amountIn]), [['USDG', 'AAPL', 1_180_000n]]);
+  const short = usdMicros([5_769_999n, 23_820_000n, 23_470_001n, 23_470_000n, 23_470_000n]);
+  assert(planRebalance(short, 'USDG', 500)!.trades.every(trade => trade.buyAssetId === 'USDG'), 'one base unit below sufficient cash must fund the remaining rational deficit');
+  const sharedCash = usdMicros([11_000_000n, 24_000_000n, 20_500_000n, 24_500_000n, 20_000_000n], [1000, 3000, 2500, 2000, 1500]);
+  assert(planRebalance(sharedCash, 'USDG', 500)!.trades.every(trade => trade.buyAssetId === 'USDG'), 'cash apportioned to another underweight must not count toward the materially deficient stock');
+});

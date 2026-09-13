@@ -768,7 +768,7 @@ test('input limits are validated and copied before asynchronous preparation', as
 });
 
 
-test('capped-out sales never misalign minima and held cash remains usable without those sales', async t => {
+test('capped-out sales keep minima aligned and insufficient cash does not create a partial dust fallback', async t => {
   const { state, chain } = fixture(t);
   investedBalances(state); state.allowance = maxUint256;
   const plan = planRebalance((await chain.snapshot()).portfolio, 'USDG', 500)!;
@@ -778,10 +778,12 @@ test('capped-out sales never misalign minima and held cash remains usable withou
   assert(!partial.plan!.trades.some(trade => trade.sellAssetId === 'NVDA'));
   assert.equal(partial.quotes.length, partial.plan!.trades.length);
   state.balances.USDG = 45_000_000n;
-  const cashOnly = await chain.transactionBatch(plan, partial, { ...atomicContext, inputLimits: { USDG: 10_000_000n } });
+  await assert.rejects(chain.transactionBatch(plan, partial, { ...atomicContext, inputLimits: { USDG: 10_000_000n } }), RebalanceInputLimitError);
+  state.balances.USDG = 100_000_000n;
+  const cashOnly = await chain.transactionBatch(plan, partial, { ...atomicContext, inputLimits: { USDG: 64_000_000n } });
   assert.equal(cashOnly.kind, 'swap');
   assert(cashOnly.plan!.trades.every(trade => trade.sellAssetId === 'USDG'));
-  assert.equal(cashOnly.plan!.trades.reduce((sum, trade) => sum + trade.amountIn, 0n), 10_000_000n);
+  assert.equal(cashOnly.plan!.trades.reduce((sum, trade) => sum + trade.amountIn, 0n), 64_000_000n);
 });
 
 

@@ -105,7 +105,7 @@ test('view HTTP routes reject foreign origin/host, missing origin, non-JSON and 
   }
   assert.equal(f.ensured.length, 0); assert.deepEqual(await pendingViewRequests(f.root, sessionA), []);
   const state = await call(f.url, '/api/view', { body: { token }, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
-  assert.equal(state.code, 200); assert.deepEqual(JSON.parse(state.body), { connectedWallet: null, canSetup: true });
+  assert.equal(state.code, 200); assert.deepEqual(JSON.parse(state.body), { connectedWallet: null, canSetup: true, chartUrl: null, portfolios: [] });
   assert.equal(state.headers['cache-control'], 'no-store'); assert.equal(state.headers['referrer-policy'], 'no-referrer');
   assert.match(String(state.headers['content-security-policy']), /frame-ancestors 'none'/);
 });
@@ -140,7 +140,9 @@ test('connect HTTP requests bind the capability conversation only after its char
   assert.deepEqual(f.ensured.map(profile => profile.wallet), [walletB]);
   assert.equal((await readJson<{wallet:string}>(connectionPath(f.root, sessionA)))?.wallet, walletB);
   assert.equal(await readJson(connectionPath(f.root, sessionB)), null);
-  assert.deepEqual(JSON.parse((await call(f.url, '/api/view', { body: { token: b.token } })).body), { connectedWallet: null, canSetup: true });
+  const otherView = JSON.parse((await call(f.url, '/api/view', { body: { token: b.token } })).body);
+  assert.equal(otherView.connectedWallet, null); assert.equal(otherView.canSetup, true);
+  assert.equal(otherView.chartUrl, null); assert.equal(otherView.portfolios.length, 2);
   assert.notEqual((await call(f.url, '/api/connect', { body: { token: a.token, wallet: `0x${'c'.repeat(40)}` } })).code, 200);
   f.failEnsure();
   assert.equal((await call(f.url, '/api/connect', { body: { token: a.token, wallet: walletA } })).code, 503);
@@ -187,9 +189,14 @@ test('view SSE reports session-scoped connection changes without leaking its tok
   assert.equal(first.response.headers['content-type'], 'text/event-stream; charset=utf-8');
   assert.equal(first.events[0].connectedWallet, null); assert.equal(second.events[0].connectedWallet, null);
   assert.equal(first.events[0].portfolios.length, 2); assert.equal(first.events[0].canSetup, true);
+  const initialReadback = JSON.parse((await call(f.url, '/api/view', { body: { token: a.token } })).body);
+  assert.deepEqual(initialReadback, first.events[0], 'short view readback must match the full actual SSE contract, including portfolios and chartUrl');
   assert.equal((await call(f.url, '/api/connect', { body: { token: a.token, wallet: walletB } })).code, 200);
   await until(() => first.events.at(-1)?.connectedWallet === walletB, 'an atomic connection replacement should update its view');
   assert.equal(first.events.at(-1)?.chartUrl, 'http://127.0.0.1:4664/chart');
+  const connectedReadback = JSON.parse((await call(f.url, '/api/view', { body: { token: a.token } })).body);
+  assert.deepEqual(connectedReadback, first.events.at(-1), 'rotation readback follows the same selected-wallet chart routing as the stream');
+  assert.deepEqual(f.ensured.map(profile => profile.wallet), [walletB], 'readbacks do not prepare a chart or repeat selection');
   await delay(100); assert.equal(second.events.length, 1, 'another chat connection must not redirect or emit an unrelated view update');
   await atomicWriteJson(connectionPath(f.root, sessionB), { version: 1, chainId: 4663, wallet: walletA });
   await until(() => second.events.at(-1)?.connectedWallet === walletA, 'direct agent attachment changes should also reach that session view');

@@ -306,10 +306,29 @@ export function planRebalance(
   };
   const surplus = deviations.find(({ position }) => position.id === quoteAssetId)!.delta;
   const overweights = deviations.filter(({ position, delta }) => position.id !== quoteAssetId && delta > 0n);
-  // Realized sale fees/slippage can lower total value, leaving small positive
-  // stock drifts. Spend actual cash surplus before correcting tolerated dust;
-  // material stock drift or a cash shortfall still requires the sales phase.
-  const prioritizeSales = surplus <= 0n || overweights.some(({ delta }) => delta > threshold);
+  const available = surplus > 0n ? (surplus * 10n ** BigInt(quote.decimals)) / (BPS * quote.priceUsdE8) : 0n;
+  const budget = limitedInput(quoteAssetId, available < quote.balance ? available : quote.balance, limits);
+  const deficits = deviations.filter(({ position, delta }) => position.id !== quoteAssetId && delta < 0n).sort(largestFirst);
+  const portions = apportion(budget, deficits.map(({ position, delta }) => ({ id: position.id, weight: -delta })));
+  const buys = deficits.flatMap(({ position }): TradePlan[] => {
+    const amountIn = portions.get(position.id)!;
+    if (amountIn === 0n || estimatedOutput(amountIn, quote, position) === 0n) return [];
+    return [{ sellAssetId: quoteAssetId, buyAssetId: position.id, amountIn,
+      reason: `Buy underweight ${position.symbol} with excess ${quote.symbol}` }];
+  });
+  // This projection chooses the funding phase only. Actual held quote units,
+  // never projected stock sales, remain the cash-only spending authority.
+  const cashResult = evaluatePortfolio(current.positions.map(position => {
+    if (position.id === quoteAssetId) return { ...position, balance: position.balance - buys.reduce((sum, trade) => sum + trade.amountIn, 0n) };
+    const purchase = buys.find(trade => trade.buyAssetId === position.id);
+    return purchase ? { ...position, balance: position.balance + estimatedOutput(purchase.amountIn, quote, position) } : position;
+  }));
+  const cashFundsDeficits = cashResult.positions.every(position => position.id === quoteAssetId ||
+    position.valueUsdE8 * BPS - cashResult.totalUsdE8 * BigInt(position.targetBps) >= -cashResult.totalUsdE8 * BigInt(driftThresholdBps));
+  // Tolerated stock residuals should not cause another sales round when actual
+  // cash can finish the material deficits. A tiny positive cash surplus is not
+  // sufficient evidence: sell bounded surplus stocks when funding is missing.
+  const prioritizeSales = surplus <= 0n || overweights.some(({ delta }) => delta > threshold) || !cashFundsDeficits;
   const sells: TradePlan[] = [];
   for (const { position, delta } of (prioritizeSales ? overweights : []).sort(largestFirst)) {
     const correction = (delta * 10n ** BigInt(position.decimals)) / (BPS * position.priceUsdE8);
@@ -319,19 +338,9 @@ export function planRebalance(
       reason: `Sell overweight ${position.symbol} into ${quote.symbol}` });
   }
   if (sells.length) return { trades: sells, reason: `Sell ${sells.length} overweight asset${sells.length === 1 ? "" : "s"} into ${quote.symbol}` };
-  if (surplus <= 0n) return null;
-  const available = (surplus * 10n ** BigInt(quote.decimals)) / (BPS * quote.priceUsdE8);
-  const budget = limitedInput(quoteAssetId, available < quote.balance ? available : quote.balance, limits);
-  if (budget === 0n) return null;
-  const deficits = deviations.filter(({ position, delta }) => position.id !== quoteAssetId && delta < 0n).sort(largestFirst);
-  if (!deficits.length) return null;
-  const portions = apportion(budget, deficits.map(({ position, delta }) => ({ id: position.id, weight: -delta })));
-  const buys = deficits.flatMap(({ position }): TradePlan[] => {
-    const amountIn = portions.get(position.id)!;
-    if (amountIn === 0n || estimatedOutput(amountIn, quote, position) === 0n) return [];
-    return [{ sellAssetId: quoteAssetId, buyAssetId: position.id, amountIn,
-      reason: `Buy underweight ${position.symbol} with excess ${quote.symbol}` }];
-  });
+  // If a retained input bound excludes the funding stocks, do not spend cash
+  // dust and then mislabel its rounded-zero follow-up as portfolio completion.
+  if (!cashFundsDeficits && overweights.length > 0) return null;
   return buys.length ? { trades: buys, reason: `Buy ${buys.length} underweight asset${buys.length === 1 ? "" : "s"} with excess ${quote.symbol}` } : null;
 }
 

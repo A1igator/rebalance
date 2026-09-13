@@ -1,0 +1,69 @@
+{
+  "verifiedAt": "2026-09-13T08:36:34.972Z",
+  "method": "Read-only public RPC transaction/receipt/block verification and ABI decoding; no signing or state mutation",
+  "chainId": 4663,
+  "wallet": "0xced38202ef03b2cb7dc69cd004f5cce70dc21808",
+  "operations": [
+    {
+      "hash": "0x269e3eb1bc34ab8d536ec430d46a399192f75ecaf6a78dffad9745cb1d19887b",
+      "nonce": 27,
+      "type": "0x0",
+      "blockNumber": 61813038,
+      "timestamp": "2026-09-13T08:25:08.000Z",
+      "status": "success",
+      "authorizationCount": 0,
+      "selfCall": true,
+      "approval": {
+        "token": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "spender": "0xCaf681a66D020601342297493863E78C959E5cb2",
+        "amount": "22673"
+      },
+      "swap": {
+        "router": "0xCaf681a66D020601342297493863E78C959E5cb2",
+        "tokenIn": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "tokenOut": "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9",
+        "fee": 500,
+        "recipient": "0xCeD38202ef03b2cB7dc69cD004F5cCe70dC21808",
+        "amountIn": "22673",
+        "amountOutMinimum": "67698673545834",
+        "sqrtPriceLimitX96": "0"
+      },
+      "gasUsed": "163265",
+      "networkFeeWei": "13867729100000"
+    },
+    {
+      "hash": "0x306e43cb68d8c0c2b205220ef591e86a8c2fe015a21fe5e09c7aaeba23abb2fb",
+      "nonce": 28,
+      "type": "0x0",
+      "blockNumber": 61813197,
+      "timestamp": "2026-09-13T08:25:24.000Z",
+      "status": "success",
+      "authorizationCount": 0,
+      "selfCall": true,
+      "approval": {
+        "token": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "spender": "0xCaf681a66D020601342297493863E78C959E5cb2",
+        "amount": "2"
+      },
+      "swap": {
+        "router": "0xCaf681a66D020601342297493863E78C959E5cb2",
+        "tokenIn": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "tokenOut": "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9",
+        "fee": 500,
+        "recipient": "0xCeD38202ef03b2cB7dc69cD004F5cCe70dC21808",
+        "amountIn": "2",
+        "amountOutMinimum": "2987453046",
+        "sqrtPriceLimitX96": "0"
+      },
+      "gasUsed": "158124",
+      "networkFeeWei": "13438642512000"
+    }
+  ],
+  "nextNonce": 29,
+  "interpretation": "Two successful Simple7702 approval-and-purchase self-calls, without repeated authorization. The planner used only spare USDG (22673 units, then 2 units), omitting funding stock sales. This verifies live delegated approval/swap execution, not a completed target rebalance or Clear Signing.",
+  "limits": [
+    "Signature bytes and raw signed transactions omitted.",
+    "No physical screen count inferred from receipts.",
+    "No signed request, recovery, target change or runner control performed by this audit."
+  ]
+}
