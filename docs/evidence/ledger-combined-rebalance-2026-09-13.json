@@ -1,0 +1,126 @@
+{
+  "chainId": 4663,
+  "wallet": "0xced38202ef03b2cb7dc69cd004f5cce70dc21808",
+  "fromBlock": 61703500,
+  "toBlock": 61706020,
+  "transactions": [
+    {
+      "hash": "0x3d05c0049f029e5d02445b63b308459d63436724ce83b3abbc036d69f260dd09",
+      "nonce": 21,
+      "block": 61705564,
+      "time": "2026-09-13T05:23:53.000Z",
+      "status": "0x1",
+      "gasUsed": "63637",
+      "method": "approve",
+      "to": "0xaf3d76f1834a1d425780943c99ea8a608f8a93f9",
+      "token": "AAPL",
+      "spender": "0xCaf681a66D020601342297493863E78C959E5cb2",
+      "amount": "933381563909034"
+    },
+    {
+      "hash": "0x3d723af6d0bd302d372a5cd81b4ad346739fa97a3921f9407b017c273c0d7b84",
+      "nonce": 22,
+      "block": 61705710,
+      "time": "2026-09-13T05:24:08.000Z",
+      "status": "0x1",
+      "gasUsed": "57976",
+      "method": "approve",
+      "to": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+      "token": "USDG",
+      "spender": "0xCaf681a66D020601342297493863E78C959E5cb2",
+      "amount": "289383"
+    },
+    {
+      "hash": "0x36f874402daaec5b68acc6ffc4e3720fcef2c9ce57dfe2ce500e86814779801d",
+      "nonce": 23,
+      "block": 61705868,
+      "time": "2026-09-13T05:24:24.000Z",
+      "status": "0x1",
+      "gasUsed": "454603",
+      "method": "multicall",
+      "to": "0xcaf681a66d020601342297493863e78c959e5cb2",
+      "swaps": [
+        {
+          "method": "exactInputSingle",
+          "sell": "AAPL",
+          "buy": "USDG",
+          "amountIn": "933381563909034",
+          "minimumOut": "309363",
+          "recipient": "0xCeD38202ef03b2cB7dc69cD004F5cCe70dC21808"
+        },
+        {
+          "method": "exactInputSingle",
+          "sell": "USDG",
+          "buy": "AMD",
+          "amountIn": "97148",
+          "minimumOut": "188525117190163",
+          "recipient": "0xCeD38202ef03b2cB7dc69cD004F5cCe70dC21808"
+        },
+        {
+          "method": "exactInputSingle",
+          "sell": "USDG",
+          "buy": "NVDA",
+          "amountIn": "97099",
+          "minimumOut": "443677074776257",
+          "recipient": "0xCeD38202ef03b2cB7dc69cD004F5cCe70dC21808"
+        },
+        {
+          "method": "exactInputSingle",
+          "sell": "USDG",
+          "buy": "MSFT",
+          "amountIn": "95136",
+          "minimumOut": "190636965884782",
+          "recipient": "0xCeD38202ef03b2cB7dc69cD004F5cCe70dC21808"
+        }
+      ]
+    }
+  ],
+  "rpcIdentityAndNonceChecks": [
+    {
+      "method": "eth_chainId",
+      "params": [],
+      "result": "0x1237"
+    },
+    {
+      "method": "eth_getTransactionCount",
+      "params": [
+        "0xced38202ef03b2cb7dc69cd004f5cce70dc21808",
+        "0x3ad854c"
+      ],
+      "result": "0x15"
+    },
+    {
+      "method": "eth_getTransactionCount",
+      "params": [
+        "0xced38202ef03b2cb7dc69cd004f5cce70dc21808",
+        "0x3ad8f24"
+      ],
+      "result": "0x18"
+    }
+  ],
+  "appObservation": {
+    "source": "Read-only public status in the referenced owner-run task",
+    "completedAt": "2026-09-13T05:24:28.752Z",
+    "outcome": "on-target",
+    "runner": {
+      "pid": 16443,
+      "startedAt": "2026-09-13T04:45:33Z",
+      "codeContext": "Started after commit b7d76eb, with combined batching and stable prepared inputs"
+    }
+  },
+  "conclusions": {
+    "successfulOutgoingTransactions": 3,
+    "exactTokenApprovals": 2,
+    "combinedSwapTransactions": 1,
+    "innerSwapCount": 4,
+    "startingNextNonce": 21,
+    "endingNextNonce": 24,
+    "duplicateApprovalsInAuditedRange": false
+  },
+  "limits": [
+    "The block range and nonce checks bound this transaction count to this run, not the entire wallet history.",
+    "The number of physical device screens, taps and unbroadcast prompts was not independently observed.",
+    "Successful execution and on-target app status do not establish Clear Signing or explicit rejection behavior.",
+    "This audit did not initiate signing, a transaction, runner control or a configuration change."
+  ]
+}

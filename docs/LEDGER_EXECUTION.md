@@ -2,9 +2,23 @@
 
 The initial request-driven integration was implemented September 10, 2026 under [prompt 053](prompts/053-ledger-execution.md). [Prompt 075](prompts/075-ledger-direct-device-validation.md), committed as `920f337` before implementation on September 12, changes the normal workflow to direct backend preparation and device prompts. The integration uses the existing pinned Ledger DMK 1.9.0, Node HID transport 1.0.1, Ethereum Signer Kit 1.18.0 and Context Module 2.5.0 on Robinhood mainnet, chain ID 4663.
 
-**The sequential Ledger rebalance completed successfully on September 12.** Public receipts and refreshed app holdings verify the result; the earlier unavailable, cancelled and fallback-refused attempts below are historical. The new combined-batch implementation is tested offline and awaits its own live validation. Fully decoded device display, Clear Signing and explicit rejection evidence remain separate checks.
+**A combined Ledger rebalance completed successfully on September 13.** Two distinct token approvals and one four-leg Uniswap multicall were confirmed, followed by on-target app status. Earlier sequential, phase-batched and failed attempts below are dated history. Fully decoded device display, Clear Signing and explicit rejection evidence remain separate checks.
 
-## Verified sequential rebalance; batch validation pending
+## Verified combined rebalance — September 13
+
+A bounded public RPC audit verified Robinhood chain **4663**, wallet `0xCeD38202ef03b2cB7dc69cD004F5cCe70dC21808`, and blocks **61703500–61706020**. The wallet's next nonce advanced from **21 to 24**: exactly three successful outgoing transactions in that interval.
+
+| UTC time | Operation | Successful receipt |
+| --- | --- | --- |
+| 05:23:53 | Exact AAPL approval to the configured Uniswap router | [Nonce 21, block 61705564](https://robinhoodchain.blockscout.com/tx/0x3d05c0049f029e5d02445b63b308459d63436724ce83b3abbc036d69f260dd09) |
+| 05:24:08 | Exact aggregate USDG approval to the same router | [Nonce 22, block 61705710](https://robinhoodchain.blockscout.com/tx/0x3d723af6d0bd302d372a5cd81b4ad346739fa97a3921f9407b017c273c0d7b84) |
+| 05:24:24 | One multicall: AAPL → USDG, then USDG → AMD, NVDA and MSFT | [Nonce 23, block 61705868](https://robinhoodchain.blockscout.com/tx/0x36f874402daaec5b68acc6ffc4e3720fcef2c9ce57dfe2ce500e86814779801d) |
+
+All four swaps name the Ledger wallet as recipient. The three USDG purchase inputs sum to the approved **289383 atomic units**. The referenced task's public status recorded completion at **05:24:28.752 UTC** with outcome **on-target**. Its owner-started runner loaded after `b7d76eb`, including combined batching and stable prepared inputs. [Sanitized public evidence](evidence/ledger-combined-rebalance-2026-09-13.json).
+
+No approval was duplicated in this audited interval. This verifies live combined sales and purchases with two required approvals; it is not a universal three-transaction guarantee. The owner's approximate physical prompt count was not independently observed, and chain receipts cannot count review screens, taps or unbroadcast requests. The earlier [September 13 phase-batch audit](evidence/ledger-rebalance-2026-09-13.json) involved a different, older runner and separate sale/purchase transactions. This documentation audit made no signing, runner or configuration change.
+
+## Historical sequential rebalance — September 12
 
 The owner reported that the last live run worked. The linked chart showed **On target** with all four stocks and about 5.19% USDG. Scoped public status/events independently recorded a finished Ledger request with outcome `on-target`, no error/proposal, and completion at **2026-09-12 23:25:08 UTC** (19:25 EDT).
 
