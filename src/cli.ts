@@ -44,6 +44,15 @@ async function main() {
     const { prepareView } = await import('./view.js');
     print(await prepareView(root, sessionId, explicit)); return;
   }
+  const bareLaunch = args[0] === 'launch' && (args.length === 1 || args.length === 2 && args[1] === '--setup-only');
+  if (args.includes('--restore') || bareLaunch && !explicit && process.env.REBALANCE_PROFILE_PINNED !== '1') {
+    if (explicit || process.env.REBALANCE_PROFILE_PINNED === '1') throw new Error('App restoration cannot use a pinned or explicitly selected portfolio.');
+    const requestId = option(args, '--request-id');
+    if (args[0] !== 'launch' || args.some(arg => !['launch', '--restore', '--setup-only'].includes(arg)) ||
+        new Set(args).size !== args.length) throw new Error('Use launch --restore with optional --request-id, --session and --setup-only.');
+    const { restoreApp } = await import('./app-launch.js');
+    print(await restoreApp(root, sessionId, { requestId, setupOnly: args.includes('--setup-only') })); return;
+  }
   if (args[0] === 'wallet' && ['list','add','connect'].includes(args[1] ?? '')) {
     const { portfolios, addPortfolio, connectPortfolio } = await import('./profiles.js');
     if (args[1] === 'list') { if (args.length !== 2) throw new Error('Use wallet list'); print({ portfolios: await portfolios(root), sessionId: sessionId ?? null }); return; }

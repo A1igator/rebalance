@@ -4,7 +4,7 @@ import { get } from 'node:http';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { readProfiles, resolveProfile, type RoutedProfile } from '../scripts/profile-routing.mjs';
+import { readProfiles, resolveProfile, validateProfileDirectory, type RoutedProfile } from '../scripts/profile-routing.mjs';
 import { acquireLock, readJson } from './storage.js';
 import { issueView } from './view-session.js';
 
@@ -80,9 +80,21 @@ export async function ensurePortfolioChart(profile: RoutedProfile, overrides: Pa
 export async function prepareView(rootDir: string, sessionId: string | undefined, wallet?: string,
   overrides: Partial<ViewDependencies> = {}) {
   const profiles = await readProfiles(rootDir);
-  const profile = wallet ? await resolveProfile(rootDir, { wallet }) : profiles.find(p => p.directory === '.') ?? {
+  const rootProfile = profiles.find(p => p.directory === '.') ?? {
     rootDir, dataDir: rootDir, directory: '.', wallet: null, chainId: 4663 as const, chartPort: 4663,
   };
+  let profile = wallet ? await resolveProfile(rootDir, { wallet }) : rootProfile;
+  if (!wallet) {
+    const deps = { ...defaults, ...overrides };
+    // Every owned chart serves this root's selector. Reuse a ready one without
+    // attaching its wallet or replacing an obsolete/foreign default listener.
+    for (const candidate of [rootProfile, ...profiles.filter(p => p.directory !== '.')]) {
+      await validateProfileDirectory(rootDir, candidate.directory);
+      const lock = await readJson<{ pid: number }>(resolve(candidate.dataDir, 'chart.lock'));
+      if (lock === null || !Number.isSafeInteger(lock.pid) || lock.pid <= 0 || lock.pid > 2_147_483_647 || !deps.alive(lock.pid)) continue;
+      if (await deps.probe(candidate) === 'ready') { profile = candidate; break; }
+    }
+  }
   await ensurePortfolioChart(profile, overrides);
   const handle = sessionId ? await issueView(rootDir, sessionId) : null;
   const path = wallet ? '/chart' : '/';

@@ -638,3 +638,14 @@ test('replayed launch requests do not restore notifications or undo a newer noti
   assert.equal(f.notificationCalls.length, calls);
   assert.equal(f.notifications.enabled, false);
 });
+
+
+test('restoration carries the frozen running generation through the final conditional start', async t => {
+  const f = await fixture(t);
+  const generation = '11111111-1111-4111-8111-111111111111';
+  const result = await launch({ expectedStop: 'none', expectedRunnerGeneration: generation }, f.deps);
+  assert.equal(result.outcome, 'armed');
+  assert.deepEqual(f.calls.find(args => args[0] === 'start'), [
+    'start', '--background', '--expected-stop', 'none', '--expected-runner-generation', generation,
+  ]);
+});

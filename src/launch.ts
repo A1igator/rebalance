@@ -10,7 +10,7 @@ import { chartPort, chartUrl } from './chart-address.js';
 
 const REPOSITORY = fileURLToPath(new URL('..', import.meta.url));
 const CLI = fileURLToPath(new URL('./cli.ts', import.meta.url));
-export type LaunchOptions = { setupOnly?: boolean; targets?: string; requestId?: string; expectedStop?: string };
+export type LaunchOptions = { setupOnly?: boolean; targets?: string; requestId?: string; expectedStop?: string; expectedRunnerGeneration?: string };
 type CommandResult = { ok: boolean; value: unknown };
 type ChartProbe = { state: 'absent' } | { state: 'unavailable' } | { state: 'response'; value: unknown };
 export type LaunchDependencies = {
@@ -95,6 +95,9 @@ export async function launch(options: LaunchOptions = {}, overrides: Partial<Lau
   }
   if (options.expectedStop !== undefined && !/^(?:none|[0-9a-f]{64})$/.test(options.expectedStop)) {
     result.messages.push('Invalid expected stop generation.'); return result;
+  }
+  if (options.expectedRunnerGeneration !== undefined && !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(options.expectedRunnerGeneration)) {
+    result.messages.push('Invalid saved runner preference generation.'); return result;
   }
   const attempts = Math.max(1, Math.min(80, deps.attempts));
   const recordPath = resolve(deps.dataDir, 'launch-processes.json');
@@ -290,7 +293,8 @@ export async function launch(options: LaunchOptions = {}, overrides: Partial<Lau
     // The ordinary start command repeats this generation comparison while it
     // serializes stop-marker updates, closing the check/spawn race.
     startAttempted = true;
-    await recordSpawn('runner', await run(['start', '--background', '--expected-stop', expectedStop]));
+    await recordSpawn('runner', await run(['start', '--background', '--expected-stop', expectedStop,
+      ...(options.expectedRunnerGeneration ? ['--expected-runner-generation', options.expectedRunnerGeneration] : [])]));
     for (let i = 0; i < attempts; i++) {
       await readStatus();
       if (result.status!.armed) { result.outcome = 'armed'; return result; }

@@ -2,6 +2,12 @@
 
 Keep the portfolio in a browser pane beside the conversation. The view uses the same local Rebalance server and session-scoped URL as the selector. Opening or navigating it does not launch, stop, or recover a runner.
 
+## Opening the selector
+
+A bare skill invocation opens the conversation-linked selector and restores saved running preferences independently of the selected wallet. A card click attaches this chat and opens that chart; another invocation is not needed to connect. Selector navigation and choosing preserve runner state, with Start available separately on inactive portfolios. The skill entry restores only previously running portfolios; deliberately stopped portfolios stay stopped. Return a short selection prompt rather than listing every wallet or declaring launch incomplete.
+
+The selector can reuse any ready owned chart from the same portfolio registry, while preserving the conversation's view capability. The hosting chart's wallet is not selected by opening its grid. An obsolete or foreign default-port listener is never replaced or adopted; if no existing owned chart is ready, normal read-only root-chart preparation applies. No arbitrary localhost origin or visible browser URL supplies the conversation identity.
+
 ## Claude Code in cmux
 
 The Claude slash-command wrapper supplies `openCompanionView` to the shared hook. After the shared handler has a view URL, the helper opens a cmux browser split beside the invoking terminal. It passes the inherited `CMUX_WORKSPACE_ID` and `CMUX_SURFACE_ID` explicitly and uses `--focus false`, so another focused workspace cannot redirect the opening and keyboard focus stays with the conversation.

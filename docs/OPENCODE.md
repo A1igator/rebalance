@@ -13,7 +13,7 @@ opencode
 
 Use the root **Build** agent and submit **`/rebalance`**. If OpenCode was already running when these files were added, reopen it in this repository so it loads the local plugin and command. Review any native project/plugin consent in the host; this repository does not edit global permissions or trust. The existing model/provider setup belongs to OpenCode.
 
-A bare invocation requests full setup and launch: automatic execution for raw-key/Privy, monitoring without signing for Ledger. When several wallets exist and this conversation has no selection, it opens the selector without arming any wallet. Choose a card, then make a fresh `/rebalance` invocation or use that displayed portfolio's Start button. Setup buttons create unarmed portfolios. Existing settings, transactions, recovery and cadence are preserved.
+A bare invocation opens the linked selector and restores only portfolios whose saved running preference is enabled. Explicitly stopped, never-started and unknown portfolios remain stopped. Selecting a card connects this conversation immediately without another skill invocation; Start is available for a portfolio that the user wants to enable. Ledger transactions retain physical confirmation. Setup buttons create unarmed portfolios, and settings, transactions, recovery and cadence are preserved. See [remembered startup](LAUNCH.md#remembered-background-startup).
 
 `/rebalance status` and other scoped requests use the canonical skill for the named operation. Loading the skill as reference does not trigger the native launcher. A missing native result is an incomplete integration, not permission for the model to reconstruct startup. Do not repeat a launch already reported by the plugin.
 

@@ -4,7 +4,8 @@ import { access, mkdir, open, readFile, realpath, rename, rm, writeFile } from '
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { portfolioRoot, resolveProfile, sessionIdentity, readProfiles, connectionPath, readRoutingJson } from './profile-routing.mjs';
+import { portfolioRoot, resolveProfile, sessionIdentity, readRoutingJson } from './profile-routing.mjs';
+import { captureAppEntryInputs } from './app-entry-inputs.mjs';
 
 const executeFile = promisify(execFile);
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -108,11 +109,13 @@ export async function recordHookObservation(input, root = repository) {
 }
 
 export function hookReply(result) {
+  const appEntry = Array.isArray(result?.portfolios) || result?.outcome === 'select-portfolio';
   return {
     hookSpecificOutput: {
       hookEventName: 'UserPromptSubmit',
       additionalContext: 'The deterministic Rebalance command handler already handled this invocation. '
-        + 'Report the public result below; do not repeat launch or start, or repeat recovery. An outcome is not a trade receipt.\n'
+        + (appEntry ? 'Briefly describe readiness in natural language, invite choosing a portfolio, and include any actual blockers; ' : 'Report the public result below; ')
+        + 'do not repeat launch or start, or repeat recovery or restoration. An outcome is not a trade receipt.\n'
         + JSON.stringify(result),
     },
   };
@@ -124,13 +127,15 @@ function hookFailure(phase) {
     workspace: 'The Rebalance hook could not verify its project directory; no startup was attempted. Review the project hook setup.',
     profile: 'The Rebalance hook could not pin this request to a wallet. Choose this conversation’s wallet or inspect its saved routing; no startup was attempted.',
     'stop-state': 'The Rebalance hook could not read its saved stop state; no startup was attempted. Preserve local records for recovery.',
+    snapshot: 'Rebalance could not preserve this request’s startup inputs; no restoration was attempted. Existing portfolios were preserved.',
     dependencies: 'The Rebalance hook could not prepare its locked dependencies; no startup was attempted. Check the local runtime and dependencies; Node.js 24 or later is required.',
     launch: 'The Rebalance launcher may have started the runner, but its result could not be verified. Current trading state is unknown. Inspect public status; do not repeat launch or start.',
+    restore: 'Rebalance may have restored previously running portfolios, but its result could not be verified. Current trading state is unknown. Inspect public status; do not repeat restoration or start.',
     recovery: 'The Rebalance recovery command may have submitted a cancellation or resumed the runner, but its result could not be verified. Inspect public status and read-only recovery; do not repeat cancellation or start.',
   };
   // These fixed messages are deliberately independent of caught errors, paths,
   // stdin and subprocess output. A dispatched launcher can outlive its result.
-  return hookReply({ app: 'Rebalance', outcome: phase === 'launch' ? 'starting' : phase === 'recovery' ? 'unknown' : 'blocked',
+  return hookReply({ app: 'Rebalance', outcome: ['launch', 'restore'].includes(phase) ? 'starting' : phase === 'recovery' ? 'unknown' : 'blocked',
     status: null, phase, messages: [messages[phase]] });
 }
 
@@ -223,11 +228,8 @@ async function routeRequest(root, selected, overrides) {
       ? config.wallet.toLowerCase() : null;
     profile = { wallet, dataDir: rootDir, chartPort: 4663, rootDir };
   } else {
-    let resolved;
-    try { resolved = await (overrides.resolveProfile ?? resolveProfile)(rootDir, { sessionId: selected.sessionId }); }
-    catch (error) {
-      if (!await needsWalletSelection(root, selected)) throw error;
-    }
+    const resolver = overrides.resolveProfile ?? resolveProfile;
+    const resolved = await resolver(rootDir, { sessionId: selected.sessionId });
     profile = resolved ? { wallet: resolved.wallet?.toLowerCase() ?? null, dataDir: resolve(resolved.dataDir),
       chartPort: resolved.chartPort, rootDir: resolved.rootDir } : null;
   }
@@ -256,24 +258,45 @@ async function runView(root, sessionId) {
   if (result?.state !== 'ready' || typeof result.url !== 'string') throw new Error('Invalid view result');
   return result;
 }
+async function presentView(result, root, selected, overrides) {
+  const view = result?.view;
+  if (view?.state !== 'ready' || typeof view.url !== 'string' || !overrides.openView) return result;
+  let presentation;
+  try { presentation = await overrides.openView({ url: view.url, rootDir: portfolioRoot(process.env, root), sessionId: selected.sessionId }); }
+  catch { presentation = { host: 'host', opened: false, reason: 'Open the local view through this agent host.' }; }
+  return { ...result, view: { ...view, presentation } };
+}
 async function withView(result, root, selected, overrides) {
   try {
     const view = await (overrides.runView ?? runView)(root, selected.sessionId);
-    if (!view) return result;
-    let presentation;
-    if (overrides.openView) {
-      try { presentation = await overrides.openView({ url: view.url, rootDir: portfolioRoot(process.env, root), sessionId: selected.sessionId }); }
-      catch { presentation = { host: 'host', opened: false, reason: 'Open the local view through this agent host.' }; }
-    }
-    return { ...result, view: { ...view, ...(presentation ? { presentation } : {}) } };
+    return view ? presentView({ ...result, view }, root, selected, overrides) : result;
   } catch {
     return { ...result, view: { state: 'unavailable', message: 'The companion view could not be prepared. The reported trading result is unchanged.' } };
   }
 }
-async function needsWalletSelection(root, selected) {
+async function legacyRequest(root, selected) {
   const rootDir = portfolioRoot(process.env, root);
-  if (await readRoutingJson(resolve(rootDir, 'hook-routes', `${selected.requestId}.json`))) return false;
-  return (await readProfiles(rootDir)).length > 1 && await readRoutingJson(connectionPath(rootDir, selected.sessionId)) === null;
+  if (await readRoutingJson(resolve(rootDir, 'hook-routes', `${selected.requestId}.json`)) !== null) return true;
+  const digest = createHash('sha256').update(selected.requestId).digest('hex');
+  return await readRoutingJson(resolve(rootDir, 'launch-requests', `${digest}.json`)) !== null ||
+    await readRoutingJson(resolve(rootDir, 'recovery-requests', `${digest}.json`)) !== null;
+}
+async function runRestore(root, requestId, sessionId) {
+  const rootDir = portfolioRoot(process.env, root);
+  const env = { ...process.env, REBALANCE_ROOT_DIR: rootDir, REBALANCE_DATA_DIR: rootDir, REBALANCE_SESSION_ID: sessionId };
+  for (const key of ['REBALANCE_PROFILE_PINNED', 'REBALANCE_PROFILE_WALLET', 'REBALANCE_CHART_PORT']) delete env[key];
+  let stdout;
+  try {
+    ({ stdout } = await executeFile(process.execPath, ['--import', 'tsx', resolve(root, 'src/cli.ts'),
+      'launch', '--restore', '--request-id', requestId, '--session', sessionId], {
+      cwd: root, env, timeout: 240_000, maxBuffer: 1_048_576,
+    }));
+  } catch (error) { stdout = typeof error.stdout === 'string' ? error.stdout : ''; }
+  const result = JSON.parse(stdout);
+  if (result?.app !== 'Rebalance' || !['ready', 'partial', 'starting', 'already-handled', 'select-portfolio'].includes(result.outcome)) {
+    throw new Error('Invalid app restoration result');
+  }
+  return result;
 }
 
 export async function handlePrompt(input, overrides = {}) {
@@ -288,14 +311,25 @@ export async function handlePrompt(input, overrides = {}) {
     const cwd = await realpath(selected.cwd);
     const child = relative(root, cwd);
     if (child === '..' || child.startsWith('../') || child.startsWith('..\\') || isAbsolute(child)) return null;
-    // Freeze the native request before a chat switch, npm bootstrap or stop read.
+    // Historical requests keep their original route. New app requests delegate
+    // the eligible-wallet snapshot and deduplication to the restoration journal.
     phase = 'profile';
+    if (!recovery && !await legacyRequest(root, selected)) {
+      phase = 'snapshot';
+      await (overrides.captureAppEntryInputs ?? captureAppEntryInputs)(portfolioRoot(process.env, root), selected.requestId, selected.sessionId);
+      phase = 'dependencies';
+      await (overrides.ensureDependencies ?? ensureDependencies)(root);
+      phase = 'restore';
+      const result = await (overrides.runRestore ?? runRestore)(root, selected.requestId, selected.sessionId);
+      return hookReply(await presentView(result, root, selected, overrides));
+    }
     const profile = await routeRequest(root, selected, overrides);
     if (profile.selectionRequired) {
       if (recovery) return hookReply({ app: 'Rebalance', outcome: 'blocked', status: null, messages: ['This request did not select a wallet; no recovery was attempted.'] });
+      phase = 'dependencies';
       await (overrides.ensureDependencies ?? ensureDependencies)(root);
-      return hookReply(await withView({ app: 'Rebalance', outcome: 'needs-input', status: null,
-        messages: ['Choose a portfolio in the companion view. This invocation is selection-only; use a new skill invocation to launch the selected portfolio. No wallet runner was armed or stopped.'] }, root, selected, overrides));
+      return hookReply(await withView({ app: 'Rebalance', outcome: 'select-portfolio', status: null,
+        messages: ['Choose a portfolio to open.'] }, root, selected, overrides));
     }
     phase = 'stop-state';
     const expectedStop = await (overrides.readStopToken ?? readStopToken)(root, profile);

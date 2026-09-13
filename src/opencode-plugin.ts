@@ -109,7 +109,25 @@ export async function createRebalanceOpenCodePlugin(context: Context, overrides:
     const route = await readJson<{ version?: number; requestId?: string; sessionId?: string;
       selectionRequired?: boolean; profile?: { wallet?: string; dataDir?: string; rootDir?: string; chartPort?: number } }>(
       resolve(rootDir, 'hook-routes', `${requestId}.json`));
-    if (!route) return;
+    if (!route) {
+      // New app entries restore an immutable remembered-running snapshot. Only
+      // its eligible wallets join this native conversation's event bindings.
+      const restored = await readJson<{ version: number; requestId: string; sessionId: string;
+        entries: { profile: { wallet: string; rootDir: string; dataDir: string; chartPort: number }; generation: string | null; expectedStop: string | null }[] }>(
+        resolve(rootDir, 'app-launch-requests', `${hash(requestId)}.json`));
+      if (!restored) return;
+      if (restored.version !== 1 || restored.requestId !== requestId || restored.sessionId !== namespaced(id) || !Array.isArray(restored.entries)) throw new Error('Invalid restoration route');
+      const registered = await readProfiles(rootDir), wallets: string[] = [];
+      for (const entry of restored.entries) {
+        if (entry.generation === null && entry.expectedStop === null) continue;
+        if (typeof entry.generation !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(entry.generation) || entry.expectedStop !== 'none') throw new Error('Invalid restoration preference');
+        const profile = registered.find(p => p.wallet === entry.profile?.wallet);
+        if (!profile?.wallet || entry.profile.rootDir !== rootDir || entry.profile.dataDir !== profile.dataDir || entry.profile.chartPort !== profile.chartPort || wallets.includes(profile.wallet)) throw new Error('Restoration route no longer matches a registered wallet');
+        wallets.push(profile.wallet);
+      }
+      await updateBinding(id, value => { for (const wallet of wallets) if (!value.wallets.includes(wallet)) value.wallets.push(wallet); });
+      return;
+    }
     if (route.version !== 1 || route.requestId !== requestId || route.sessionId !== namespaced(id)) throw new Error('Invalid launch route');
     if (route.selectionRequired === true || !route.profile?.wallet) return;
     const profile = (await readProfiles(rootDir)).find(entry => entry.wallet === route.profile!.wallet);

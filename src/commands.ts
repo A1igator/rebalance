@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
+import { constants } from 'node:fs';
 import { open, mkdir, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,11 +23,13 @@ import { chartPort, chartUrl } from './chart-address.js';
 import { loginPrivy, privyWallet } from './privy.js';
 import { launch } from './launch.js';
 import { recover } from './recovery.js';
+import { RUNNER_GENERATION, runnerPreferenceMatches, withRunnerControl, writeRunnerPreference } from './runner-preference.js';
 import { decodeShareCode, encodeShareCode, sharePreview } from './share.js';
 import { configureCodexNotifications, codexNotificationStatus, prepareCodexNotifications,
   runCodexNotifications, stopCodexNotifications } from './codex-notifications.js';
 
 const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
+  launch                               Restore previously running portfolios and open the linked grid
   view                                 Open the portfolio grid linked to this conversation
   wallet list                          List independent wallet portfolios
   wallet add --wallet 0x... --mode privy --targets USDG=5,...
@@ -58,7 +61,7 @@ const HELP = `Rebalance — agent commands, Robinhood mainnet 4663
   ledger status                        Read the latest Ledger rebalance request
   ledger rebalance [--request-id UUID]   Request one device-confirmed rebalance on a running Ledger monitor
   check                                Fresh read/plan/quote; never sign
-  launch [--setup-only]                 Prepare/reuse chart and arm/reuse the runner
+  --profile 0x... launch [--setup-only]  Prepare/reuse chart and arm/reuse that wallet's runner
     [--targets <ASSET=percent,...>]      Initial allocation only; preserve saved targets
   recover                              Read-only assessment of a pending transaction
   recover --cancel                     Explicit same-nonce self-cancellation and verified recovery
@@ -87,7 +90,7 @@ const { values, positionals: args } = parseArgs({ allowPositionals: true, option
   'rebalance-interval-seconds': { type: 'string' },
   'resume-start': { type: 'boolean', default: false },
   'setup-only': { type: 'boolean', default: false }, 'request-id': { type: 'string' },
-  'expected-stop': { type: 'string' },
+  'expected-stop': { type: 'string' }, 'expected-runner-generation': { type: 'string' },
   cancel: { type: 'boolean', default: false },
   thread: { type: 'string' }, codex: { type: 'string' },
   'enabled-only': { type: 'boolean', default: false }, 'notification-token': { type: 'string' },
@@ -109,36 +112,52 @@ function feeTargetStatus(config: Config) {
     description: 'Target for estimated rebalance network fees in USD; estimates are not guaranteed final costs.' };
 }
 
-// Stop and the start command's older-stop removal must be ordered. In
-// particular, a slow launch must not erase a newer user stop during setup.
-async function control<T>(action: () => Promise<T>): Promise<T> {
-  for (let attempt = 0; ; attempt++) {
-    let release: (() => Promise<void>) | undefined;
-    try { release = await acquireLock(DATA, 'control.lock'); }
-    catch (error) {
-      if (attempt >= 99 || !(error instanceof Error) || !/^Lock control\.lock is held/.test(error.message)) throw error;
-      await delay(20); continue;
-    }
-    try { return await action(); } finally { await release(); }
-  }
-}
+// Stop, preference changes and a start's older-stop removal share one boundary.
+const control = <T>(action: () => Promise<T>) => withRunnerControl(DATA, action);
 
-async function clearOlderStop() {
-  await control(async () => {
+async function prepareRunnerStart(persist: boolean): Promise<boolean> {
+  return control(async () => {
+    const config = await requiredConfig();
     const stop = await readJson(STOP_PATH);
+    // A detached continuation never clears a Stop that arrived after its parent.
+    if (values['resume-start'] && stop !== null) return false;
     const token = stop === null ? 'none' : createHash('sha256').update(JSON.stringify(stop)).digest('hex');
     if (values['expected-stop'] !== undefined && values['expected-stop'] !== token) {
       throw new Error('A newer stop arrived during launch; no runner was started and the stop was preserved');
     }
-    await rm(STOP_PATH, { force: true });
+    if (values['expected-runner-generation'] !== undefined && !await runnerPreferenceMatches(DATA, config.wallet,
+      values['expected-runner-generation'], values['expected-stop'] ?? 'none')) {
+      throw new Error('The running preference changed during launch; no runner was started');
+    }
+    if (!values['resume-start']) await rm(STOP_PATH, { force: true });
+    if (persist) await writeRunnerPreference(DATA, config.wallet, true);
+    return true;
   });
+}
+
+async function stopWallet(): Promise<string | null> {
+  const address = (value: unknown): value is string => typeof value === 'string' && /^0x[0-9a-f]{40}$/i.test(value);
+  const pinned = process.env.REBALANCE_PROFILE_PINNED === '1' ? process.env.REBALANCE_PROFILE_WALLET : undefined;
+  if (address(pinned)) return pinned;
+  // Stop must work even when configuration is broken. This fallback reads only
+  // a bounded public reference; missing or unusable identity never invents intent.
+  let file;
+  try {
+    file = await open(resolve(DATA, 'wallet.json'), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const info = await file.stat();
+    if (!info.isFile() || info.nlink !== 1 || info.size > 16_384) return null;
+    const wallet = JSON.parse(await file.readFile('utf8')) as { address?: unknown; chainId?: unknown } | null;
+    return wallet?.chainId === 4663 && address(wallet.address) ? wallet.address : null;
+  } catch { return null; }
+  finally { await file?.close().catch(() => {}); }
 }
 
 async function background(command: string): Promise<void> {
   await mkdir(DATA, { recursive: true, mode: 0o700 });
   const log = await open(resolve(DATA, `${command}.log`), 'a', 0o600);
   const child = spawn(process.execPath, ['--import', 'tsx', fileURLToPath(import.meta.url), command,
-    ...(command === 'start' ? ['--resume-start'] : [])], {
+    ...(command === 'start' ? ['--resume-start',
+      ...(values['expected-runner-generation'] ? ['--expected-runner-generation', values['expected-runner-generation']] : [])] : [])], {
     cwd: process.cwd(), detached: true, stdio: ['ignore', log.fd, log.fd], env: process.env,
   });
   child.unref();
@@ -264,6 +283,8 @@ async function main() {
   if ((values.apply || values.settings) && command !== 'share') throw new Error('--apply and --settings apply only to share import');
   if (values['expected-stop'] !== undefined && (!['start', 'launch', 'recover'].includes(command) || values['resume-start'] ||
       !/^(none|[a-f0-9]{64})$/.test(values['expected-stop']))) throw new Error('Invalid conditional-start token');
+  if (values['expected-runner-generation'] !== undefined && (!['start', 'launch'].includes(command) ||
+      !RUNNER_GENERATION.test(values['expected-runner-generation']) || values['setup-only'])) throw new Error('Invalid conditional runner preference generation');
   if (command !== 'notifications' && (values.thread !== undefined || values.codex !== undefined ||
       values['notification-token'] !== undefined || values['enabled-only'])) throw new Error('Notification options apply only to notifications');
   if (command === 'notifications') { await notificationCommand(); return; }
@@ -273,7 +294,7 @@ async function main() {
       await requiredConfig();
       // Do not clear a stop belonging to an existing runner. Clear the older
       // request before spawning; the child preserves any subsequently issued stop.
-      await inLock('run.lock', clearOlderStop);
+      await inLock('run.lock', () => prepareRunnerStart(false));
     }
     await background(command); return;
   }
@@ -304,7 +325,7 @@ async function main() {
     case 'status': print(await status()); return;
     case 'launch': {
       const result = await launch({ setupOnly: values['setup-only'], targets: values.targets,
-        requestId: values['request-id'], expectedStop: values['expected-stop'] });
+        requestId: values['request-id'], expectedStop: values['expected-stop'], expectedRunnerGeneration: values['expected-runner-generation'] });
       print(result);
       if (result.outcome === 'blocked') process.exitCode = 1;
       return;
@@ -449,7 +470,7 @@ async function main() {
     case 'start': {
       await requiredConfig();
       await inLock('run.lock', async () => {
-        if (!values['resume-start']) await clearOlderStop();
+        if (!await prepareRunnerStart(true)) return;
         const abort = new AbortController();
         const stop = () => abort.abort();
         process.once('SIGINT', stop); process.once('SIGTERM', stop);
@@ -459,7 +480,12 @@ async function main() {
       }); return;
     }
     case 'stop':
-      await control(() => atomicWriteJson(STOP_PATH, { requestedAt: new Date().toISOString(), requestId: randomUUID() }));
+      await control(async () => {
+        // Persist Stop first: an interrupted preference write must still stop execution.
+        await atomicWriteJson(STOP_PATH, { requestedAt: new Date().toISOString(), requestId: randomUUID() });
+        const wallet = await stopWallet();
+        if (wallet) await writeRunnerPreference(DATA, wallet, false);
+      });
       print({ status: 'stop-requested', message: 'No new work after the current dispatch boundary; any submitted transaction still settles.' }); return;
     case 'chart': {
       await inLock('chart.lock', async () => {

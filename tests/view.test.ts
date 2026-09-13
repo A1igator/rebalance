@@ -57,3 +57,33 @@ test('malformed per-wallet execution metadata produces an unavailable card inste
  await rm(join(f.root,'run.lock'));await atomicWriteJson(join(f.root,'stop.json'),false);
  assert.equal((await portfolios(f.root))[0]!.allocationObjective,'manual');
 });
+
+
+test('selector reuses a ready owned wallet chart when the default listener is unavailable, without attaching that wallet',async t=>{
+ const f=await fixture(t);
+ const directory=`wallets/${wallet}`;
+ await atomicWriteJson(join(f.root,'portfolios.json'),{version:1,profiles:[{wallet,chainId:4663,directory,chartPort:4666}]});
+ await atomicWriteJson(join(f.root,directory,'chart.lock'),{pid:123});
+ const markers=['config.json','run.lock','stop.json','cycle.json','pending.json','recovery.json'];
+ for(const file of markers)await atomicWriteJson(join(f.root,directory,file),{fixture:file});
+ const before=await Promise.all(markers.map(file=>readFile(join(f.root,directory,file),'utf8')));
+ const result=await prepareView(f.root,'selector-chat',undefined,{...f.deps,
+  probe:async p=>p.chartPort===4666?'ready':'unavailable',
+  spawnChart:async()=>assert.fail('a ready existing chart should be reused'),
+ });
+ assert.match(result.url,/^http:\/\/127\.0\.0\.1:4666\/#view=[a-f0-9]{64}$/);
+ assert.equal(result.connected,true);assert.equal(result.tradingChanged,false);
+ assert.equal(await readJson(connectionPath(f.root,'selector-chat')),null);
+ assert.deepEqual(await Promise.all(markers.map(file=>readFile(join(f.root,directory,file),'utf8'))),before);
+});
+
+test('selector never adopts an unowned wallet listener, and explicit views do not switch to another portfolio',async t=>{
+ const f=await fixture(t);const directory=`wallets/${wallet}`;
+ await atomicWriteJson(join(f.root,'portfolios.json'),{version:1,profiles:[{wallet,chainId:4663,directory,chartPort:4666}]});
+ let spawned=0;
+ const deps={...f.deps,probe:async(p:RoutedProfile)=>p.chartPort===4666?'ready' as const:'unavailable' as const,
+  spawnChart:async()=>{spawned++;}};
+ await assert.rejects(prepareView(f.root,'selector-chat',undefined,deps),/unavailable/);
+ await assert.rejects(prepareView(f.root,'selector-chat',wallet,deps),/not owned/);
+ assert.equal(spawned,0);assert.equal(await readJson(connectionPath(f.root,'selector-chat')),null);
+});

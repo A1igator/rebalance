@@ -8,7 +8,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { test, type TestContext } from 'node:test';
 import { createRebalanceOpenCodePlugin } from '../src/opencode-plugin.js';
 import { atomicWriteJson, readJson } from '../src/storage.js';
-import { connectionPath, resolveProfile } from '../scripts/profile-routing.mjs';
+import { connectionPath, readProfiles, resolveProfile } from '../scripts/profile-routing.mjs';
 import type { OpenCodeNotificationOptions, OpenCodeNotifications } from '../src/opencode-notifications.js';
 
 const { selectOpenCodeLaunchRequest } = await import(new URL('../scripts/rebalance-opencode-hook.mjs', import.meta.url).href);
@@ -464,4 +464,22 @@ test('unmarked message provenance is verified before restoring a saved notificat
   assert.equal(f.notificationCalls.length, 1);
   await f.chat([{ type: 'text', text: 'verified ordinary user message' }], {}, restored);
   assert.equal(f.notificationCalls.length, 2); assert.equal(f.launches.length, 1);
+});
+
+
+test('remembered app entry binds only restored wallets without choosing one for the chat', async t => {
+ const f = await fixture(t, {wallets:[walletA,walletB]});
+ f.setLaunch(async input => {
+  const selected=selectOpenCodeLaunchRequest(input,f.root);
+  const profiles=await readProfiles(f.rootDir);
+  await atomicWriteJson(join(f.rootDir,'app-launch-requests',createHash('sha256').update(selected.requestId).digest('hex')+'.json'),{
+   version:1,requestId:selected.requestId,sessionId:selected.sessionId,
+   entries:profiles.map(p=>({profile:p,generation:p.wallet===walletA?'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa':null,expectedStop:p.wallet===walletA?'none':null})),
+  });
+  return structuredClone(publicReply);
+ });
+ await f.invoke();
+ assert.deepEqual((await f.binding())?.wallets,[walletA]);
+ assert.deepEqual(f.notificationCalls.map(call=>call.wallet),[walletA]);
+ assert.equal(await readJson(connectionPath(f.rootDir,namespace(sessionId))),null);
 });

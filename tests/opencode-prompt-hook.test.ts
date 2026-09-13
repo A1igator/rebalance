@@ -1,3 +1,4 @@
+import { isolatedViewPreload, seedLegacyHookRoute } from './legacy-hook-fixture.js';
 import { assertTemporaryTestDirectory } from '../src/test-isolation.js';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
@@ -8,7 +9,15 @@ import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-const { handleOpenCodePrompt, selectOpenCodeLaunchRequest } = await import(new URL('../scripts/rebalance-opencode-hook.mjs', import.meta.url).href);
+const { handleOpenCodePrompt: realHandle, selectOpenCodeLaunchRequest } = await import(new URL('../scripts/rebalance-opencode-hook.mjs', import.meta.url).href);
+// These tests preserve historical per-wallet routes; new entry tests exercise restoration.
+const handleOpenCodePrompt = async (input: unknown, overrides: Record<string, unknown> = {}) => {
+  const selected = selectOpenCodeLaunchRequest(input, overrides.repository);
+  await seedLegacyHookRoute(overrides.repository, selected?.normalized ? { ...selected.normalized,
+    requestId: selected.requestId, sessionId: selected.normalized.session_id } : selected, overrides);
+  return realHandle(input, overrides);
+};
+
 // Sanitized internal plugin envelope. Native command.execute.before has no
 // stable message identity; the plugin must correlate it to chat.message first.
 const event = {
@@ -220,7 +229,7 @@ test('OpenCode default shared launcher uses isolated unconfigured storage and re
   const directory = await fixture(t, 'entry');
   const repository = fileURLToPath(new URL('..', import.meta.url));
   const preload = join(directory, 'no-network.mjs');
-  await writeFile(preload, `import { writeFileSync } from 'node:fs';
+  await writeFile(preload, `${isolatedViewPreload}\nimport { writeFileSync } from 'node:fs';
     globalThis.fetch = async () => { writeFileSync(${JSON.stringify(join(directory, 'unexpected-network'))}, 'blocked');
       throw new Error('Isolated OpenCode fixture network disabled'); };`);
   const wrapper = join(directory, 'isolated-opencode.mjs');
@@ -239,12 +248,37 @@ test('OpenCode default shared launcher uses isolated unconfigured storage and re
     });
   }
   const first = publicResult(JSON.parse(await invoke()));
-  assert.equal(first.outcome, 'needs-input'); assert.equal(first.status.armed, false);
+  assert.equal(first.outcome, 'ready'); assert.equal(first.status, null);
   const stop = { requestedAt: '2026-09-11T12:00:00.000Z', token: 'fixture-newer-stop' };
   await writeFile(join(directory, 'stop.json'), JSON.stringify(stop));
   const replay = publicResult(JSON.parse(await invoke()));
-  assert.equal(replay.outcome, 'already-handled'); assert.equal(replay.status.armed, false);
+  assert.equal(replay.outcome, 'already-handled'); assert.equal(replay.status, null);
   assert.deepEqual(JSON.parse(await readFile(join(directory, 'stop.json'), 'utf8')), stop);
   for (const file of ['unexpected-network', 'private-key', 'config.json', 'start.log', 'chart.log', 'pending.json',
     'cycle.json', 'run.lock', 'chart.lock', 'recovery.json', 'recovery.lock']) assert.equal(existsSync(join(directory, file)), false);
+});
+
+
+test('OpenCode new bare entry preserves native session identity through restore and opens its returned view once', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-opencode-restore-')));
+  pinFixtureRepository(t, root); t.after(() => rm(root, { recursive: true, force: true }));
+  const input = { ...event, cwd: root }, selected = selectOpenCodeLaunchRequest(input, root);
+  const view = { state: 'ready', url: `http://127.0.0.1:4663/#view=${'a'.repeat(64)}`, connected: true };
+  const calls: string[] = [];
+  const result = publicResult(await realHandle(input, { repository: root,
+    resolveProfile: () => assert.fail('restoration is independent of chat wallet attachment'),
+    readStopToken: () => assert.fail('app snapshot owns wallet Stop generations'),
+    runLaunch: () => assert.fail('new entry must not use legacy launch'), runView: () => assert.fail('view is already prepared'),
+    ensureDependencies: async () => { calls.push('dependencies'); },
+    runRestore: async (repository: string, id: string, session: string) => {
+      assert.equal(repository, root); assert.equal(id, selected.requestId); assert.equal(session, selected.normalized.session_id);
+      calls.push('restore'); return { app: 'Rebalance', outcome: 'ready', status: null, portfolios: [], messages: [], view };
+    },
+    openView: async (request: {url: string; sessionId: string}) => {
+      assert.equal(request.url, view.url); assert.equal(request.sessionId, selected.normalized.session_id);
+      calls.push('open'); return { host: 'fixture', opened: true };
+    },
+  }));
+  assert.equal(result.outcome, 'ready'); assert.equal(result.view.presentation.opened, true);
+  assert.deepEqual(calls, ['dependencies', 'restore', 'open']);
 });

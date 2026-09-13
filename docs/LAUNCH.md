@@ -1,12 +1,23 @@
 # Deterministic launch
 
-The launch context is now a [wallet portfolio](PORTFOLIOS.md). Before dependency setup or any stop-state read, a native request is durably pinned to the wallet attached to that conversation. Replaying it after a chat connection change keeps its original wallet. Each wallet has separate launch records, process locks, cadence and chart port. A bare invocation launches the selected wallet: automatic trading for raw-key/Privy, public monitoring for Ledger. An explicit `launch --all` requests separate launches for all registered wallets, without creating Ledger signing requests. Connecting the chat alone prepares a view with setup-only and does not arm or stop a runner.
+## Remembered background startup
+
+Bare `launch` and native skill entry open the linked portfolio selector and restore previously running portfolios independently of the conversation's attachment. Explicit Stop disables restoration; never-started and unknown portfolios remain stopped. A normal ready response can simply invite the user to choose a portfolio, in the model's own voice. Card selection connects the chat immediately without another invocation or a trading action. See [prompt 085](prompts/085-restore-running-portfolios.md), which refines [prompt 084](prompts/084-selector-first-skill-entry.md).
+
+`runner-preference.json` stores each wallet's enabled intent and generation. A real runner start records enabled intent; explicit Stop first writes its stop marker, then records disabled intent under the same control lock. Unexpected process exit does not disable restoration. Legacy intent can be adopted only from a currently live owned runner with matching config/public status and no Stop, never from old cached armed state. This adds no login service, polling task or scheduled model wakeup.
+
+The dependency-free `scripts/app-entry-inputs.mjs` first freezes public wallet identities and preference/Stop fingerprints in `app-entry-inputs/`, before native dependency bootstrap. Legacy candidates also retain their public owned-runner evidence. Changed inputs cannot join the earlier request. `src/app-launch.ts` then freezes the eligible set and original preference/Stop generations in `app-launch-requests/` before preparing the view or starting runners. Independent eligible startups can proceed concurrently through the existing per-wallet launcher. A replay never expands the snapshot or repeats its starts; changed preference/Stop state is checked again at the final start boundary. Existing pending receipts, cadence, signer behavior and native hook provenance remain intact. Historical single-wallet and selection-only hook receipts are handled with their original scope.
+
+`launch --setup-only` opens the linked selector without reading/adopting running preferences or starting inactive runners. A specifically requested wallet start uses `--profile <address> launch`; `launch --all` remains an explicit start-all operation. Pinned workers and scoped targets/status/recovery commands retain their existing behavior. View readiness and actual restoration outcomes are separate; partial or unverified starts are reported without claiming all wallets are running.
+
+The launch context is now a [wallet portfolio](PORTFOLIOS.md). New app entry uses the restoration snapshot above. Historical native requests remain durably pinned to their original wallet or terminal selection-only route; replay never changes that scope. Each wallet has separate launch records, process locks, cadence and chart port. A bare invocation restores enabled portfolios; explicit per-wallet Start enables automatic raw-key/Privy execution or direct device-confirmed Ledger rebalancing. An explicit `launch --all` requests separate launches for all registered wallets; an enabled Ledger backend may prepare device prompts when conditions permit. Connecting the chat alone prepares a view with setup-only and does not arm or stop a runner.
 
 The user-facing command is a bare **`$rebalance`**, typed or selected from the project's skill suggestion. Once its project hook is loaded and trusted, Codex routes the submitted command to application code before the model chooses tools:
 
 ```text
-UserPromptSubmit → exact bare-command check → locked dependency setup
-                 → launch → saved config / receipt check / chart / runner
+UserPromptSubmit → exact bare-command check → freeze public running inputs
+                 → locked dependency setup → restore saved enabled portfolios
+                 → linked selector / per-wallet receipt check / chart / runner
                  → structured public result → conversation
 ```
 
@@ -52,7 +63,7 @@ The official app-server API exposes live `hook/started` and `hook/completed` not
 
 ## Launcher behavior
 
-`npm run cli -- launch` performs startup through existing typed CLI operations. `launch --setup-only` performs preparation without starting an inactive runner. A fresh configuration requires explicit `--targets`; saved wallet/profile/weights are preserved. Missing input is reported as `needs-input`, not filled with a new example portfolio. The hook installs missing locked dependencies with `npm ci`; the ordinary CLI assumes dependencies are installed.
+`npm run cli -- --profile <address> launch` performs startup for that requested portfolio through existing typed CLI operations. Its `--setup-only` option performs preparation without starting an inactive runner. Unscoped entry uses the remembered-startup behavior above. A fresh configuration requires explicit `--targets`; saved wallet/profile/weights are preserved. Missing input is reported as `needs-input`, not filled with a new example portfolio. The hook installs missing locked dependencies with `npm ci`; the ordinary CLI assumes dependencies are installed.
 
 The launcher checks cached public state, performs normal read-only receipt reconciliation/observation when the runner is inactive, and checks GET `/api/status` against a live owned chart process and the configured chain/wallet/targets. It never replaces an unrelated listener. It starts each missing process once and verifies public readiness. A slow or busy process is reported without spawning a duplicate. Launch serialization and saved spawned PIDs cover the gap before background children acquire their service locks.
 
@@ -64,11 +75,11 @@ Handled hook failures return structured public context with hook-process exit co
 
 Launch restores a configured, enabled notification listener separately from trading, preserves paused notifications and reports its state separately. It does not create a schedule, pair Remote or prove delivery. The agent can display the verified chart and report public results after dispatch. Codex and Claude now have separate native entry definitions that reuse the same launcher; see the Claude section below and [notification setup](NOTIFICATIONS.md).
 
-The current assistant prepares/tests this integration but does not trust the hook, invoke the funded launcher or submit trades. Ledger signing is implemented behind a separate explicit rebalance request; live transaction/display/rejection evidence remains unverified. The official Privy CLI adapter is fixture-tested; live Robinhood service/signing and swap validation remain pending. Tests use isolated local fixtures and stubbed operations, not sponsor or mainnet execution evidence.
+This startup change is validated with isolated fixtures, without trusting a hook, invoking a funded launcher or submitting trades. The earlier sequential Ledger signing result and remaining live evidence gaps are tracked separately in [Ledger execution](LEDGER_EXECUTION.md).
 
 ## Ledger rebalance requests
 
-Start, bare launch, connection and notification delivery only enable or refresh Ledger monitoring. A user-authorized `npm run cli -- ledger rebalance --request-id <UUID>` queues one request for the selected running Ledger portfolio. Use `npm run cli -- ledger status` to inspect its public state; queue acceptance is not a signature or a receipt. The runner consumes the request once, binds its in-memory authority to that wallet/configuration/runner and one cycle, refreshes holdings and quotes, and requests physical confirmation for each sequential approval/swap. Rejection, expiry, stop, configuration change, restart or an uncertain send cannot reactivate that request. The chart has no signing action. See [Ledger execution](LEDGER_EXECUTION.md) for deadlines and recovery.
+Explicit Start or restoration of enabled intent lets the Ledger backend monitor and prepare device-confirmed rebalancing when connected and conditions permit. Chat connection and notifications do not start trading. `ledger rebalance --request-id <UUID>` and chart Retry remain explicit retries for a running portfolio; normal cycles require no agent request. The backend consumes each bounded request once and obtains physical confirmation for each prepared transaction. Queue acceptance is not a signature or receipt; Stop, configuration changes and unresolved sends retain their existing barriers. See [Ledger execution](LEDGER_EXECUTION.md) for current deadlines, suspension and recovery behavior.
 
 Ledger unknown sends remain receipt-only and are never automatically cancelled. A confirmed reverted Ledger transaction requires explicit receipt recovery: inspect with read-only `recover`, then use the existing `acknowledge-revert` command after verifying the onchain failure. This clears only that reverted receipt barrier and does not sign a cancellation. Do not delete pending state or retry the swap.
 

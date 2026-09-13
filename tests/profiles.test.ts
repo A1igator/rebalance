@@ -148,6 +148,13 @@ test('a broken wallet does not block status, stop or notification commands for a
  assert.equal(listed[0].wallet,one); assert.ok(listed[1].error);
  await command(['stop','--profile',one]); assert.ok(await readJson(join(root,'stop.json')));
  await command(['stop','--profile',two]); assert.ok(await readJson(join(profile.dataDir,'stop.json')));
+ const preference=await readJson<{wallet:string;enabled:boolean}>(join(profile.dataDir,'runner-preference.json'));
+ assert.equal(preference?.wallet,two); assert.equal(preference?.enabled,false);
+ // A mismatched configuration and public reference cannot redirect a pinned Stop.
+ await atomicWriteJson(join(profile.dataDir,'config.json'),config(one,'privy'));
+ await atomicWriteJson(join(profile.dataDir,'wallet.json'),{address:one,chainId:4663});
+ assert.equal(JSON.parse((await command(['stop','--profile',two])).stdout).status,'stop-requested');
+ assert.equal((await readJson<{wallet:string}>(join(profile.dataDir,'runner-preference.json')))?.wallet,two);
  const event={id:'source-id',type:'rebalance-attention',message:'fixture',createdAt:'2026-09-07T00:00:00Z'};
  await atomicWriteJson(join(root,'events.json'),[event]);
  await command(['events','ack','source-id','--profile',one]);
@@ -210,4 +217,25 @@ if(process.env.REBALANCE_PROFILE_PINNED==='1') {
   for(const file of ['run.lock','chart.lock','pending.json','private-key'])assert.equal(await readJson(join(profile.dataDir,file)),null);
  }
  assert.deepEqual(await Promise.all(profiles.map(profile=>readFile(join(profile.dataDir,'stop.json'),'utf8'))),before);
+});
+
+
+test('unscoped Stop uses only a valid public reference and stays successful without a usable identity', async t => {
+ const {root,env}=await fixture(t);
+ const commands=fileURLToPath(new URL('../src/commands.ts',import.meta.url));
+ const stop=()=>run(process.execPath,['--import','tsx',commands,'stop'],{cwd:repository,timeout:12000,
+  env:{...env,REBALANCE_PROFILE_PINNED:'0',REBALANCE_PROFILE_WALLET:two}});
+ await writeFile(join(root,'config.json'),'corrupt');
+ await atomicWriteJson(join(root,'wallet.json'),{address:one,chainId:4663});
+ assert.equal(JSON.parse((await stop()).stdout).status,'stop-requested');
+ const preference=await readJson<{wallet:string;enabled:boolean}>(join(root,'runner-preference.json'));
+ assert.equal(preference?.wallet,one);assert.equal(preference?.enabled,false);
+ await rm(join(root,'runner-preference.json'));
+ for(const reference of [null,'corrupt',JSON.stringify({address:two,chainId:1})]){
+  if(reference===null)await rm(join(root,'wallet.json'),{force:true});
+  else await writeFile(join(root,'wallet.json'),reference);
+  assert.equal(JSON.parse((await stop()).stdout).status,'stop-requested');
+  assert.ok(await readJson(join(root,'stop.json')));
+  assert.equal(await readJson(join(root,'runner-preference.json')),null,'unavailable identity must not use an unpinned environment address');
+ }
 });

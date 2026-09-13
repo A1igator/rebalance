@@ -1,3 +1,4 @@
+import { isolatedViewPreload, seedLegacyHookRoute } from './legacy-hook-fixture.js';
 import { assertTemporaryTestDirectory } from '../src/test-isolation.js';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
@@ -10,7 +11,12 @@ import { test, type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const { handlePrompt: realHandlePrompt, launchPromptFormat, recoveryPromptFormat, selectLaunchRequest, selectRecoveryRequest } = await import(new URL('../scripts/rebalance-hook.mjs', import.meta.url).href);
-const handlePrompt = (input: unknown, overrides: Record<string, unknown> = {}) => realHandlePrompt(input, { runView: async () => undefined, ...overrides });
+// These tests preserve historical per-wallet routes; new entry tests exercise restoration.
+const handlePrompt = async (input: unknown, overrides: Record<string, unknown> = {}) => {
+  const selected = selectRecoveryRequest(input, overrides.repository) ?? selectLaunchRequest(input, overrides.repository);
+  await seedLegacyHookRoute(overrides.repository, selected, overrides);
+  return realHandlePrompt(input, { runView: async () => undefined, ...overrides });
+};
 
 function pinFixtureRepository(t: TestContext, root: string) {
   assertTemporaryTestDirectory(root);
@@ -129,7 +135,7 @@ test('ambient framing excludes metadata commands, malformed wrappers and every n
   }
 });
 
-test('a bare command routes directly to the launcher with stable opaque request identity', async t => {
+test('a historical bare command keeps its direct wallet launcher route with stable opaque request identity', async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-hook-test-')));
   pinFixtureRepository(t, root);
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -373,7 +379,7 @@ test('post-dispatch recovery failure reports unknown state without leaking error
   assert.doesNotMatch(JSON.stringify(result), /fixture-secret|"armed":false|no startup was attempted/);
 });
 
-test('a standalone skill-picker link routes to the same launcher request as the literal command', async t => {
+test('a historical skill-picker link retains the same wallet launcher request as the literal command', async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance hook picker-')));
   pinFixtureRepository(t, root);
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -401,7 +407,7 @@ test('a standalone skill-picker link routes to the same launcher request as the 
   assert.match(result.hookSpecificOutput.additionalContext, /do not repeat launch or start/);
 });
 
-test('ambient framing routes only the entire bare user request with the same stable launch identity', async t => {
+test('historical ambient framing routes only the entire bare user request with the same stable launch identity', async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'rebalance-hook-ambient-')));
   pinFixtureRepository(t, root);
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -618,7 +624,7 @@ test('prepared hook command reaches the actual CLI in an isolated unconfigured f
   const directory = await mkdtemp(join(tmpdir(), 'rebalance-hook-entry-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const preload = join(directory, 'no-network.mjs');
-  await writeFile(preload, `import { writeFileSync } from 'node:fs';
+  await writeFile(preload, `${isolatedViewPreload}\nimport { writeFileSync } from 'node:fs';
     globalThis.fetch = async () => { writeFileSync(${JSON.stringify(join(directory, 'unexpected-network'))}, 'blocked');
       throw new Error('Hook fixture transport is disabled'); };`);
   const root = fileURLToPath(new URL('..', import.meta.url));
@@ -646,8 +652,9 @@ test('prepared hook command reaches the actual CLI in an isolated unconfigured f
       assert.match(context, /"requested":"cancel"/);
       assert.match(context, /"outcome":"blocked"/);
       assert.match(context, /No configured portfolio to recover/);
-    } else assert.match(context, /"outcome":"needs-input"/);
-    assert.match(context, /"armed":false/);
+    } else assert.match(context, /"outcome":"ready"/);
+    if (expectedFormat.startsWith('recovery-')) assert.match(context, /"armed":false/);
+    else assert.match(context, /"status":null/);
     const observation = JSON.parse(await readFile(join(directory, 'last-hook-observation.json'), 'utf8'));
     assert.equal(observation.requestId, (selectLaunchRequest(input, root) ?? selectRecoveryRequest(input, root)).requestId);
     assert.equal(observation.promptFormat, expectedFormat);

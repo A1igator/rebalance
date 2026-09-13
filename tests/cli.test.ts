@@ -91,11 +91,13 @@ test('stop after background start is retained when the delayed child begins', { 
   assert.equal(JSON.parse((await command(['stop'])).stdout).status, 'stop-requested');
   const requested = await readJson(join(directory, 'stop.json'));
   await writeFile(join(directory, 'release-child'), 'go');
-  await until(async () => {
-    const current = await readJson<{ armed?: boolean }>(join(directory, 'status.json'));
-    return current?.armed === false && !existsSync(join(directory, 'run.lock'));
-  }, 'stopped child should finish and release its run lock');
+  await until(() => {
+    try { process.kill(started.pid, 0); return false; }
+    catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH' && !existsSync(join(directory, 'run.lock')); }
+  }, 'stopped child should exit before entering its monitor and release its run lock');
+  assert.equal(JSON.parse((await command(['status'])).stdout).armed, false);
   assert.deepEqual(await readJson(join(directory, 'stop.json')), requested);
+  assert.equal((await readJson<{ enabled: boolean }>(join(directory, 'runner-preference.json')))?.enabled, false);
   assert.equal(existsSync(join(directory, 'unexpected-network')), false, 'stop must prevent even the first observation');
   assert.equal(existsSync(join(directory, 'pending.json')), false);
   assert.equal(existsSync(join(directory, 'private-key')), false);
@@ -235,10 +237,10 @@ test('stop waits for the short start/stop control lock then persists a distinct 
   assert.equal(existsSync(join(directory, 'unexpected-network')), false);
 });
 
-test('actual launch command reports missing initial targets without creating keys or starting services', async t => {
+test('actual pinned launch command reports missing initial targets without creating keys or starting services', async t => {
   const { directory, command } = await fixture(t);
   await rm(join(directory, 'config.json'));
-  const result = JSON.parse((await command(['launch'])).stdout);
+  const result = JSON.parse((await command(['launch'], { REBALANCE_PROFILE_PINNED: '1' })).stdout);
   assert.equal(result.outcome, 'needs-input');
   assert.equal(result.status.armed, false);
   for (const file of ['private-key', 'start.log', 'chart.log', 'pending.json', 'unexpected-network']) {
@@ -374,4 +376,48 @@ test('notification test requires an enabled worker and publishes only a retained
   assert.deepEqual(await readJson(join(directory, 'events.json')), queued, 'paused testing cannot create orphan entries');
   assert.deepEqual(await Promise.all(records.map(file => readFile(join(directory, file), 'utf8'))), before);
   for (const file of ['run.lock', 'private-key', 'unexpected-network', 'start.log']) assert.equal(existsSync(join(directory, file)), false, file);
+});
+
+
+test('actual start persists running intent and an unexpected process exit does not turn it into explicit Stop', async t => {
+  const { directory, command } = await fixture(t);
+  const runtime = join(directory, 'isolated-runtime.mjs');
+  await writeFile(runtime, `
+    import { writeFileSync } from 'node:fs';
+    import { resolve } from 'node:path';
+    export const STOP_PATH = resolve(process.env.REBALANCE_DATA_DIR, 'stop.json');
+    export async function monitor() {
+      writeFileSync(resolve(process.env.REBALANCE_DATA_DIR, 'monitor-entered'), 'ready');
+      await new Promise(() => { setInterval(() => {}, 1000); });
+    }
+    export async function status() { throw new Error('Unexpected fixture status'); }
+    export async function tick() { throw new Error('Unexpected fixture tick'); }
+  `);
+  const preload = join(directory, 'fixture.mjs');
+  await writeFile(preload, (await readFile(preload, 'utf8')) + `
+    import { registerHooks } from 'node:module';
+    import { readFileSync } from 'node:fs';
+    registerHooks({ load(url, context, nextLoad) {
+      if (url.endsWith('/src/runtime.ts')) return { format: 'module', shortCircuit: true,
+        source: readFileSync(${JSON.stringify(runtime)}, 'utf8') };
+      return nextLoad(url, context);
+    } });
+  `);
+  const started = JSON.parse((await command(['start', '--background'])).stdout) as { pid: number };
+  t.after(() => { try { process.kill(started.pid, 'SIGKILL'); } catch {} });
+  await until(() => existsSync(join(directory, 'monitor-entered')), 'the real start command must pass its preference boundary');
+  const path = join(directory, 'runner-preference.json');
+  const before = await readFile(path, 'utf8');
+  const preference = JSON.parse(before);
+  assert.equal(preference.enabled, true); assert.equal(preference.wallet, config.wallet);
+  assert.match(preference.generation, /^[a-f0-9-]{36}$/);
+  process.kill(started.pid, 'SIGKILL');
+  await until(() => {
+    try { process.kill(started.pid, 0); return false; }
+    catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; }
+  }, 'the fixture runner must exit after its simulated crash');
+  assert.equal(await readFile(path, 'utf8'), before);
+  assert.equal(await readJson(join(directory, 'stop.json')), null);
+  assert.equal(existsSync(join(directory, 'unexpected-network')), false);
+  assert.equal(existsSync(join(directory, 'private-key')), false);
 });
